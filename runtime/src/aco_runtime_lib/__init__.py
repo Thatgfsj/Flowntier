@@ -7,15 +7,31 @@ See `docs/ARCHITECTURE.md` §4 and `docs/WORKFLOW_SPEC.md` §4.
 """
 
 from aco_runtime_lib.event_bus import EventBus, WfEvent
-from aco_runtime_lib.workflow import State, StateMachine, Transition
+from aco_runtime_lib.workflow import (
+    LogEntry,
+    ResumableWorkflow,
+    State,
+    StateMachine,
+    Transition,
+    WorkflowCtx,
+    WorkflowLog,
+    TERMINAL_STATES,
+    find_resumable,
+)
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = [
     "EventBus",
+    "LogEntry",
+    "ResumableWorkflow",
     "State",
     "StateMachine",
     "Transition",
+    "TERMINAL_STATES",
     "WfEvent",
+    "WorkflowCtx",
+    "WorkflowLog",
     "__version__",
+    "find_resumable",
 ]

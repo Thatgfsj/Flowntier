@@ -1,9 +1,20 @@
-"""Agent implementations: Chief, Critic A/B, Worker, Planner, Merger, Reporter.
+"""Agent implementations: Chief, Critic A/B, Worker, Planner, Merger, Reporter."""
 
-Phase 0 ships the ABCs only; real LLM calls land in Phase 1.
-See `docs/PROMPT_GUIDE.md` and `prompts/*.md` for the prompts.
-"""
+from aco_runtime_lib.agents.base import Agent, AgentResult, AgentRole
+from aco_runtime_lib.agents.chief import ChiefAgent, ChiefOutput
+from aco_runtime_lib.agents.critic import CriticAgent
+from aco_runtime_lib.agents.planner import PlannerAgent
+from aco_runtime_lib.agents.reporter import ReporterAgent
+from aco_runtime_lib.agents.worker import WorkerAgent
 
-from aco_runtime_lib.agents.base import Agent, AgentRole
-
-__all__ = ["Agent", "AgentRole"]
+__all__ = [
+    "Agent",
+    "AgentResult",
+    "AgentRole",
+    "ChiefAgent",
+    "ChiefOutput",
+    "CriticAgent",
+    "PlannerAgent",
+    "ReporterAgent",
+    "WorkerAgent",
+]
