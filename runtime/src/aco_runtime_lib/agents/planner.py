@@ -6,6 +6,10 @@ defined in `prompts/planner.md`.
 
 Phase 1: thin wrapper around the provider. Parses the Markdown
 into a structured plan dict.
+Phase 2.1: also runs `plan_parser.parse_plan` to populate the full
+`ParsedPlan` AST. The legacy `_extract_task_table` regex is kept
+for backwards compatibility with consumers that read `tasks`; it
+will be removed in v0.3.
 """
 
 from __future__ import annotations
@@ -16,6 +20,11 @@ from typing import Any
 from aco_runtime_lib.agents.base import Agent, AgentResult, AgentRole
 from aco_runtime_lib.providers.base import ChatMessage, ChatRequest, ProviderError
 from aco_runtime_lib.providers.router import ModelRouter
+from aco_runtime_lib.workflow.plan_parser import (
+    ParsedPlan,
+    PlanParseError,
+    parse_plan,
+)
 
 PLANNER_SYSTEM_PROMPT = """\
 You are the Planner for Agent Company OS.
@@ -65,9 +74,30 @@ class PlannerAgent(Agent):
             )
         plan_md = response.content.strip()
         tasks = _extract_task_table(plan_md)
+        # Phase 2.1: full ParsedPlan AST. parse_plan may raise
+        # PlanParseError on strict-mode failures (bad table,
+        # unknown section, etc.) — surface it in the result so the
+        # Chief's repair loop can feed the error back to the LLM
+        # instead of crashing the workflow.
+        try:
+            parsed: ParsedPlan | None = parse_plan(plan_md)
+            parse_error: dict[str, Any] | None = None
+        except PlanParseError as e:
+            parsed = None
+            parse_error = {
+                "section": e.section,
+                "kind": e.kind,
+                "line": e.line,
+                "message": str(e),
+            }
         return AgentResult(
             role=self.role,
-            data={"plan_md": plan_md, "tasks": tasks},
+            data={
+                "plan_md": plan_md,
+                "tasks": tasks,
+                "parsed_plan": parsed,
+                "parse_error": parse_error,
+            },
         )
 
 
