@@ -32,7 +32,7 @@ console.log('Waiting for completion (button text → 重置)...');
 await page.waitForFunction(() => {
   const btn = document.querySelector('form[aria-label="命令输入栏"] button');
   return btn && btn.textContent && btn.textContent.includes('重置');
-}, { timeout: 180_000 });
+}, undefined, { timeout: 600_000 });
 await page.waitForTimeout(800);
 console.log('3) done screenshot');
 await page.screenshot({ path: '.validation/ui-3-done.png', fullPage: true });
