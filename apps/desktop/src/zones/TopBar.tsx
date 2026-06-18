@@ -31,3 +31,4 @@ export function TopBar({ projectName, subtitle, onSettingsClick }: TopBarProps) 
     </header>
   );
 }
+

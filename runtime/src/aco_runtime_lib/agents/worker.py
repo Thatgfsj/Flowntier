@@ -62,7 +62,7 @@ class WorkerAgent(Agent):
                     content=_render_task_envelope(ctx),
                 ),
             ],
-            max_tokens=2048,
+            max_tokens=512,
             temperature=0.2,
         )
         try:

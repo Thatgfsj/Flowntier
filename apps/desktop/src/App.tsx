@@ -7,18 +7,20 @@ import { CenterPanel } from './zones/CenterPanel.js';
 import { RightPanel } from './zones/RightPanel.js';
 import { BottomConsole } from './zones/BottomConsole.js';
 import { CommandDock } from './zones/CommandDock.js';
+import { Settings } from './zones/Settings.js';
 import { ReasoningBubble } from '@aco/ui';
 import { ReviewVerdict } from '@aco/ui';
-import {
-  startSimulation,
-  type SimEvent,
-  type SimPhaseId,
-  type SimTaskState,
-  type SimAgentStatus,
-} from './simulator.js';
 
 interface Phase {
-  name: SimPhaseId;
+  name:
+    | 'requirement'
+    | 'planning'
+    | 'plan_review'
+    | 'dispatch'
+    | 'development'
+    | 'review'
+    | 'repair'
+    | 'delivery';
   label: string;
 }
 
@@ -33,7 +35,7 @@ const PHASES: ReadonlyArray<Phase> = [
   { name: 'delivery', label: '交付' },
 ];
 
-const PHASE_STATE: Record<SimPhaseId, PhaseState> = {
+const PHASE_STATE: Record<Phase['name'], PhaseState> = {
   requirement: 'pending',
   planning: 'pending',
   plan_review: 'pending',
@@ -49,7 +51,7 @@ interface TaskRow {
   title: string;
   owner: string;
   fileHint?: string;
-  state: SimTaskState;
+  state: string;
 }
 
 const INITIAL_TASKS: ReadonlyArray<TaskRow> = [
@@ -59,48 +61,35 @@ const INITIAL_TASKS: ReadonlyArray<TaskRow> = [
   { id: 't4', title: '测试：登录流程端到端', owner: '执行员 4', fileHint: 'tests/e2e/test_login.py', state: 'PENDING' },
 ];
 
-const INITIAL_AGENT_STATUS: SimAgentStatus = {
+type AgentStatusMap = {
+  chief: AgentStatus;
+  'critic-a': AgentStatus;
+  'critic-b': AgentStatus;
+  worker: AgentStatus;
+};
+
+const INITIAL_AGENT_STATUS: AgentStatusMap = {
   chief: 'idle',
   'critic-a': 'idle',
   'critic-b': 'idle',
   worker: 'idle',
 };
 
+const RUNTIME_URL = 'http://127.0.0.1:7317';
+
 function nowIso(): string {
   return new Date().toISOString();
 }
 
-function stateToLabel(s: SimTaskState): string {
-  return s;
-}
-
-function chiefCardFromStatus(status: AgentStatus, progress?: number) {
-  return (
-    <AgentCard
-      role="chief"
-      name="首席代理"
-      status={status}
-      subtitle={
-        status === 'thinking'
-          ? '沉稳的策略师 · 正在分析'
-          : status === 'speaking'
-            ? '沉稳的策略师 · 正在汇报'
-            : '沉稳的策略师 · 待命'
-      }
-      progress={progress}
-    />
-  );
-}
-
-function agentStatusToRole(s: SimAgentStatus['chief']): AgentStatus {
+function agentStatusToRole(s: AgentStatus): AgentStatus {
   return s;
 }
 
 export function App() {
   const [activePhase, setActivePhase] = useState(0);
-  const [phaseStates, setPhaseStates] = useState<Record<SimPhaseId, PhaseState>>({ ...PHASE_STATE });
+  const [phaseStates, setPhaseStates] = useState<Record<Phase['name'], PhaseState>>({ ...PHASE_STATE });
   const [tasks, setTasks] = useState<TaskRow[]>([...INITIAL_TASKS]);
-  const [agentStatus, setAgentStatus] = useState<SimAgentStatus>({ ...INITIAL_AGENT_STATUS });
+  const [agentStatus, setAgentStatus] = useState<AgentStatusMap>({ ...INITIAL_AGENT_STATUS });
   const [events, setEvents] = useState<WfEvent[]>([]);
   const [cmd, setCmd] = useState('');
   const [busy, setBusy] = useState(false);
@@ -111,18 +100,32 @@ export function App() {
     summary: string;
   } | null>(null);
   const [finalReport, setFinalReport] = useState<string | null>(null);
-  const simRef = useRef<(() => void) | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [backendMode, setBackendMode] = useState<'real' | 'simulator' | 'unknown'>('unknown');
+  const [currentWfId, setCurrentWfId] = useState<string | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
 
-  const appendLog = (agent_id: string, level: 'info' | 'warn' | 'error' | 'debug', message: string) => {
-    setEvents((prev) => [
-      ...prev,
-      { kind: 'console', ts: nowIso(), agent_id, level, message },
-    ]);
-  };
+  // Probe the runtime on mount to decide real vs simulator.
+  useEffect(() => {
+    void (async () => {
+      try {
+        const r = await fetch(`${RUNTIME_URL}/api/state`, { signal: AbortSignal.timeout(2000) });
+        if (r.ok) {
+          setBackendMode('real');
+          return;
+        }
+      } catch {
+        // fall through
+      }
+      setBackendMode('simulator');
+    })();
+  }, []);
 
   const reset = () => {
-    simRef.current?.();
-    simRef.current = null;
+    if (wsRef.current) {
+      wsRef.current.close();
+      wsRef.current = null;
+    }
     setActivePhase(0);
     setPhaseStates({ ...PHASE_STATE });
     setTasks([...INITIAL_TASKS]);
@@ -132,68 +135,148 @@ export function App() {
     setMilestones([]);
     setReviewVerdict(null);
     setFinalReport(null);
+    setCurrentWfId(null);
   };
 
-  const start = () => {
-    if (busy) return;
+  const applyEvent = (event: WfEvent) => {
+    setEvents((prev) => [...prev, event]);
+    if (event.kind === 'transition' && event.to_state) {
+      const idx = PHASES.findIndex((p) => p.name === event.to_state);
+      if (idx >= 0) {
+        setActivePhase(idx);
+        setPhaseStates((prev) => ({ ...prev, [event.to_state as Phase['name']]: 'done' }));
+        // mark earlier phases done
+        setPhaseStates((prev) => {
+          const next = { ...prev };
+          for (let i = 0; i < idx; i++) {
+            next[PHASES[i].name] = 'done';
+          }
+          next[event.to_state as Phase['name']] = 'active';
+          return next;
+        });
+      }
+    }
+    if (event.kind === 'milestone' && event.label) {
+      setMilestones((prev) => [...prev, event.label]);
+    }
+    if (event.kind === 'console' && event.agent_id) {
+      // Map agent_id → status
+      if (event.agent_id === 'agent:chief') {
+        setAgentStatus((prev) => ({ ...prev, chief: 'thinking' }));
+      } else if (event.agent_id === 'agent:critic:a') {
+        setAgentStatus((prev) => ({ ...prev, 'critic-a': 'thinking' }));
+      } else if (event.agent_id === 'agent:critic:b') {
+        setAgentStatus((prev) => ({ ...prev, 'critic-b': 'thinking' }));
+      } else if (event.agent_id.startsWith('agent:worker:')) {
+        setAgentStatus((prev) => ({ ...prev, worker: 'thinking' }));
+      }
+    }
+  };
+
+  const startRealWorkflow = async (text: string) => {
     setBusy(true);
-    appendLog('agent:user', `> ${cmd.trim() || '实现 POST /auth/login 接口'}`, 'info');
-    simRef.current = startSimulation(
-      {
-        onEvent: (e: SimEvent) => {
-          if (e.log) appendLog(e.log.agent_id, e.log.level, e.log.message);
-          if (e.phase) {
-            setPhaseStates((prev) => ({ ...prev, [e.phase!.name]: e.phase!.state }));
-            const idx = PHASES.findIndex((p) => p.name === e.phase!.name);
-            if (idx >= 0 && e.phase.state === 'active') setActivePhase(idx);
-          }
-          if (e.task) {
-            setTasks((prev) =>
-              prev.map((t) => (t.id === e.task!.id ? { ...t, state: e.task!.state } : t)),
-            );
-          }
-          if (e.agent) setAgentStatus((prev) => ({ ...prev, ...e.agent }));
-          if (e.milestone) {
-            setMilestones((prev) => [...prev, e.milestone!]);
-          }
-          if (e.done) {
-            if (e.done.status === 'DONE') {
-              setReviewVerdict({
-                verdict: 'PASS',
-                summary: '所有任务通过最终评审。',
-              });
-              setFinalReport(
-                '4 个任务全部完成：后端 /login 接口、前端 LoginForm、数据库迁移、端到端测试。\n修改文件：src/auth/login.py, src/components/LoginForm.tsx, migrations/0001_users.sql, tests/e2e/test_login.py\n下一个建议：接入真实 LLM provider（v0.3）。',
-              );
-            }
-          }
-        },
-        onComplete: () => {
-          setBusy(false);
-          setCompleted(true);
-        },
-      },
-      { speed: 2.0, triggerRepair: true },
-    );
-  };
+    setEvents([]);
+    setTasks([...INITIAL_TASKS]);
+    setMilestones([]);
+    setReviewVerdict(null);
+    setFinalReport(null);
+    setActivePhase(0);
+    setPhaseStates({ ...PHASE_STATE });
+    setAgentStatus({ ...INITIAL_AGENT_STATUS });
 
-  useEffect(() => {
-    return () => simRef.current?.();
-  }, []);
+    // Open the WebSocket
+    const ws = new WebSocket(`ws://127.0.0.1:7317/api/events/stream`);
+    wsRef.current = ws;
+    ws.onmessage = (ev) => {
+      try {
+        const data = JSON.parse(ev.data) as Record<string, unknown>;
+        if (data.kind === 'heartbeat') return;
+        applyEvent(data as unknown as WfEvent);
+      } catch (e) {
+        console.warn('bad event', e);
+      }
+    };
+    ws.onerror = () => console.warn('ws error');
+
+    // POST the workflow
+    try {
+      const resp = await fetch(`${RUNTIME_URL}/api/workflow`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text, speed: 'fast' }),
+      });
+      const data = (await resp.json()) as { id: string };
+      setCurrentWfId(data.id);
+
+      // Poll for completion
+      const poll = async () => {
+        try {
+          const r = await fetch(`${RUNTIME_URL}/api/workflow/${data.id}/summary`);
+          if (r.ok) {
+            const summary = (await r.json()) as { summary: string };
+            setFinalReport(summary.summary);
+            setReviewVerdict({ verdict: 'PASS', summary: '工作流已完成' });
+            setBusy(false);
+            setCompleted(true);
+            return;
+          }
+        } catch {
+          // ignore
+        }
+        window.setTimeout(() => void poll(), 1000);
+      };
+      void poll();
+    } catch (e) {
+      console.warn('workflow POST failed', e);
+      setBusy(false);
+    }
+  };
 
   const handleSubmit = () => {
     if (completed) {
       reset();
       return;
     }
-    start();
+    const text = cmd.trim() || '实现 POST /auth/login 接口';
+    setCmd('');
+    if (backendMode === 'real') {
+      void startRealWorkflow(text);
+    } else {
+      // Simulator fallback not implemented in this revision; show
+      // a console line and stay in idle.
+      setEvents((prev) => [
+        ...prev,
+        {
+          kind: 'console',
+          ts: nowIso(),
+          agent_id: 'agent:system',
+          level: 'warn',
+          message: `runtime 未启动，请先运行 apps/runtime（python -m aco_runtime.main）`,
+        },
+      ]);
+    }
   };
+
+  useEffect(() => {
+    return () => {
+      wsRef.current?.close();
+    };
+  }, []);
 
   return (
     <div className="flex h-screen flex-col">
       <TopBar
         projectName="Agent Company OS"
-        subtitle={completed ? '上次工作流已完成' : busy ? '运行中…' : '示例工作流：实现登录接口'}
+        subtitle={
+          completed
+            ? '上次工作流已完成'
+            : busy
+              ? '运行中…'
+              : backendMode === 'simulator'
+                ? '未连接 runtime（启动 Python 端以启用 AI）'
+                : '示例工作流：实现登录接口'
+        }
+        onSettingsClick={() => setSettingsOpen(true)}
       />
 
       <div className="flex flex-1 overflow-hidden">
@@ -237,7 +320,21 @@ export function App() {
             </Card>
           )}
 
-          {chiefCardFromStatus(agentStatusToRole(agentStatus.chief), 0.5)}
+          {(
+            <AgentCard
+              role="chief"
+              name="首席代理"
+              status={agentStatusToRole(agentStatus.chief)}
+              subtitle={
+                agentStatus.chief === 'thinking'
+                  ? '沉稳的策略师 · 正在分析'
+                  : agentStatus.chief === 'speaking'
+                    ? '沉稳的策略师 · 正在汇报'
+                    : '沉稳的策略师 · 待命'
+              }
+              progress={0.5}
+            />
+          )}
 
           <ReasoningBubble
             agentName="首席代理"
@@ -292,6 +389,8 @@ export function App() {
       />
 
       <BottomConsole events={events} />
+
+      <Settings open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </div>
   );
 }
