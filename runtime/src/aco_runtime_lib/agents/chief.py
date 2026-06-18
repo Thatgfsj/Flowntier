@@ -56,7 +56,7 @@ class ChiefAgent(Agent):
             ChatMessage(role="user", content=request_text),
         ]
         try:
-            response = await provider.chat(_make_request(ref.model_id, messages, max_tokens=2048))
+            response = await provider.chat(_make_request(ref.model_id, messages, max_tokens=512))
         except ProviderError as e:
             return AgentResult(
                 role=self.role,
