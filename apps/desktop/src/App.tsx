@@ -104,6 +104,12 @@ export function App() {
   const [backendMode, setBackendMode] = useState<'real' | 'simulator' | 'unknown'>('unknown');
   const [currentWfId, setCurrentWfId] = useState<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
+  const busyRef = useRef(false);
+  // Expose for screenshot / debug scripts.
+  useEffect(() => {
+    // @ts-expect-error: window.__acoCurrentWfId is a debug hook
+    window.__acoCurrentWfId = currentWfId;
+  }, [currentWfId]);
 
   // Probe the runtime on mount to decide real vs simulator.
   useEffect(() => {
@@ -174,6 +180,7 @@ export function App() {
   };
 
   const startRealWorkflow = async (text: string) => {
+    busyRef.current = true;
     setBusy(true);
     setEvents([]);
     setTasks([...INITIAL_TASKS]);
@@ -184,19 +191,35 @@ export function App() {
     setPhaseStates({ ...PHASE_STATE });
     setAgentStatus({ ...INITIAL_AGENT_STATUS });
 
-    // Open the WebSocket
-    const ws = new WebSocket(`ws://127.0.0.1:7317/api/events/stream`);
-    wsRef.current = ws;
-    ws.onmessage = (ev) => {
-      try {
-        const data = JSON.parse(ev.data) as Record<string, unknown>;
-        if (data.kind === 'heartbeat') return;
-        applyEvent(data as unknown as WfEvent);
-      } catch (e) {
-        console.warn('bad event', e);
-      }
+    // Open the WebSocket with auto-reconnect. If the socket dies
+    // mid-run, the polling loop will still detect completion; the
+    // reconnect lets us catch any *late* events for visual feedback.
+    let ws: WebSocket | null = null;
+    let reconnectAttempts = 0;
+    const connect = () => {
+      ws = new WebSocket(`ws://127.0.0.1:7317/api/events/stream`);
+      wsRef.current = ws;
+      ws.onmessage = (ev) => {
+        try {
+          const data = JSON.parse(ev.data) as Record<string, unknown>;
+          if (data.kind === 'heartbeat') return;
+          applyEvent(data as unknown as WfEvent);
+        } catch (e) {
+          console.warn('bad event', e);
+        }
+      };
+      ws.onclose = () => {
+        if (busyRef.current && reconnectAttempts < 5) {
+          reconnectAttempts += 1;
+          const delay = Math.min(500 * 2 ** reconnectAttempts, 5_000);
+          window.setTimeout(connect, delay);
+        }
+      };
+      ws.onerror = () => {
+        // onclose will follow
+      };
     };
-    ws.onerror = () => console.warn('ws error');
+    connect();
 
     // POST the workflow
     try {
@@ -216,6 +239,7 @@ export function App() {
             const summary = (await r.json()) as { summary: string };
             setFinalReport(summary.summary);
             setReviewVerdict({ verdict: 'PASS', summary: '工作流已完成' });
+            busyRef.current = false;
             setBusy(false);
             setCompleted(true);
             return;
@@ -228,6 +252,7 @@ export function App() {
       void poll();
     } catch (e) {
       console.warn('workflow POST failed', e);
+      busyRef.current = false;
       setBusy(false);
     }
   };
