@@ -35,6 +35,15 @@ from aco_runtime_lib.workflow.plan_validator import (
     ValidationResult,
     validate_plan,
 )
+from aco_runtime_lib.workflow.plan_scheduler import (
+    SchedulerOptions,
+    TaskStatus,
+    TickResult,
+    compute_repair_subgraph,
+    find_ready,
+    pick_dispatch,
+    reset_to_pending,
+)
 from aco_runtime_lib.workflow.recovery import ResumableWorkflow, find_resumable
 from aco_runtime_lib.workflow.state_machine import (
     TERMINAL_STATES,
@@ -58,18 +67,25 @@ __all__ = [
     "ResumableWorkflow",
     "Risk",
     "SchemaChange",
+    "SchedulerOptions",
     "State",
     "StateMachine",
     "TaskNode",
+    "TickResult",
     "Transition",
+    "TaskStatus",
     "ValidationOptions",
     "ValidationResult",
     "WorkflowCtx",
     "WorkflowLog",
     "WorkflowOrchestrator",
+    "compute_repair_subgraph",
+    "find_ready",
     "find_resumable",
     "iter_entries_sync",
     "last_entry",
     "parse_plan",
+    "pick_dispatch",
+    "reset_to_pending",
     "validate_plan",
 ]
