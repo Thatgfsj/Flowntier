@@ -6,12 +6,31 @@ truth for the Python runtime; the Rust core mirrors them in
 `crates/event-bus` (events) and `crates/storage` (DB rows).
 """
 
+from aco_runtime_lib.workflow.persistence import (
+    LogEntry,
+    WorkflowLog,
+    iter_entries_sync,
+    last_entry,
+)
+from aco_runtime_lib.workflow.recovery import ResumableWorkflow, find_resumable
 from aco_runtime_lib.workflow.state_machine import (
-    TERMINAL_STATES,
     State,
     StateMachine,
     Transition,
     WorkflowCtx,
+    TERMINAL_STATES,
 )
 
-__all__ = ["TERMINAL_STATES", "State", "StateMachine", "Transition", "WorkflowCtx"]
+__all__ = [
+    "State",
+    "StateMachine",
+    "Transition",
+    "WorkflowCtx",
+    "TERMINAL_STATES",
+    "LogEntry",
+    "WorkflowLog",
+    "ResumableWorkflow",
+    "find_resumable",
+    "iter_entries_sync",
+    "last_entry",
+]
