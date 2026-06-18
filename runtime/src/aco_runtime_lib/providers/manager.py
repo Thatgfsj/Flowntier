@@ -135,6 +135,11 @@ class ProviderManager:
         self._config: dict[str, dict[str, Any]] = {}
         self._role_defaults: dict[str, str] = dict(self.DEFAULT_ROLES)
         self._fallback_chains: dict[str, list[str]] = {}
+        # Cache the built ModelRouter — first build is slow (~5s per
+        # provider on Windows due to httpx DNS resolution); subsequent
+        # calls return the same instance. Use `invalidate_router()` to
+        # force a rebuild after `apply_config()`.
+        self._cached_router: ModelRouter | None = None
         self._init_defaults()
 
     def _init_defaults(self) -> None:
@@ -262,7 +267,17 @@ class ProviderManager:
 
         Providers whose key is missing or whose entry is disabled are
         silently skipped.
+
+        The result is **cached** — the first call constructs the
+        providers (each opening an httpx.AsyncClient, which on
+        Windows can take ~5s per provider due to DNS resolution),
+        and subsequent calls return the same instance. The
+        providers are stateless and safe to share across workflows.
+        Call `invalidate_router()` after `apply_config()` to
+        rebuild.
         """
+        if self._cached_router is not None:
+            return self._cached_router
         providers: dict[str, Provider] = {}
         for status in self.list_providers():
             if not status.enabled:
@@ -282,7 +297,15 @@ class ProviderManager:
             defaults=self._role_defaults,
             fallbacks=self._fallback_chains,
         )
-        return ModelRouter(providers=providers, config=cfg)
+        self._cached_router = ModelRouter(providers=providers, config=cfg)
+        return self._cached_router
+
+    def invalidate_router(self) -> None:
+        """Drop the cached router so the next build_router rebuilds.
+
+        Call after `apply_config()` to pick up new provider settings.
+        """
+        self._cached_router = None
 
     def available_providers(self) -> list[str]:
         return [p.id for p in self.list_providers() if p.enabled]

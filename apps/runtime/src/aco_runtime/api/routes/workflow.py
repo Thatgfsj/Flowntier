@@ -50,6 +50,15 @@ Values: {plan_md, parsed_plan, parse_error, validation, validation_error, tasks}
 The UI's /plan endpoint reads this to render the task list before the
 workflow finishes."""
 
+# Serializes workflow runs. Multiple concurrent workflows against the
+# same ModelRouter (single shared API key + single TCP pool) cause
+# rate-limiting and unpredictable latency. A Lock keeps one workflow
+# in-flight at a time; additional POSTs are accepted immediately but
+# block at `_run` until the previous workflow finishes. The POST itself
+# still returns 202 within milliseconds — only the actual orchestrator
+# execution is serialized.
+_run_lock: asyncio.Lock = asyncio.Lock()
+
 
 def bind_orchestrator_factory(factory: OrchestratorFactory) -> None:
     global _factory
@@ -123,18 +132,21 @@ async def start_workflow(req: dict[str, Any]) -> dict[str, Any]:
     orchestrator = await factory(options)
 
     async def _run() -> None:
-        try:
-            logger.info("orchestrator {} start", wf_id)
-            result = await orchestrator.run(wf_id, text)
-            _runs[wf_id] = result
-            logger.info("orchestrator {} done: {}", wf_id, result.final_state.value)
-        except Exception as e:  # noqa: BLE001
-            logger.exception("orchestrator {} failed: {}", wf_id, e)
-            _runs[wf_id] = OrchestratorResult(
-                wf_id=wf_id,
-                final_state=type("S", (), {"value": "FAILED"})(),  # noqa
-                summary=f"orchestrator error: {e}",
-            )
+        # Serialize: wait for any in-flight workflow to finish first.
+        # See `_run_lock` docstring for rationale.
+        async with _run_lock:
+            try:
+                logger.info("orchestrator {} start", wf_id)
+                result = await orchestrator.run(wf_id, text)
+                _runs[wf_id] = result
+                logger.info("orchestrator {} done: {}", wf_id, result.final_state.value)
+            except Exception as e:  # noqa: BLE001
+                logger.exception("orchestrator {} failed: {}", wf_id, e)
+                _runs[wf_id] = OrchestratorResult(
+                    wf_id=wf_id,
+                    final_state=type("S", (), {"value": "FAILED"})(),  # noqa
+                    summary=f"orchestrator error: {e}",
+                )
 
     task = asyncio.create_task(_run(), name=f"orch-{wf_id}")
     _tasks[wf_id] = task
