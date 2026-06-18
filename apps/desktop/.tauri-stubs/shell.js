@@ -1,0 +1,1 @@
+export async function open() {} export async function Command() { return { execute: async () => {} }; }

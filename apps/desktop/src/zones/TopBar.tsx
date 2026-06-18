@@ -1,40 +1,32 @@
-import type { FormEvent } from 'react';
-
+/**
+ * Z1 — top bar. Title + user menu only.
+ * The command input was moved to the bottom (CommandDock) in v0.2.
+ */
 export interface TopBarProps {
-  commandInput: string;
-  onCommandChange: (value: string) => void;
-  onCommandSubmit: () => void;
   projectName: string;
+  /** Optional subtitle for the project (e.g. current workflow). */
+  subtitle?: string;
+  /** Optional onClick for the settings button. */
+  onSettingsClick?: () => void;
 }
 
-/**
- * Z1 — top bar. Command input + project name + user menu.
- * See `docs/UI_GUIDELINES.md` §3 Z1.
- */
-export function TopBar({ commandInput, onCommandChange, onCommandSubmit, projectName }: TopBarProps) {
-  const handleSubmit = (e: FormEvent) => {
-    e.preventDefault();
-    onCommandSubmit();
-  };
-
+export function TopBar({ projectName, subtitle, onSettingsClick }: TopBarProps) {
   return (
-    <header className="flex h-16 shrink-0 items-center gap-4 border-b border-border bg-surface-2 px-4">
-      <div className="font-semibold tracking-tight">{projectName}</div>
-      <form onSubmit={handleSubmit} className="flex-1">
-        <input
-          type="text"
-          value={commandInput}
-          onChange={(e) => onCommandChange(e.target.value)}
-          placeholder="Ask the Chief…  (e.g. 'Add a /login endpoint')"
-          className="w-full rounded-md border border-border bg-surface-1 px-3 py-2 text-sm placeholder:text-text-secondary focus:border-chief focus:outline-none focus:ring-2 focus:ring-chief/50"
-          aria-label="Command input"
-        />
-      </form>
+    <header className="flex h-14 shrink-0 items-center gap-4 border-b border-border bg-surface-2 px-4">
+      <div className="flex items-baseline gap-2">
+        <span className="font-semibold tracking-tight text-primary">{projectName}</span>
+        <span className="text-xs text-text-secondary">· 智能体公司操作系统</span>
+      </div>
+      {subtitle !== undefined && subtitle.length > 0 && (
+        <span className="text-xs text-text-secondary">/ {subtitle}</span>
+      )}
+      <div className="flex-1" />
       <button
         type="button"
-        className="rounded-md border border-border bg-surface-1 px-3 py-1.5 text-xs text-text-secondary hover:text-primary focus:outline-none focus:ring-2 focus:ring-chief/50"
+        onClick={onSettingsClick}
+        className="rounded-md border border-border bg-surface-1 px-3 py-1.5 text-xs text-text-secondary transition-colors hover:text-primary focus:outline-none focus:ring-2 focus:ring-chief/50"
       >
-        Settings
+        设置
       </button>
     </header>
   );

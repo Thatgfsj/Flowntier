@@ -1,37 +1,58 @@
-import { AgentCard } from '@aco/ui';
+import { AgentCard, type AgentStatus } from '@aco/ui';
+
+export interface LeftRosterProps {
+  chiefStatus: AgentStatus;
+  criticAStatus: AgentStatus;
+  criticBStatus: AgentStatus;
+  workerStatus: AgentStatus;
+}
 
 /**
  * Z2 — left roster. Lists every agent with status.
- * See `docs/UI_GUIDELINES.md` §3 Z2.
  */
-export function LeftRoster() {
+export function LeftRoster({
+  chiefStatus,
+  criticAStatus,
+  criticBStatus,
+  workerStatus,
+}: LeftRosterProps) {
   return (
     <div className="flex flex-col gap-2">
       <h2 className="px-1 text-xs font-semibold uppercase tracking-wide text-text-secondary">
-        Chief
+        首席
       </h2>
       <AgentCard
         role="chief"
-        name="Chief"
-        status="thinking"
-        subtitle="Calm strategist"
-        progress={0.42}
+        name="首席代理"
+        status={chiefStatus}
+        subtitle="沉稳的策略师 · 正在分析"
+        progress={chiefStatus === 'thinking' ? 0.5 : undefined}
       />
 
       <h2 className="mt-3 px-1 text-xs font-semibold uppercase tracking-wide text-text-secondary">
-        Critics
+        审核员
       </h2>
-      <AgentCard role="critic-a" name="Critic A" status="idle" subtitle="Bug hunter" />
-      <AgentCard role="critic-b" name="Critic B" status="idle" subtitle="Architect" />
+      <AgentCard
+        role="critic-a"
+        name="审核员 A"
+        status={criticAStatus}
+        subtitle="缺陷猎手"
+      />
+      <AgentCard
+        role="critic-b"
+        name="审核员 B"
+        status={criticBStatus}
+        subtitle="架构师"
+      />
 
       <h2 className="mt-3 px-1 text-xs font-semibold uppercase tracking-wide text-text-secondary">
-        Workers
+        执行员
       </h2>
       <AgentCard
         role="worker"
-        name="Backend · login"
-        status="queued"
-        subtitle="Waiting on plan"
+        name="执行员"
+        status={workerStatus}
+        subtitle="执行任务中"
       />
     </div>
   );

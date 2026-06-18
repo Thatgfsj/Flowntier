@@ -19,11 +19,11 @@
     "e2e": "playwright test"
   },
   "dependencies": {
+    "@aco/prompts": "workspace:*",
+    "@aco/providers": "workspace:*",
     "@aco/shared": "workspace:*",
     "@aco/ui": "workspace:*",
     "@aco/workflow": "workspace:*",
-    "@aco/providers": "workspace:*",
-    "@aco/prompts": "workspace:*",
     "@tanstack/react-query": "^5.59.0",
     "@tauri-apps/api": "^2.1.0",
     "@tauri-apps/plugin-shell": "^2.0.0",
@@ -37,6 +37,7 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.48.0",
+    "@tailwindcss/vite": "^4.0.0",
     "@tauri-apps/cli": "^2.1.0",
     "@testing-library/react": "^16.0.1",
     "@types/react": "^19.0.0",
@@ -44,9 +45,9 @@
     "@vitejs/plugin-react": "^4.3.3",
     "autoprefixer": "^10.4.20",
     "happy-dom": "^15.11.0",
+    "playwright": "^1.61.0",
     "postcss": "^8.4.49",
     "tailwindcss": "^4.0.0",
-    "@tailwindcss/vite": "^4.0.0",
     "typescript": "^5.6.0",
     "vite": "^5.4.10",
     "vitest": "^2.1.5"
