@@ -1,7 +1,9 @@
 export { Button } from './Button.js';
 export { Card } from './Card.js';
 export { AgentCard } from './AgentCard.js';
+export type { AgentStatus } from './AgentCard.js';
 export { PhaseTimeline } from './PhaseTimeline.js';
+export type { PhaseState } from './PhaseTimeline.js';
 export { TaskItem } from './TaskItem.js';
 export { ReasoningBubble } from './ReasoningBubble.js';
 export { ReviewVerdict } from './ReviewVerdict.js';

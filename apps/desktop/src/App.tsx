@@ -3,7 +3,8 @@ import { PhaseTimeline, AgentCard, Card, type PhaseState, type AgentStatus } fro
 import type { WfEvent } from '@aco/shared';
 import { TopBar } from './zones/TopBar.js';
 import { LeftRoster } from './zones/LeftRoster.js';
-import { CenterPanel } from './zones/CenterPanel.js';
+// CenterPanel removed: the Plan tab + ReasoningBubble replace the
+// dedicated center view (see PR #2).
 import { RightPanel } from './zones/RightPanel.js';
 import { BottomConsole } from './zones/BottomConsole.js';
 import { CommandDock } from './zones/CommandDock.js';
@@ -187,18 +188,22 @@ export function App() {
 
   const applyEvent = (event: WfEvent) => {
     setEvents((prev) => [...prev, event]);
-    if (event.kind === 'transition' && event.to_state) {
-      const idx = PHASES.findIndex((p) => p.name === event.to_state);
+    if (event.kind === 'transition' && event.to) {
+      const idx = PHASES.findIndex((p) => p.name === event.to);
       if (idx >= 0) {
         setActivePhase(idx);
-        setPhaseStates((prev) => ({ ...prev, [event.to_state as Phase['name']]: 'done' }));
+        setPhaseStates((prev) => ({ ...prev, [event.to as Phase['name']]: 'done' }));
         // mark earlier phases done
         setPhaseStates((prev) => {
           const next = { ...prev };
           for (let i = 0; i < idx; i++) {
-            next[PHASES[i].name] = 'done';
+            const phaseName = PHASES[i]?.name;
+            if (phaseName) {
+              next[phaseName] = 'done';
+            }
           }
-          next[event.to_state as Phase['name']] = 'active';
+          const toName = event.to as Phase['name'];
+          next[toName] = 'active';
           return next;
         });
       }
@@ -224,24 +229,38 @@ export function App() {
       // /plan), append a fresh row.
       const newState = event.task_status;
       const summary = event.task_summary;
+      // Build the new row conditionally — exactOptionalPropertyTypes
+      // complains about setting `summary: undefined` on a property
+      // typed `summary?: string`. Omit the key when undefined.
       setTasks((prev) => {
         const idx = prev.findIndex((t) => t.id === event.task_id);
         if (idx >= 0) {
           const next = prev.slice();
-          next[idx] = { ...next[idx], state: newState, summary };
+          const existing = next[idx];
+          if (existing) {
+            const updated: TaskRow = summary
+              ? { ...existing, state: newState, summary }
+              : { ...existing, state: newState };
+            next[idx] = updated;
+          }
           return next;
         }
         // Append a row using the event's task_title as the title.
-        return [
-          ...prev,
-          {
-            id: event.task_id!,
-            title: event.task_title ?? event.task_id!,
-            owner: '',
-            state: newState,
-            summary,
-          },
-        ];
+        const fresh: TaskRow = summary
+          ? {
+              id: event.task_id!,
+              title: event.task_title ?? event.task_id!,
+              owner: '',
+              state: newState,
+              summary,
+            }
+          : {
+              id: event.task_id!,
+              title: event.task_title ?? event.task_id!,
+              owner: '',
+              state: newState,
+            };
+        return [...prev, fresh];
       });
     }
   };
@@ -477,7 +496,7 @@ export function App() {
         onCommandChange={setCmd}
         onCommandSubmit={handleSubmit}
         busy={busy}
-        resetLabel={completed ? '重置' : undefined}
+        {...(completed ? { resetLabel: '重置' } : {})}
       />
 
       <BottomConsole events={events} />

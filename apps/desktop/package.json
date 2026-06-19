@@ -6,7 +6,8 @@
   "description": "Tauri 2 + React 19 desktop shell for Agent Company OS",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "vite build",
+    "typecheck": "tsc -b",
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
