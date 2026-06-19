@@ -2,10 +2,11 @@
 
 > A Visual AI Software Company Powered by Multi-Agent Workflow
 
-[![Status](https://img.shields.io/badge/status-v0.1%20RFC%20Draft-blue)]()
+[![Release](https://img.shields.io/badge/release-v0.2.2-blue)](https://github.com/Thatgfsj/AgentCompanyOS/releases/tag/v0.2.2)
 [![License](https://img.shields.io/badge/license-MIT-green)]()
 [![RFCs](https://img.shields.io/badge/RFCs-15-orange)]()
-[![Phases](https://img.shields.io/badge/phases-5%2F5%20planned-purple)]()
+[![Tests](https://img.shields.io/badge/tests-153%20passing-brightgreen)]()
+[![Windows](https://img.shields.io/badge/windows-installer-blueviolet)](https://github.com/Thatgfsj/AgentCompanyOS/releases/tag/v0.2.2)
 
 **ACO is not another AI IDE. It is an AI Software Company Operating System.**
 
@@ -90,19 +91,65 @@ In [`.agent/`](./.agent/):
 
 ---
 
+## 🚀 5-minute demo (no API key needed)
+
+```bash
+# 1. Install runtime + deps (already in apps/desktop/ if you cloned the
+#    monorepo; otherwise pip install -e runtime).
+pip install -e ./runtime
+
+# 2. Run an end-to-end multi-agent workflow. Uses the deterministic
+#    MockProvider so no LLM API key is required.
+python -m aco_runtime_lib demo "Write an is_prime function with pytest tests"
+
+# Expected output (abridged):
+#   ACO runtime demo — end-to-end multi-agent workflow
+#   Request: 'is_prime'
+#
+#   Result  state: DONE
+#           tasks : 2
+#           LLM   : 4 calls
+#           time  : 0.01s
+#
+#   Delivery summary:
+#   # Delivery Summary
+#   ## What was built
+#   - is_prime checks n>1 then trial-divides up to sqrt(n)
+#   ...
+```
+
+The demo exercises the full state machine (Chief → Planner →
+Critic → Worker ×2 → Reporter → FinalReviewer → DONE) using the
+real orchestrator code. Swap the `MockProvider` for a real
+provider (set `MINIMAX_API_KEY` in the OS keychain via the
+Settings UI) to see the same flow with real LLM calls.
+
+---
+
 ## 🏗️ Status
 
-**Current version:** `v0.1` (Phase 0 — Foundation)
+**Current version:** [`v0.2.2`](https://github.com/Thatgfsj/AgentCompanyOS/releases/tag/v0.2.2)
+(Phase 2 partial: parser + validator + scheduler shipped; full Phase 2 in progress.)
 
 | Milestone | Status |
 |-----------|--------|
-| Phase 0 — Foundation (monorepo, CI, RFCs) | 🔨 In progress |
-| Phase 1 — Minimal runtime (state machine + 1 e2e test) | ⏳ Planned |
-| Phase 2 — Task graph + multi-provider + plugins | ⏳ Planned |
-| Phase 3 — Memory + replay + cost dashboard | ⏳ Planned |
-| Phase 4 — Real-world plugins + marketplace | ⏳ Planned |
-| Phase 5 — Live2D + voice + streaming | ⏳ Planned |
+| Phase 0 — Foundation (monorepo, CI, RFCs, Windows installer) | ✅ Done |
+| Phase 1 — Minimal runtime (state machine, JSONL replay, 1 e2e test) | ✅ Done |
+| Phase 2.1 — Plan parser (Markdown → DAG, strict mode) | ✅ Done |
+| Phase 2.2 — Plan validator (cycles, budget, max-nodes) | ✅ Done |
+| Phase 2.3 — Plan scheduler (topological, fair, repair subgraph) | ✅ Done |
+| Phase 2.4 — React Flow UI for plan graph | 🛠 In progress |
+| Phase 2.5+ — Memory + cost dashboard + marketplace | ⏳ Planned |
 | v1.0 — Complete AI Software Company | 🎯 Target |
+
+**Verified working end-to-end (v0.2.2):**
+- 153 runtime tests passing
+- Workflow `POST /api/workflow` → plan → workers → FinalReviewer → DONE
+- `GET /api/workflow/{id}/plan` returns live `parsed_plan` + `task_statuses`
+- OS-keychain secret store (Windows Credential Manager / macOS Keychain)
+- Structured Plugin system (`echo`, `python`, `git`) with sandbox + default-deny write
+- Per-agent timeouts (`*_timeout_seconds`) prevent local-model self-lock
+- Windows installer: NSIS 3.6 MB + MSI 5.0 MB at [Release v0.2.2](https://github.com/Thatgfsj/AgentCompanyOS/releases/tag/v0.2.2)
 
 See [plans/](./plans/) and [docs/ROADMAP.md](./docs/ROADMAP.md) for details.
 
@@ -117,9 +164,9 @@ Locked-in for v0.1 — see [docs/TECH_STACK.md](./docs/TECH_STACK.md) for the fu
 * **Backend (Rust):** Tokio · Tauri IPC · Serde · SQLx · SQLite + FTS5 · portable-pty · Crossbeam
 * **AI Runtime (Python 3.12+):** FastAPI · Uvicorn · Pydantic v2 · asyncio · Loguru · Tenacity · Rich
 * **Agent Framework:** Custom workflow engine, event bus, task-graph scheduler, prompt engine, model router
-* **AI SDKs:** Anthropic · OpenAI · Google GenAI · MiniMax · Moonshot (Kimi) · DeepSeek · OpenRouter · Ollama · LM Studio · OpenAI-compatible
-* **Execution engine (v0.1):** Claude Code CLI
-* **Plugins:** Python plugin API (MCP, Git, Docker, Browser)
+* **AI SDKs:** Anthropic · OpenAI · Google GenAI · MiniMax · Moonshot (Kimi) · DeepSeek · OpenRouter · Ollama · LM Studio · OpenAI-compatible (only `minimax` + `deepseek` verified end-to-end in v0.2.2; others implemented but not smoke-tested)
+* **Execution:** Plugin ABC with structured args; `portable-pty` for Claude Code CLI as one possible backend, but **not** the only path — `echo`/`python`/`git` plugins ship in-tree
+* **Plugins:** Structured plugin API (Python / git / echo shipped; MCP / Docker / Browser are stubs)
 * **Testing:** Vitest · Playwright · cargo test · pytest
 * **CI:** GitHub Actions (clippy · rustfmt · ruff · black · mypy · eslint · prettier)
 
@@ -133,42 +180,57 @@ AgentCompanyOS/
 ├── LICENSE                ← MIT
 ├── CONTRIBUTING.md        ← how to contribute
 │
-├── docs/                  ← 15 RFCs
-├── prompts/               ← 8 runnable agent prompts
+├── docs/                  ← 15 RFCs (PROPOSALS/, WORKFLOW_SPEC, TASK_GRAPH, …)
+├── prompts/               ← 8 runnable agent prompts (Chief, Planner, …)
 ├── plans/                 ← 7 phase plans
-├── .agent/                ← 4 rule files
+├── .agent/                ← 4 rule files (CLAUDE.md etc.)
 │
-├── apps/
-│   ├── desktop/           ← Tauri app (TS + Rust)
-│   └── runtime/           ← Python FastAPI sidecar
+├── apps/                   ← runtime + desktop shells
+│   ├── desktop/           ← Tauri v2 app (TypeScript + Rust)
+│   └── runtime/           ← Python FastAPI sidecar (aco_runtime/)
 │
-├── packages/              ← pnpm workspace
-│   ├── ui/                ← React components
-│   ├── workflow/          ← workflow client
+├── packages/              ← pnpm workspace (TS shared types/components)
+│   ├── ui/                ← React 19 components
+│   ├── workflow/          ← workflow client types
 │   ├── providers/         ← provider metadata
 │   ├── prompts/           ← prompt renderer
-│   └── shared/            ← cross-language types
+│   └── shared/            ← cross-language types (WfEvent mirror)
 │
-├── crates/                ← Cargo workspace
-│   ├── tauri-core/
-│   ├── event-bus/
-│   ├── claude-adapter/
-│   ├── config/
-│   └── storage/
+├── crates/                ← Cargo workspace — Tauri-side glue only
+│   ├── tauri-core/        ← Tauri commands, AppState
+│   ├── event-bus/         ← Rust event types (mirror of shared/events.ts)
+│   ├── claude-adapter/    ← portable-pty Claude Code CLI runner
+│   ├── config/            ← aco.toml loader
+│   └── storage/           ← sqlx + SQLite + FTS5 (Phase 2 stub)
 │
-├── runtime/               ← uv workspace
-│   ├── agents/
-│   ├── workflow/
-│   ├── providers/
-│   ├── plugins/
-│   ├── prompts/
-│   ├── memory/
-│   └── api/
+├── runtime/               ← uv workspace — the actual product
+│   ├── pyproject.toml
+│   ├── src/
+│   │   └── aco_runtime_lib/      ← the runtime library
+│   │       ├── agents/            ← Chief, Planner, Worker, Critic, Reporter, FinalReviewer
+│   │       ├── workflow/          ← orchestrator + state machine
+│   │       │                       + plan_parser / plan_validator / plan_scheduler
+│   │       ├── providers/         ← model router (12+ providers, keychain-backed)
+│   │       ├── plugins/           ← Plugin ABC + builtin/{echo,python,git}
+│   │       ├── prompts/           ← Jinja-style prompt renderer
+│   │       ├── memory/            ← in-mem key-value (Phase 2 → SQLite)
+│   │       ├── api/               ← routes (workflow, events, providers, settings, plugins)
+│   │       ├── event_bus.py       ← pub/sub asyncio
+│   │       ├── secrets.py         ← OS-keychain SecretStore
+│   │       └── __init__.py
+│   └── tests/              ← 153 pytest tests
 │
-├── plugins/               ← built-in plugin sources
-│
-└── .github/workflows/     ← CI
+├── .validation/           ← smoke + e2e + icon-gen scripts
+├── .github/workflows/     ← CI (clippy · ruff · mypy · eslint · prettier)
+└── target/release/        ← Tauri build artifacts (.exe, .msi, NSIS setup)
 ```
+
+**Key paths:**
+- Tauri desktop app: `apps/desktop/`
+- Python AI runtime: `runtime/src/aco_runtime_lib/`
+- Phase 2 plan parser / validator / scheduler: `runtime/src/aco_runtime_lib/workflow/`
+- Plugin registry + builtin plugins: `runtime/src/aco_runtime_lib/plugins/`
+- End-to-end demo: `python -m aco_runtime_lib.demo` (see below)
 
 ---
 
