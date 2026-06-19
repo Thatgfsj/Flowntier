@@ -14,6 +14,10 @@ dependencies = [
     "tenacity>=9.0.0",
     "asyncio-throttle>=1.0.2",
     "ulid-py>=1.1.0",
+    # Encrypted secret store (Settings UI → OS keychain bridge).
+    # On Windows uses Credential Manager (DPAPI); macOS Keychain;
+    # Linux Secret Service. Pure-python wrapper, no native deps.
+    "keyring>=24.0.0",
 ]
 
 [project.optional-dependencies]

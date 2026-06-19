@@ -61,6 +61,22 @@ state = AppState()
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     logger.info("aco-runtime starting up")
+    # Seed os.environ from the OS keychain BEFORE the provider
+    # manager builds its router. Anything the user saved in the
+    # Settings UI (or via the secrets CLI) becomes available to the
+    # existing code that reads os.environ. The default
+    # overwrite=False means an explicit `setx` value beats the
+    # keychain value — useful for one-off local overrides.
+    try:
+        from aco_runtime_lib.secrets import secrets_store
+        seeded = secrets_store.seed_os_environ()
+        if seeded:
+            logger.info("seeded {} env var(s) from keychain: {}", len(seeded), seeded)
+    except Exception as exc:  # noqa: BLE001
+        # Keyring failure on Linux is common (no Secret Service);
+        # log and continue — the user can still setx manually.
+        logger.warning("keychain seed skipped: {}", exc)
+
     providers = state.manager.list_providers()
     enabled = [p.id for p in providers if p.enabled]
     logger.info(
@@ -124,6 +140,7 @@ async def get_state() -> dict[str, object]:
 from .api.routes import events as events_module
 from .api.routes import providers as providers_module
 from .api.routes import router as router_module
+from .api.routes import settings as settings_module
 from .api.routes import workflow as workflow_module
 
 events_module.bind_bus(state.bus)
@@ -135,6 +152,7 @@ app.include_router(providers_router, prefix="/api/providers", tags=["providers"]
 app.include_router(router_module.router, prefix="/api/router", tags=["router"])
 app.include_router(workflow_router, prefix="/api/workflow", tags=["workflow"])
 app.include_router(events_router, prefix="/api/events", tags=["events"])
+app.include_router(settings_module.router, prefix="/api/settings", tags=["settings"])
 
 
 # ── Entry point ──────────────────────────────────────────────────
