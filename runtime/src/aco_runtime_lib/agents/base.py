@@ -24,6 +24,7 @@ class AgentRole(enum.StrEnum):
     PLANNER = "agent:planner"
     REPORTER = "agent:reporter"
     MERGER = "agent:merger"
+    FINAL_REVIEWER = "agent:final_reviewer"
 
 
 @dataclass(frozen=True, slots=True)

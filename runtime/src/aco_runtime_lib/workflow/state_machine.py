@@ -61,6 +61,7 @@ class State(enum.StrEnum):
 
     # Phase 8 — Delivery
     DELIVERING = "DELIVERING"
+    FINAL_REVIEW = "FINAL_REVIEW"
     DONE = "DONE"
 
     # Terminal — failure paths
@@ -200,7 +201,30 @@ TRANSITIONS: Final[tuple[Transition, ...]] = (
     Transition(State.REPAIRING, "budget_exceeded", State.FAILED),
     Transition(State.REWRITING, "replan_done", State.PLAN_REVISING),
     # Phase 8
-    Transition(State.DELIVERING, "report_emitted", State.DONE),
+    Transition(State.DELIVERING, "report_emitted", State.FINAL_REVIEW),
+    # The "started" event is fired for symmetry with other phases
+    # so observers (UI, logs) can see the review begin.
+    Transition(State.DELIVERING, "final_review_started", State.FINAL_REVIEW),
+    # Final review after the delivery summary is drafted. PASS
+    # -> DONE. REPAIR -> re-loop through the worker + repair
+    # cycle. REJECT -> FAILED (the whole workflow missed the
+    # point; retrying won't help).
+    Transition(
+        State.FINAL_REVIEW,
+        "final_review_pass",
+        State.DONE,
+    ),
+    Transition(
+        State.FINAL_REVIEW,
+        "final_review_repair",
+        State.REPAIRING,
+        _under_repair_budget,
+    ),
+    Transition(
+        State.FINAL_REVIEW,
+        "final_review_reject",
+        State.FAILED,
+    ),
     # Universal: any state can be aborted
     Transition(State.REQ_RECEIVED, "user_abort", State.ABORTED),
     Transition(State.REQ_ANALYZING, "user_abort", State.ABORTED),

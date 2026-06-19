@@ -84,6 +84,8 @@ async def _drive_to_done(sm: StateMachine) -> list[WfEvent]:
 
         # Phase 8 — Delivery
         await sm.transition("report_emitted")
+        # Phase 8b — Final Review (Phase 2 / C2). PASS path.
+        await sm.transition("final_review_pass")
         assert sm.state == State.DONE
         assert sm.is_terminal
     finally:
@@ -122,7 +124,7 @@ async def test_happy_path_req_to_done() -> None:
     assert sm.state == State.DONE
 
     transition_events = [e for e in events if e.kind == "transition"]
-    assert len(transition_events) == 12
+    assert len(transition_events) == 13
     states = [e.to_state for e in transition_events]
     assert states == [
         "REQ_ANALYZING",
@@ -136,6 +138,7 @@ async def test_happy_path_req_to_done() -> None:
         "DEVELOPING",
         "REVIEWING",
         "DELIVERING",
+        "FINAL_REVIEW",
         "DONE",
     ]
 

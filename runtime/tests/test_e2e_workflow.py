@@ -190,14 +190,17 @@ async def test_e2e_happy_path_writes_full_jsonl(tmp_path: Path) -> None:
         await sm.transition("verdict_pass")
         # Phase 8
         await sm.transition("report_emitted")
+        # Phase 8b — Final Review (PASS path).
+        await sm.transition("final_review_pass")
         assert sm.state == State.DONE
     finally:
         sm.transition = original  # type: ignore[method-assign]
         await log.close()
 
-    # Verify the JSONL has every transition
+    # Verify the JSONL has every transition (now 13 — added
+    # final_review_pass transition in Phase 2 / C2).
     entries = list(iter_entries_sync(workflows_dir / "wf_e2e.jsonl"))
-    assert len(entries) == 12
+    assert len(entries) == 13
     assert entries[-1].to_state == "DONE"
 
     # And recovery should NOT report this workflow (it is terminal)
@@ -335,6 +338,8 @@ async def test_e2e_with_mock_agents_full_loop(tmp_path: Path) -> None:
 
     # 5. Delivery
     await sm.transition("report_emitted")
+    # 6. Final review (Phase 2 / C2).
+    await sm.transition("final_review_pass")
     assert sm.state == State.DONE
 
     # Reporter composes the summary

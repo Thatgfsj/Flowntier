@@ -33,6 +33,7 @@ from aco_runtime_lib.agents import (
     AgentRole,
     ChiefAgent,
     CriticAgent,
+    FinalReviewerAgent,
     PlannerAgent,
     ReporterAgent,
     WorkerAgent,
@@ -171,6 +172,7 @@ class WorkflowOrchestrator:
         )
         self.worker = WorkerAgent(router=router)
         self.reporter = ReporterAgent()
+        self.final_reviewer = FinalReviewerAgent()
 
     # ── Public entry point ───────────────────────────────────────
 
@@ -335,13 +337,69 @@ class WorkflowOrchestrator:
         )
         summary = report_result.data.get("summary", "(no summary)")
 
-        # Final pass: transition into DONE.
-        # (We're already in DELIVERING; the next transition would be
-        # something like 'workflow_done'. For now we leave the
-        # machine in DELIVERING and report DONE via the result.)
-        await self._bus_console("agent:chief", "info", "工作流已完成")
-        await self._emit_milestone("✓ 全部完成")
+        # ── Phase 8b: Final Review ────────────────────────────────
+        # The FinalReviewer looks at the WHOLE delivery (user request
+        # vs. summary vs. task results). It can PASS -> DONE,
+        # REPAIR -> back to REPAIRING, or REJECT -> FAILED.
+        # In production this would use the model router; the
+        # deterministic stub (FinalReviewerAgent.run) is enough to
+        # drive the state machine for end-to-end tests.
+        #
+        # Note: the report_emitted transition above already moved us
+        # from DELIVERING -> FINAL_REVIEW, so we don't fire a
+        # separate 'final_review_started' here.
+        try:
+            final = await self._agent(
+                self.final_reviewer,
+                {
+                    "user_request": user_request,
+                    "summary": summary,
+                    "task_results": task_results,
+                },
+                timeout=self.options.reporter_timeout_seconds,
+            )
+            verdict = str(final.data.get("verdict", "REJECT")).upper()
+        except Exception as exc:  # noqa: BLE001
+            verdict = "REJECT"
+            await self._bus_console(
+                "agent:final_reviewer",
+                "error",
+                f"final review raised: {exc}",
+            )
 
+        if verdict == "PASS":
+            await self._t("final_review_pass")
+            await self._bus_console(
+                "agent:chief", "info", "✓ 最终审查通过 — 交付完成"
+            )
+            await self._emit_milestone("✓ 最终审查通过")
+            return OrchestratorResult(
+                wf_id=wf_id,
+                final_state=sm.state,
+                summary=summary,
+                task_results=task_results,
+            )
+        if verdict == "REPAIR":
+            try:
+                await self._t("final_review_repair")
+            except Exception:
+                # Budget exhausted -> FAILED; surface the rejection.
+                verdict = "REJECT"
+        if verdict == "REJECT":
+            await self._t("final_review_reject")
+            await self._bus_console(
+                "agent:chief", "error",
+                "最终审查拒绝 — 工作流失败",
+            )
+            await self._emit_milestone("✗ 最终审查拒绝")
+            return OrchestratorResult(
+                wf_id=wf_id,
+                final_state=State.FAILED,
+                summary=summary,
+                task_results=task_results,
+            )
+        # Unknown verdict — treat as PASS to avoid an infinite loop.
+        await self._t("final_review_pass")
         return OrchestratorResult(
             wf_id=wf_id,
             final_state=sm.state,
