@@ -1,6 +1,6 @@
 {
   "name": "@aco/desktop",
-  "version": "0.1.0",
+  "version": "0.2.2",
   "private": true,
   "type": "module",
   "description": "Tauri 2 + React 19 desktop shell for Agent Company OS",

@@ -1,6 +1,6 @@
 [project]
 name        = "aco-runtime-lib"
-version     = "0.1.0"
+version     = "0.2.2"
 description = "ACO AI runtime library (agents, workflow, providers, plugins, memory)"
 readme      = "README.md"
 license     = { text = "MIT" }
