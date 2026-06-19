@@ -61,6 +61,11 @@ state = AppState()
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     logger.info("aco-runtime starting up")
+    # Eager-init the plugin registry so the first request to
+    # /api/plugins doesn't pay the import cost.
+    from aco_runtime_lib.plugins.base import get_registry
+    plugins = get_registry().list()
+    logger.info("plugin registry ready: {}", [p.name for p in plugins])
     # Seed os.environ from the OS keychain BEFORE the provider
     # manager builds its router. Anything the user saved in the
     # Settings UI (or via the secrets CLI) becomes available to the
@@ -138,6 +143,7 @@ async def get_state() -> dict[str, object]:
 # Wire the shared bus + manager into the routers so the endpoints
 # can reach them at request time.
 from .api.routes import events as events_module
+from .api.routes import plugins as plugins_module
 from .api.routes import providers as providers_module
 from .api.routes import router as router_module
 from .api.routes import settings as settings_module
@@ -153,6 +159,7 @@ app.include_router(router_module.router, prefix="/api/router", tags=["router"])
 app.include_router(workflow_router, prefix="/api/workflow", tags=["workflow"])
 app.include_router(events_router, prefix="/api/events", tags=["events"])
 app.include_router(settings_module.router, prefix="/api/settings", tags=["settings"])
+app.include_router(plugins_module.router, prefix="/api/plugins", tags=["plugins"])
 
 
 # ── Entry point ──────────────────────────────────────────────────
