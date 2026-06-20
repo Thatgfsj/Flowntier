@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { PhaseTimeline, AgentCard, Card, type PhaseState, type AgentStatus } from '@aco/ui';
 import type { WfEvent } from '@aco/shared';
 import { TopBar } from './zones/TopBar.js';
@@ -11,10 +11,7 @@ import { PluginsPanel } from './zones/PluginsPanel.js';
 import { ReasoningBubble } from '@aco/ui';
 import { ReviewVerdict } from '@aco/ui';
 import { PlanGraph, type PlanTaskNode, type PlanEdge } from './components/PlanGraph.js';
-import { ConnectionBanner } from './components/ConnectionBanner.js';
-import { StartupScreen } from './components/StartupScreen.js';
 import { getJson, postJson, createWebSocket, pollUntil } from './lib/api.js';
-import { useConnection } from './lib/useConnection.js';
 
 interface Phase {
   name:
@@ -80,22 +77,7 @@ function agentStatusToRole(s: AgentStatus): AgentStatus {
   return s;
 }
 
-// ── Wrapper: startup gate ────────────────────────────────────────
-
 export function App() {
-  const [ready, setReady] = useState(false);
-  const handleReady = useCallback(() => setReady(true), []);
-
-  if (!ready) {
-    return <StartupScreen onReady={handleReady} />;
-  }
-  return <MainApp />;
-}
-
-// ── Main app (only rendered after runtime is confirmed alive) ────
-
-function MainApp() {
-  const { connected } = useConnection(3000);
   const [activePhase, setActivePhase] = useState(0);
   const [phaseStates, setPhaseStates] = useState<Record<Phase['name'], PhaseState>>({ ...PHASE_STATE });
   const [tasks, setTasks] = useState<TaskRow[]>([...INITIAL_TASKS]);
@@ -332,14 +314,10 @@ function MainApp() {
             ? '上次工作流已完成'
             : busy
               ? '运行中…'
-              : connected
-                ? '已连接 · 准备就绪'
-                : '未连接'
+              : '准备就绪'
         }
         onSettingsClick={() => setSettingsOpen(true)}
       />
-
-      <ConnectionBanner />
 
       <div className="flex flex-1 overflow-hidden">
         <aside
