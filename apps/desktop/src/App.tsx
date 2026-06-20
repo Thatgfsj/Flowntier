@@ -11,6 +11,7 @@ import { CommandDock } from './zones/CommandDock.js';
 import { Settings } from './zones/Settings.js';
 import { ReasoningBubble } from '@aco/ui';
 import { ReviewVerdict } from '@aco/ui';
+import { PlanGraph, type PlanTaskNode, type PlanEdge } from './components/PlanGraph.js';
 
 interface Phase {
   name:
@@ -104,6 +105,10 @@ export function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [backendMode, setBackendMode] = useState<'real' | 'simulator' | 'unknown'>('unknown');
   const [currentWfId, setCurrentWfId] = useState<string | null>(null);
+  const [planNodes, setPlanNodes] = useState<PlanTaskNode[]>([]);
+  const [planEdges, setPlanEdges] = useState<PlanEdge[]>([]);
+  const [selectedTask, setSelectedTask] = useState<string | null>(null);
+  const [showPlanGraph, setShowPlanGraph] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const busyRef = useRef(false);
   // Expose for screenshot / debug scripts.
@@ -138,6 +143,31 @@ export function App() {
                 }),
               );
               setTasks(rows);
+
+              // Set plan graph data
+              const graphNodes: PlanTaskNode[] = data.parsed_plan.nodes.map(
+                (n: { id: string; title: string; owner_role?: string; depends_on?: string[]; est_tokens?: number }) => ({
+                  id: n.id,
+                  title: n.title,
+                  owner_role: n.owner_role ?? 'default',
+                  depends_on: n.depends_on ?? [],
+                  status: 'PENDING',
+                  est_tokens: n.est_tokens,
+                }),
+              );
+              setPlanNodes(graphNodes);
+
+              // Set edges
+              const graphEdges: PlanEdge[] = data.parsed_plan.edges?.map(
+                (e: { from_: string; to: string; kind?: string }) => ({
+                  from: e.from_,
+                  to: e.to,
+                  kind: e.kind ?? 'Hard',
+                }),
+              ) ?? [];
+              setPlanEdges(graphEdges);
+
+              setShowPlanGraph(true);
               return;
             }
           }
@@ -417,6 +447,29 @@ export function App() {
               }}
             />
           </div>
+
+          {showPlanGraph && planNodes.length > 0 && (
+            <Card className="mb-3">
+              <div className="mb-2 flex items-center justify-between">
+                <h3 className="text-sm font-semibold">计划图</h3>
+                <span className="text-xs text-text-secondary">
+                  {planNodes.length} 个任务 · 点击节点查看详情
+                </span>
+              </div>
+              <PlanGraph
+                nodes={planNodes}
+                edges={planEdges}
+                onNodeClick={setSelectedTask}
+                className="h-[350px] w-full rounded border border-border"
+              />
+              {selectedTask && (
+                <div className="mt-2 rounded bg-surface-2 p-2 text-xs">
+                  <span className="font-semibold">选中：</span>
+                  {planNodes.find((n) => n.id === selectedTask)?.title ?? selectedTask}
+                </div>
+              )}
+            </Card>
+          )}
 
           {milestones.length > 0 && (
             <Card className="mb-3">
