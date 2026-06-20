@@ -209,6 +209,11 @@ TRANSITIONS: Final[tuple[Transition, ...]] = (
     # -> DONE. REPAIR -> re-loop through the worker + repair
     # cycle. REJECT -> FAILED (the whole workflow missed the
     # point; retrying won't help).
+    # The same three events are also accepted from REPAIRING so the
+    # orchestrator can short-circuit a repair loop when the
+    # FinalReviewer (re-running after REPAIR) emits a verdict. The
+    # dogfooding capture on 2026-06-19 hit the bug where REJECT
+    # from REPAIRING had no transition.
     Transition(
         State.FINAL_REVIEW,
         "final_review_pass",
@@ -222,6 +227,26 @@ TRANSITIONS: Final[tuple[Transition, ...]] = (
     ),
     Transition(
         State.FINAL_REVIEW,
+        "final_review_reject",
+        State.FAILED,
+    ),
+    # Same three events from REPAIRING (post-Repair FinalReviewer
+    # verdict). Without these, a REJECT or PASS verdict emitted
+    # after a repair cycle crashes with InvalidTransitionError.
+    # See dogfooding capture 2026-06-19.
+    Transition(
+        State.REPAIRING,
+        "final_review_pass",
+        State.DONE,
+    ),
+    Transition(
+        State.REPAIRING,
+        "final_review_repair",
+        State.REPAIRING,
+        _under_repair_budget,
+    ),
+    Transition(
+        State.REPAIRING,
         "final_review_reject",
         State.FAILED,
     ),

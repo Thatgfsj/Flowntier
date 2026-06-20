@@ -194,9 +194,10 @@ async def _run_demo(user_request: str) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        prog="python -m aco_runtime_lib",
+        prog="aco_runtime",
         description=(
-            "ACO runtime CLI. Subcommands: 'demo' runs an end-to-end "
+            "ACO runtime. With no args, starts the FastAPI server on "
+            ":7317. The 'demo' subcommand runs an end-to-end "
             "workflow with the deterministic MockProvider (no API key)."
         ),
     )
@@ -211,6 +212,13 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.cmd == "demo":
         return asyncio.run(_run_demo(args.request))
+    if args.cmd is None:
+        # Default: start the FastAPI server. This matches the
+        # previous `aco-runtime` console script so the bundled
+        # sidecar just works when launched from the Tauri shell.
+        from aco_runtime.main import main as _server_main
+        _server_main()
+        return 0
     parser.print_help()
     return 0
 

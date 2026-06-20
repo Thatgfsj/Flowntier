@@ -1,6 +1,6 @@
 [project]
 name        = "aco-runtime"
-0.2.2
+0.2.3
 description = "Python AI runtime sidecar for Agent Company OS (FastAPI + uvicorn)"
 readme      = "README.md"
 license     = { text = "MIT" }

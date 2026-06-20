@@ -104,7 +104,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(
     title="Agent Company OS — Python Runtime",
-    version=0.2.2,
+    version="0.2.3",
     lifespan=lifespan,
 )
 
@@ -127,7 +127,7 @@ app.add_middleware(
 @app.get("/health", response_model=HealthResponse)
 async def health() -> HealthResponse:
     """Liveness check; Tauri polls this on startup."""
-    return HealthResponse(status="ok", version=0.2.2)
+    return HealthResponse(status="ok", version="0.2.3")
 
 
 @app.get("/api/state")

@@ -263,6 +263,56 @@ async def test_repair_budget_exhaustion() -> None:
 
 
 @pytest.mark.asyncio
+async def test_final_review_reject_from_repairing() -> None:
+    """The FinalReviewer verdict emitted after a repair cycle must
+    be accepted from REPAIRING. v0.2.2 was missing these transitions
+    and crashed with InvalidTransitionError on REJECT.
+    Found by dogfooding capture on 2026-06-19."""
+    sm, _ = _make_sm()
+    # Walk to REPAIRING
+    await sm.transition("start_analysis")
+    await sm.transition("analysis_done")
+    await sm.transition("start_planning")
+    await sm.transition("plan_emitted")
+    await sm.transition("dispatch_review")
+    sm.ctx.data["plan_verdict"] = "APPROVED"
+    await sm.transition("both_critics_done")
+    await sm.transition("start_dispatch")
+    await sm.transition("all_assigned")
+    await sm.transition("first_result")
+    await sm.transition("all_results_in")
+    await sm.transition("verdict_repair")
+    assert sm.state == State.REPAIRING
+    # FinalReviewer emits REJECT from REPAIRING. This is the path
+    # that crashed in production on 2026-06-19.
+    await sm.transition("final_review_reject")
+    assert sm.state == State.FAILED
+    assert sm.is_terminal
+
+
+@pytest.mark.asyncio
+async def test_final_review_pass_from_repairing() -> None:
+    """The FinalReviewer can also emit PASS from REPAIRING (a happy
+    path where repair cycle succeeds)."""
+    sm, _ = _make_sm()
+    await sm.transition("start_analysis")
+    await sm.transition("analysis_done")
+    await sm.transition("start_planning")
+    await sm.transition("plan_emitted")
+    await sm.transition("dispatch_review")
+    sm.ctx.data["plan_verdict"] = "APPROVED"
+    await sm.transition("both_critics_done")
+    await sm.transition("start_dispatch")
+    await sm.transition("all_assigned")
+    await sm.transition("first_result")
+    await sm.transition("all_results_in")
+    await sm.transition("verdict_repair")
+    await sm.transition("final_review_pass")
+    assert sm.state == State.DONE
+    assert sm.is_terminal
+
+
+@pytest.mark.asyncio
 async def test_plan_revision_budget_guard() -> None:
     """`max_revisions` is rejected when the budget is not yet exhausted."""
     sm, _ = _make_sm()
