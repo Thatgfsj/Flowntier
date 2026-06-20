@@ -1,6 +1,190 @@
 import { useEffect, useState } from 'react';
 import { Card } from '@aco/ui';
 
+// ── Quick Add AI ─────────────────────────────────────────────────
+
+const QUICK_PROVIDERS = [
+  {
+    id: 'openai',
+    name: 'OpenAI',
+    envVar: 'OPENAI_API_KEY',
+    placeholder: 'sk-...',
+    description: 'GPT-5, GPT-5 Mini',
+    color: '#10a37f',
+  },
+  {
+    id: 'anthropic',
+    name: 'Anthropic',
+    envVar: 'ANTHROPIC_API_KEY',
+    placeholder: 'sk-ant-...',
+    description: 'Claude Opus, Sonnet, Haiku',
+    color: '#d97706',
+  },
+  {
+    id: 'google',
+    name: 'Google Gemini',
+    envVar: 'GOOGLE_API_KEY',
+    placeholder: 'AIza...',
+    description: 'Gemini 2.5 Pro, Flash',
+    color: '#4285f4',
+  },
+  {
+    id: 'deepseek',
+    name: 'DeepSeek',
+    envVar: 'DEEPSEEK_API_KEY',
+    placeholder: 'sk-...',
+    description: 'DeepSeek Chat, Reasoner',
+    color: '#6366f1',
+  },
+];
+
+function QuickAddAI({ onSaved }: { onSaved: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [apiKey, setApiKey] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState(false);
+
+  const provider = QUICK_PROVIDERS.find((p) => p.id === selected);
+
+  const handleSave = async () => {
+    if (!provider || !apiKey.trim()) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await fetch(
+        `http://127.0.0.1:7317/api/settings/secrets/${provider.envVar}`,
+        {
+          method: 'PUT',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ value: apiKey.trim() }),
+        }
+      );
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+
+      // Re-inject to os.environ
+      await fetch('http://127.0.0.1:7317/api/settings/secrets/seed', {
+        method: 'POST',
+      });
+
+      setSuccess(true);
+      setApiKey('');
+      onSaved();
+      setTimeout(() => {
+        setOpen(false);
+        setSuccess(false);
+        setSelected(null);
+      }, 1500);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '保存失败');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="flex items-center gap-2 rounded-lg border border-chief/30 bg-chief/10 px-4 py-2 text-sm font-medium text-chief transition-colors hover:bg-chief/20"
+      >
+        <span className="text-lg">+</span>
+        添加 AI 供应商
+      </button>
+    );
+  }
+
+  return (
+    <div className="rounded-lg border border-border bg-surface-1 p-4">
+      <div className="mb-3 flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-primary">快速添加 AI</h3>
+        <button
+          type="button"
+          onClick={() => {
+            setOpen(false);
+            setSelected(null);
+            setApiKey('');
+            setError(null);
+            setSuccess(false);
+          }}
+          className="text-xs text-text-secondary hover:text-primary"
+        >
+          取消
+        </button>
+      </div>
+
+      {/* Provider selection */}
+      <div className="mb-3 grid grid-cols-2 gap-2">
+        {QUICK_PROVIDERS.map((p) => (
+          <button
+            key={p.id}
+            type="button"
+            onClick={() => {
+              setSelected(p.id);
+              setApiKey('');
+              setError(null);
+            }}
+            className={`flex items-center gap-2 rounded-md border p-2.5 text-left transition-colors ${
+              selected === p.id
+                ? 'border-chief bg-surface-2'
+                : 'border-border bg-surface-1 hover:border-text-secondary'
+            }`}
+          >
+            <div
+              className="h-3 w-3 rounded-full"
+              style={{ backgroundColor: p.color }}
+            />
+            <div>
+              <div className="text-xs font-medium">{p.name}</div>
+              <div className="text-[10px] text-text-secondary">{p.description}</div>
+            </div>
+          </button>
+        ))}
+      </div>
+
+      {/* API key input */}
+      {provider && (
+        <div className="space-y-2">
+          <label className="block text-xs text-text-secondary">
+            {provider.name} API Key
+            <span className="ml-1 text-[10px] text-text-secondary">
+              ({provider.envVar})
+            </span>
+          </label>
+          <input
+            type="password"
+            value={apiKey}
+            onChange={(e) => setApiKey(e.target.value)}
+            placeholder={provider.placeholder}
+            className="w-full rounded border border-border bg-surface-2 px-3 py-2 font-mono text-sm placeholder:text-text-secondary focus:border-chief focus:outline-none focus:ring-2 focus:ring-chief/50"
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && apiKey.trim()) {
+                void handleSave();
+              }
+            }}
+          />
+          {error && (
+            <p className="text-xs text-status-failed">{error}</p>
+          )}
+          {success && (
+            <p className="text-xs text-status-done">✓ 已保存并激活</p>
+          )}
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={busy || !apiKey.trim()}
+            className="w-full rounded bg-chief px-3 py-2 text-sm font-medium text-white hover:bg-chief/90 disabled:opacity-50"
+          >
+            {busy ? '保存中...' : `保存 ${provider.name} API Key`}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 interface ProviderInfo {
   id: string;
   display_name: string;
@@ -478,6 +662,25 @@ export function Settings({ open, onClose }: SettingsProps) {
           <>
           {/* Left: provider list */}
           <aside className="w-[380px] shrink-0 overflow-y-auto border-r border-border bg-surface-2 p-3">
+            <div className="mb-3">
+              <QuickAddAI
+                onSaved={() => {
+                  void (async () => {
+                    try {
+                      const [prov, roles, models] = await Promise.all([
+                        fetch('http://127.0.0.1:7317/api/providers').then((r) => r.json() as Promise<{providers: ProviderInfo[]; roles: RoleInfo[]}>),
+                        fetch('http://127.0.0.1:7317/api/router/roles').then((r) => r.json() as Promise<{roles: RoleInfo[]}>),
+                        fetch('http://127.0.0.1:7317/api/router/models').then((r) => r.json() as Promise<{models: RuntimeSnapshot["available_models"]}>),
+                      ]);
+                      setSnapshot({ providers: prov.providers, roles: roles.roles, available_models: models.models });
+                      setSavedAt(new Date().toLocaleTimeString());
+                    } catch {
+                      /* ignore */
+                    }
+                  })();
+                }}
+              />
+            </div>
             <h3 className="mb-2 px-1 text-xs font-semibold uppercase tracking-wide text-text-secondary">
               供应商（{snapshot.providers.length}）
             </h3>
