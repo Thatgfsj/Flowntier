@@ -101,13 +101,11 @@ class WorkerAgentV2(Agent):
             )
 
         # Parse the response to find tool calls and TASK_RESULT
-        result = self._execute_response(response.content, task_id)
+        result = await self._execute_response(response.content, task_id)
         return AgentResult(role=self.role, data=result)
 
-    def _execute_response(self, content: str, task_id: str) -> dict[str, Any]:
+    async def _execute_response(self, content: str, task_id: str) -> dict[str, Any]:
         """Execute any tool calls in the response and extract TASK_RESULT."""
-        import asyncio
-
         # Extract all JSON objects from the response
         json_objects = extract_all_json_objects(content)
 
@@ -123,17 +121,15 @@ class WorkerAgentV2(Agent):
 
                 # Execute the tool
                 try:
-                    result = asyncio.get_event_loop().run_until_complete(
-                        self._registry.invoke(plugin_name, args)
-                    )
+                    result = await self._registry.invoke(plugin_name, args)
 
                     # Track file modifications
                     if plugin_name == "write_file" and result.get("status") == "ok":
                         path = args.get("path", "")
-                        content = args.get("content", "")
+                        file_content = args.get("content", "")
                         files_modified.append({
                             "path": path,
-                            "lines_added": len(content.split("\n")),
+                            "lines_added": len(file_content.split("\n")),
                             "lines_removed": 0,
                         })
 
