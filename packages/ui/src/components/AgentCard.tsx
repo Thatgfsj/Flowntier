@@ -13,7 +13,7 @@ export interface AgentCardProps {
   /** Optional avatar element (e.g. Live2D in v0.5). */
   avatar?: ReactNode;
   /** Optional progress 0..1. */
-  progress?: number;
+  progress?: number | undefined;
   className?: string;
 }
 

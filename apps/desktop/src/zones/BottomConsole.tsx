@@ -5,14 +5,6 @@ export interface BottomConsoleProps {
   events: readonly WfEvent[];
 }
 
-const SOURCE_LABELS: Record<ConsoleSource, string> = {
-  chief: '首席',
-  worker: '执行员',
-  'critic-a': '审核员A',
-  'critic-b': '审核员B',
-  system: '系统',
-};
-
 const LEVEL_LABELS: Record<LogLevel, string> = {
   error: '错误',
   warn: '警告',
@@ -48,10 +40,12 @@ export function BottomConsole({ events }: BottomConsoleProps) {
         <ol className="flex flex-col gap-0.5">
           {visible.map((e, i) => {
             if (e.kind !== 'console') return null;
+            // ConsoleEvent doesn't have ts; use current time as fallback
+            const ts = shortTime(new Date().toISOString());
             return (
               <li key={i}>
                 <ConsoleLine
-                  ts={shortTime(e.ts)}
+                  ts={ts}
                   source={agentToSource(e.agent_id)}
                   text={`[${LEVEL_LABELS[e.level]}] ${e.message}`}
                 />

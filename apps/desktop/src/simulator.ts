@@ -218,7 +218,7 @@ export function startSimulation(
   // simulator we run them in order so the UI state is legible).
   let cursor = 5800;
   for (let i = 0; i < TASKS.length; i++) {
-    const t = TASKS[i];
+    const t = TASKS[i]!;
     const start = cursor;
     cancels.push(
       delay(start, speed, () => {
@@ -282,7 +282,7 @@ export function startSimulation(
   // ── Phase 6: Review (final) ─────────────────────────────────
   cancels.push(
     delay(cursor, speed, () => {
-      task(TASKS[TASKS.length - 1].id, 'DONE');
+      task(TASKS[TASKS.length - 1]!.id, 'DONE');
       for (const t of TASKS) task(t.id, 'DONE');
       log('agent:chief', '所有任务完成，开始最终评审');
       phase('development', 'done');

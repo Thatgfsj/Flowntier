@@ -1,2 +1,4 @@
-export { useEventStream } from './useEventStream.js';
-export { useWorkflowState } from './useWorkflowState.js';
+/**
+ * @aco/ui hooks — currently empty; Tauri-dependent hooks moved to
+ * @aco/desktop/src/hooks/.
+ */

@@ -19,7 +19,7 @@ export interface TaskItemProps {
   state: TaskState;
   owner?: string;
   durationMs?: number;
-  fileHint?: string;
+  fileHint?: string | undefined;
   className?: string;
 }
 

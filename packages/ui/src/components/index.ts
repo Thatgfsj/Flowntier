@@ -5,6 +5,8 @@ export type { AgentStatus } from './AgentCard.js';
 export { PhaseTimeline } from './PhaseTimeline.js';
 export type { PhaseState } from './PhaseTimeline.js';
 export { TaskItem } from './TaskItem.js';
+export type { TaskState } from './TaskItem.js';
 export { ReasoningBubble } from './ReasoningBubble.js';
 export { ReviewVerdict } from './ReviewVerdict.js';
 export { ConsoleLine } from './ConsoleLine.js';
+export type { ConsoleSource } from './ConsoleLine.js';
