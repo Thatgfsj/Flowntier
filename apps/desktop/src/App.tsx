@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { PhaseTimeline, AgentCard, Card, type PhaseState, type AgentStatus } from '@aco/ui';
 import type { WfEvent } from '@aco/shared';
 import { TopBar } from './zones/TopBar.js';
@@ -60,10 +60,6 @@ interface TaskRow {
   summary?: string;
 }
 
-// Tasks are populated dynamically from GET /api/workflow/{id}/plan
-// after the orchestrator's planning phase completes. The legacy
-// hardcoded placeholders were removed in this commit because they
-// never reflected what the runtime was actually working on.
 const INITIAL_TASKS: ReadonlyArray<TaskRow> = [];
 
 type AgentStatusMap = {
@@ -84,9 +80,22 @@ function agentStatusToRole(s: AgentStatus): AgentStatus {
   return s;
 }
 
+// ── Wrapper: startup gate ────────────────────────────────────────
+
 export function App() {
-  const { connected } = useConnection(3000);
   const [ready, setReady] = useState(false);
+  const handleReady = useCallback(() => setReady(true), []);
+
+  if (!ready) {
+    return <StartupScreen onReady={handleReady} />;
+  }
+  return <MainApp />;
+}
+
+// ── Main app (only rendered after runtime is confirmed alive) ────
+
+function MainApp() {
+  const { connected } = useConnection(3000);
   const [activePhase, setActivePhase] = useState(0);
   const [phaseStates, setPhaseStates] = useState<Record<Phase['name'], PhaseState>>({ ...PHASE_STATE });
   const [tasks, setTasks] = useState<TaskRow[]>([...INITIAL_TASKS]);
@@ -110,19 +119,13 @@ export function App() {
   const wsRef = useRef<WebSocket | null>(null);
   const busyRef = useRef(false);
 
-  // Show startup screen until runtime is ready
-  if (!ready) {
-    return <StartupScreen onReady={() => setReady(true)} />;
-  }
   // Expose for screenshot / debug scripts.
   useEffect(() => {
     // @ts-expect-error: window.__acoCurrentWfId is a debug hook
     window.__acoCurrentWfId = currentWfId;
   }, [currentWfId]);
 
-  // Whenever a new workflow starts, poll /plan until it's ready,
-  // then replace the task list with the real tasks. Falls back to
-  // appending rows as task_status events arrive (see applyEvent).
+  // Whenever a new workflow starts, poll /plan until it's ready
   useEffect(() => {
     if (!currentWfId) return;
     let cancelled = false;
@@ -136,50 +139,40 @@ export function App() {
         if (cancelled) return;
         const parsedPlan = data?.parsed_plan as Record<string, unknown> | undefined;
         if (data?.status === 'ready' && parsedPlan?.nodes) {
-              const nodes = parsedPlan.nodes as Array<Record<string, unknown>>;
-              const rows: TaskRow[] = nodes.map(
-                (n): TaskRow => ({
-                  id: n.id as string,
-                  title: n.title as string,
-                  owner: (n.owner_role as string) ?? '',
-                  state: 'PENDING',
-                }),
-              );
-              setTasks(rows);
-
-              // Set plan graph data
-              const graphNodes: PlanTaskNode[] = nodes.map(
-                (n): PlanTaskNode => ({
-                  id: n.id as string,
-                  title: n.title as string,
-                  owner_role: (n.owner_role as string) ?? 'default',
-                  depends_on: (n.depends_on as string[]) ?? [],
-                  status: 'PENDING',
-                }),
-              );
-              setPlanNodes(graphNodes);
-
-              // Set edges
-              const edges = parsedPlan.edges as Array<Record<string, unknown>> | undefined;
-              const graphEdges: PlanEdge[] = edges?.map(
-                (e): PlanEdge => ({
-                  from: e.from_ as string,
-                  to: e.to as string,
-                  kind: ((e.kind as string) ?? 'Hard') as 'Hard' | 'Soft',
-                }),
-              ) ?? [];
-              setPlanEdges(graphEdges);
-
-              setShowPlanGraph(true);
+          const nodes = parsedPlan.nodes as Array<Record<string, unknown>>;
+          setTasks(nodes.map(
+            (n): TaskRow => ({
+              id: n.id as string,
+              title: n.title as string,
+              owner: (n.owner_role as string) ?? '',
+              state: 'PENDING',
+            }),
+          ));
+          setPlanNodes(nodes.map(
+            (n): PlanTaskNode => ({
+              id: n.id as string,
+              title: n.title as string,
+              owner_role: (n.owner_role as string) ?? 'default',
+              depends_on: (n.depends_on as string[]) ?? [],
+              status: 'PENDING',
+            }),
+          ));
+          const edges = parsedPlan.edges as Array<Record<string, unknown>> | undefined;
+          setPlanEdges(edges?.map(
+            (e): PlanEdge => ({
+              from: e.from_ as string,
+              to: e.to as string,
+              kind: ((e.kind as string) ?? 'Hard') as 'Hard' | 'Soft',
+            }),
+          ) ?? []);
+          setShowPlanGraph(true);
         }
       } catch {
-        // API call failed, will retry on next workflow start
+        // API call failed
       }
     };
     void poll();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [currentWfId]);
 
   const reset = () => {
@@ -197,6 +190,9 @@ export function App() {
     setReviewVerdict(null);
     setFinalReport(null);
     setCurrentWfId(null);
+    setPlanNodes([]);
+    setPlanEdges([]);
+    setShowPlanGraph(false);
   };
 
   const applyEvent = (event: WfEvent) => {
@@ -205,15 +201,11 @@ export function App() {
       const idx = PHASES.findIndex((p) => p.name === event.to);
       if (idx >= 0) {
         setActivePhase(idx);
-        setPhaseStates((prev) => ({ ...prev, [event.to as Phase['name']]: 'done' }));
-        // mark earlier phases done
         setPhaseStates((prev) => {
           const next = { ...prev };
           for (let i = 0; i < idx; i++) {
             const phaseName = PHASES[i]?.name;
-            if (phaseName) {
-              next[phaseName] = 'done';
-            }
+            if (phaseName) next[phaseName] = 'done';
           }
           const toName = event.to as Phase['name'];
           next[toName] = 'active';
@@ -225,7 +217,6 @@ export function App() {
       setMilestones((prev) => [...prev, event.label]);
     }
     if (event.kind === 'console' && event.agent_id) {
-      // Map agent_id → status
       if (event.agent_id === 'agent:chief') {
         setAgentStatus((prev) => ({ ...prev, chief: 'thinking' }));
       } else if (event.agent_id === 'agent:critic:a') {
@@ -237,14 +228,8 @@ export function App() {
       }
     }
     if (event.kind === 'task_status' && event.task_id) {
-      // Update the matching row's state in place. If the task isn't
-      // in the list yet (orchestrator emitted before we fetched
-      // /plan), append a fresh row.
       const newState = event.task_status;
       const summary = event.task_summary;
-      // Build the new row conditionally — exactOptionalPropertyTypes
-      // complains about setting `summary: undefined` on a property
-      // typed `summary?: string`. Omit the key when undefined.
       setTasks((prev) => {
         const idx = prev.findIndex((t) => t.id === event.task_id);
         if (idx >= 0) {
@@ -258,21 +243,9 @@ export function App() {
           }
           return next;
         }
-        // Append a row using the event's task_title as the title.
         const fresh: TaskRow = summary
-          ? {
-              id: event.task_id!,
-              title: event.task_title ?? event.task_id!,
-              owner: '',
-              state: newState,
-              summary,
-            }
-          : {
-              id: event.task_id!,
-              title: event.task_title ?? event.task_id!,
-              owner: '',
-              state: newState,
-            };
+          ? { id: event.task_id!, title: event.task_title ?? event.task_id!, owner: '', state: newState, summary }
+          : { id: event.task_id!, title: event.task_title ?? event.task_id!, owner: '', state: newState };
         return [...prev, fresh];
       });
     }
@@ -290,14 +263,12 @@ export function App() {
     setPhaseStates({ ...PHASE_STATE });
     setAgentStatus({ ...INITIAL_AGENT_STATUS });
 
-    // Open the WebSocket with auto-reconnect
     const cleanupWs = createWebSocket('/api/events/stream', {
       onMessage: (data) => applyEvent(data as WfEvent),
       maxReconnects: 10,
       reconnectDelay: 1000,
     });
 
-    // POST the workflow with retry
     try {
       const data = await postJson<{ id: string }>('/api/workflow', { text, speed: 'fast' }, {
         retries: 3,
@@ -305,7 +276,6 @@ export function App() {
       });
       setCurrentWfId(data.id);
 
-      // Poll for completion
       const done = await pollUntil(
         async () => {
           try {
@@ -363,8 +333,8 @@ export function App() {
             : busy
               ? '运行中…'
               : connected
-                ? '已连接 runtime · 准备就绪'
-                : '未连接 runtime'
+                ? '已连接 · 准备就绪'
+                : '未连接'
         }
         onSettingsClick={() => setSettingsOpen(true)}
       />
@@ -404,7 +374,7 @@ export function App() {
               <div className="mb-2 flex items-center justify-between">
                 <h3 className="text-sm font-semibold">计划图</h3>
                 <span className="text-xs text-text-secondary">
-                  {planNodes.length} 个任务 · 点击节点查看详情
+                  {planNodes.length} 个任务
                 </span>
               </div>
               <PlanGraph
@@ -435,21 +405,19 @@ export function App() {
             </Card>
           )}
 
-          {(
-            <AgentCard
-              role="chief"
-              name="首席代理"
-              status={agentStatusToRole(agentStatus.chief)}
-              subtitle={
-                agentStatus.chief === 'thinking'
-                  ? '沉稳的策略师 · 正在分析'
-                  : agentStatus.chief === 'speaking'
-                    ? '沉稳的策略师 · 正在汇报'
-                    : '沉稳的策略师 · 待命'
-              }
-              progress={0.5}
-            />
-          )}
+          <AgentCard
+            role="chief"
+            name="首席代理"
+            status={agentStatusToRole(agentStatus.chief)}
+            subtitle={
+              agentStatus.chief === 'thinking'
+                ? '沉稳的策略师 · 正在分析'
+                : agentStatus.chief === 'speaking'
+                  ? '沉稳的策略师 · 正在汇报'
+                  : '沉稳的策略师 · 待命'
+            }
+            progress={busy ? 0.5 : undefined}
+          />
 
           <ReasoningBubble
             agentName="首席代理"
