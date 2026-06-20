@@ -23,6 +23,7 @@ ProviderKind = Literal[
     "openai",
     "google",
     "openai_compat",
+    "zhipu",
 ]
 
 
@@ -249,6 +250,62 @@ PROVIDER_PRESETS: tuple[ProviderPreset, ...] = (
             ),
         ),
         notes="Chinese aggregator. Free tier available.",
+    ),
+    ProviderPreset(
+        id="zhipu",
+        display_name="GLM (智谱)",
+        kind="openai_compat",
+        base_url="https://open.bigmodel.cn/api/paas/v4",
+        api_key_env="ZHIPU_API_KEY",
+        default_models=(
+            PresetModel(
+                "glm-4-plus",
+                "GLM-4 Plus",
+                128_000,
+                8_000,
+                0.05,
+                0.05,
+                ("chat", "stream", "tool_call", "json_mode"),
+            ),
+            PresetModel(
+                "glm-4-flash",
+                "GLM-4 Flash",
+                128_000,
+                8_000,
+                0.0,
+                0.0,
+                ("chat", "stream", "tool_call", "json_mode"),
+            ),
+        ),
+        notes="智谱 AI，中文能力强。Flash 免费。",
+    ),
+    ProviderPreset(
+        id="mimo",
+        display_name="MIMO (小米)",
+        kind="openai_compat",
+        base_url="https://token-plan-cn.xiaomimimo.com/v1",
+        api_key_env="MIMO_API_KEY",
+        default_models=(
+            PresetModel(
+                "mimo-v2-pro",
+                "MIMO V2 Pro",
+                128_000,
+                8_000,
+                0.0,
+                0.0,
+                ("chat", "stream", "tool_call", "json_mode"),
+            ),
+            PresetModel(
+                "mimo-v2-flash",
+                "MIMO V2 Flash",
+                128_000,
+                8_000,
+                0.0,
+                0.0,
+                ("chat", "stream", "tool_call", "json_mode"),
+            ),
+        ),
+        notes="小米 MIMO。兼容 OpenAI 和 Anthropic 协议。",
     ),
     ProviderPreset(
         id="openrouter",

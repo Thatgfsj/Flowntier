@@ -4,6 +4,7 @@ import { Card } from '@aco/ui';
 // ── Quick Add AI ─────────────────────────────────────────────────
 
 const QUICK_PROVIDERS = [
+  // ── International ──────────────────────────────────────────
   {
     id: 'openai',
     name: 'OpenAI',
@@ -11,6 +12,7 @@ const QUICK_PROVIDERS = [
     placeholder: 'sk-...',
     description: 'GPT-5, GPT-5 Mini',
     color: '#10a37f',
+    category: 'international',
   },
   {
     id: 'anthropic',
@@ -19,6 +21,7 @@ const QUICK_PROVIDERS = [
     placeholder: 'sk-ant-...',
     description: 'Claude Opus, Sonnet, Haiku',
     color: '#d97706',
+    category: 'international',
   },
   {
     id: 'google',
@@ -27,24 +30,93 @@ const QUICK_PROVIDERS = [
     placeholder: 'AIza...',
     description: 'Gemini 2.5 Pro, Flash',
     color: '#4285f4',
+    category: 'international',
   },
+  // ── Chinese providers ──────────────────────────────────────
   {
     id: 'deepseek',
     name: 'DeepSeek',
     envVar: 'DEEPSEEK_API_KEY',
     placeholder: 'sk-...',
-    description: 'DeepSeek Chat, Reasoner',
+    description: 'DeepSeek Chat, Reasoner (R1)',
     color: '#6366f1',
+    category: 'chinese',
+  },
+  {
+    id: 'minimax',
+    name: 'MiniMax',
+    envVar: 'MINIMAX_API_KEY',
+    placeholder: 'eyJ...',
+    description: 'MiniMax M3, 价格实惠',
+    color: '#f97316',
+    category: 'chinese',
+  },
+  {
+    id: 'kimi',
+    name: 'Kimi (月之暗面)',
+    envVar: 'MOONSHOT_API_KEY',
+    placeholder: 'sk-...',
+    description: 'Kimi K2, 长上下文',
+    color: '#8b5cf6',
+    category: 'chinese',
+  },
+  {
+    id: 'zhipu',
+    name: 'GLM (智谱)',
+    envVar: 'ZHIPU_API_KEY',
+    placeholder: '',
+    description: 'GLM-4, 中文能力强',
+    color: '#059669',
+    category: 'chinese',
+  },
+  {
+    id: 'mimo',
+    name: 'MIMO (小米)',
+    envVar: 'MIMO_API_KEY',
+    placeholder: 'sk-...',
+    description: '小米 MIMO, 兼容 OpenAI/Anthropic',
+    color: '#ff6900',
+    category: 'chinese',
+  },
+  {
+    id: 'siliconflow',
+    name: 'SiliconFlow',
+    envVar: 'SILICONFLOW_API_KEY',
+    placeholder: 'sk-...',
+    description: '硅基流动, 多模型聚合',
+    color: '#0ea5e9',
+    category: 'chinese',
   },
 ];
 
+// ── Custom proxy providers ───────────────────────────────────────
+
+interface CustomProvider {
+  id: string;
+  name: string;
+  protocol: 'openai' | 'anthropic';
+  baseUrl: string;
+  apiKey: string;
+  envVar: string;
+}
+
+const CUSTOM_PROVIDERS_KEY = 'aco_custom_providers';
+
 function QuickAddAI({ onSaved }: { onSaved: () => void }) {
   const [open, setOpen] = useState(false);
+  const [tab, setTab] = useState<'preset' | 'custom'>('preset');
   const [selected, setSelected] = useState<string | null>(null);
   const [apiKey, setApiKey] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+
+  // Custom provider state
+  const [customName, setCustomName] = useState('');
+  const [customProtocol, setCustomProtocol] = useState<'openai' | 'anthropic'>('openai');
+  const [customBaseUrl, setCustomBaseUrl] = useState('');
+  const [customApiKey, setCustomApiKey] = useState('');
+  const [customEnvVar, setCustomEnvVar] = useState('');
 
   const provider = QUICK_PROVIDERS.find((p) => p.id === selected);
 
@@ -83,12 +155,71 @@ function QuickAddAI({ onSaved }: { onSaved: () => void }) {
     }
   };
 
+  const handleCustomSave = async () => {
+    if (!customName.trim() || !customBaseUrl.trim() || !customApiKey.trim()) {
+      setError('请填写所有必填字段');
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      // Generate env var name from provider name
+      const envVar = customEnvVar.trim() ||
+        `ACO_${customName.toUpperCase().replace(/[^A-Z0-9]/g, '_')}_API_KEY`;
+
+      // Save API key to keychain
+      const r = await fetch(
+        `http://127.0.0.1:7317/api/settings/secrets/${envVar}`,
+        {
+          method: 'PUT',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ value: customApiKey.trim() }),
+        }
+      );
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+
+      // Save custom provider config to localStorage
+      const customProviders: CustomProvider[] = JSON.parse(
+        localStorage.getItem(CUSTOM_PROVIDERS_KEY) || '[]'
+      );
+      customProviders.push({
+        id: `custom_${Date.now()}`,
+        name: customName.trim(),
+        protocol: customProtocol,
+        baseUrl: customBaseUrl.trim(),
+        apiKey: '', // Don't store key in localStorage
+        envVar,
+      });
+      localStorage.setItem(CUSTOM_PROVIDERS_KEY, JSON.stringify(customProviders));
+
+      // Re-inject to os.environ
+      await fetch('http://127.0.0.1:7317/api/settings/secrets/seed', {
+        method: 'POST',
+      });
+
+      setSuccess(true);
+      setCustomName('');
+      setCustomBaseUrl('');
+      setCustomApiKey('');
+      setCustomEnvVar('');
+      onSaved();
+      setTimeout(() => {
+        setOpen(false);
+        setSuccess(false);
+      }, 1500);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '保存失败');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   if (!open) {
     return (
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="flex items-center gap-2 rounded-lg border border-chief/30 bg-chief/10 px-4 py-2 text-sm font-medium text-chief transition-colors hover:bg-chief/20"
+        className="flex w-full items-center justify-center gap-2 rounded-lg border border-chief/30 bg-chief/10 px-4 py-2.5 text-sm font-medium text-chief transition-colors hover:bg-chief/20"
       >
         <span className="text-lg">+</span>
         添加 AI 供应商
@@ -99,7 +230,7 @@ function QuickAddAI({ onSaved }: { onSaved: () => void }) {
   return (
     <div className="rounded-lg border border-border bg-surface-1 p-4">
       <div className="mb-3 flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-primary">快速添加 AI</h3>
+        <h3 className="text-sm font-semibold text-primary">添加 AI 供应商</h3>
         <button
           type="button"
           onClick={() => {
@@ -115,69 +246,218 @@ function QuickAddAI({ onSaved }: { onSaved: () => void }) {
         </button>
       </div>
 
-      {/* Provider selection */}
-      <div className="mb-3 grid grid-cols-2 gap-2">
-        {QUICK_PROVIDERS.map((p) => (
-          <button
-            key={p.id}
-            type="button"
-            onClick={() => {
-              setSelected(p.id);
-              setApiKey('');
-              setError(null);
-            }}
-            className={`flex items-center gap-2 rounded-md border p-2.5 text-left transition-colors ${
-              selected === p.id
-                ? 'border-chief bg-surface-2'
-                : 'border-border bg-surface-1 hover:border-text-secondary'
-            }`}
-          >
-            <div
-              className="h-3 w-3 rounded-full"
-              style={{ backgroundColor: p.color }}
-            />
-            <div>
-              <div className="text-xs font-medium">{p.name}</div>
-              <div className="text-[10px] text-text-secondary">{p.description}</div>
-            </div>
-          </button>
-        ))}
+      {/* Tab switcher */}
+      <div className="mb-3 flex rounded-md border border-border bg-surface-2 p-0.5">
+        <button
+          type="button"
+          onClick={() => { setTab('preset'); setError(null); }}
+          className={`flex-1 rounded px-3 py-1.5 text-xs transition-colors ${
+            tab === 'preset' ? 'bg-surface-1 text-primary' : 'text-text-secondary hover:text-primary'
+          }`}
+        >
+          预设供应商
+        </button>
+        <button
+          type="button"
+          onClick={() => { setTab('custom'); setError(null); }}
+          className={`flex-1 rounded px-3 py-1.5 text-xs transition-colors ${
+            tab === 'custom' ? 'bg-surface-1 text-primary' : 'text-text-secondary hover:text-primary'
+          }`}
+        >
+          自定义中转站
+        </button>
       </div>
 
-      {/* API key input */}
-      {provider && (
-        <div className="space-y-2">
-          <label className="block text-xs text-text-secondary">
-            {provider.name} API Key
-            <span className="ml-1 text-[10px] text-text-secondary">
-              ({provider.envVar})
-            </span>
-          </label>
-          <input
-            type="password"
-            value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
-            placeholder={provider.placeholder}
-            className="w-full rounded border border-border bg-surface-2 px-3 py-2 font-mono text-sm placeholder:text-text-secondary focus:border-chief focus:outline-none focus:ring-2 focus:ring-chief/50"
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && apiKey.trim()) {
-                void handleSave();
+      {tab === 'preset' ? (
+        <>
+          {/* Preset provider selection */}
+          <div className="mb-3 max-h-[300px] overflow-y-auto">
+            <div className="grid grid-cols-2 gap-2">
+              {QUICK_PROVIDERS.map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => {
+                    setSelected(p.id);
+                    setApiKey('');
+                    setError(null);
+                  }}
+                  className={`flex items-center gap-2 rounded-md border p-2.5 text-left transition-colors ${
+                    selected === p.id
+                      ? 'border-chief bg-surface-2'
+                      : 'border-border bg-surface-1 hover:border-text-secondary'
+                  }`}
+                >
+                  <div
+                    className="h-3 w-3 shrink-0 rounded-full"
+                    style={{ backgroundColor: p.color }}
+                  />
+                  <div className="min-w-0">
+                    <div className="text-xs font-medium">{p.name}</div>
+                    <div className="truncate text-[10px] text-text-secondary">{p.description}</div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* API key input */}
+          {provider && (
+            <div className="space-y-2">
+              <label className="block text-xs text-text-secondary">
+                {provider.name} API Key
+                <span className="ml-1 text-[10px] text-text-secondary">
+                  → {provider.envVar}
+                </span>
+              </label>
+              <input
+                type="password"
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                placeholder={provider.placeholder}
+                className="w-full rounded border border-border bg-surface-2 px-3 py-2 font-mono text-sm placeholder:text-text-secondary focus:border-chief focus:outline-none focus:ring-2 focus:ring-chief/50"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && apiKey.trim()) {
+                    void handleSave();
+                  }
+                }}
+              />
+              {provider.id === 'mimo' && (
+                <div className="rounded bg-surface-2 p-2 text-[10px] text-text-secondary">
+                  <p className="mb-1 font-medium">MIMO 接口地址：</p>
+                  <p>OpenAI: <code className="font-mono">https://token-plan-cn.xiaomimimo.com/v1</code></p>
+                  <p>Anthropic: <code className="font-mono">https://token-plan-cn.xiaomimimo.com/anthropic</code></p>
+                </div>
+              )}
+              {error && (
+                <p className="text-xs text-status-failed">{error}</p>
+              )}
+              {success && (
+                <p className="text-xs text-status-done">✓ 已保存并激活</p>
+              )}
+              <button
+                type="button"
+                onClick={handleSave}
+                disabled={busy || !apiKey.trim()}
+                className="w-full rounded bg-chief px-3 py-2 text-sm font-medium text-white hover:bg-chief/90 disabled:opacity-50"
+              >
+                {busy ? '保存中...' : `保存 ${provider.name} API Key`}
+              </button>
+            </div>
+          )}
+        </>
+      ) : (
+        /* Custom proxy provider */
+        <div className="space-y-3">
+          <div>
+            <label className="mb-1 block text-xs text-text-secondary">
+              供应商名称 <span className="text-status-failed">*</span>
+            </label>
+            <input
+              type="text"
+              value={customName}
+              onChange={(e) => setCustomName(e.target.value)}
+              placeholder="我的中转站"
+              className="w-full rounded border border-border bg-surface-2 px-3 py-2 text-sm placeholder:text-text-secondary focus:border-chief focus:outline-none focus:ring-2 focus:ring-chief/50"
+            />
+          </div>
+
+          <div>
+            <label className="mb-1 block text-xs text-text-secondary">
+              接口协议 <span className="text-status-failed">*</span>
+            </label>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setCustomProtocol('openai')}
+                className={`flex-1 rounded-md border px-3 py-2 text-xs transition-colors ${
+                  customProtocol === 'openai'
+                    ? 'border-chief bg-surface-2'
+                    : 'border-border bg-surface-1 hover:border-text-secondary'
+                }`}
+              >
+                OpenAI 兼容
+                <div className="text-[10px] text-text-secondary">/v1/chat/completions</div>
+              </button>
+              <button
+                type="button"
+                onClick={() => setCustomProtocol('anthropic')}
+                className={`flex-1 rounded-md border px-3 py-2 text-xs transition-colors ${
+                  customProtocol === 'anthropic'
+                    ? 'border-chief bg-surface-2'
+                    : 'border-border bg-surface-1 hover:border-text-secondary'
+                }`}
+              >
+                Anthropic 兼容
+                <div className="text-[10px] text-text-secondary">/v1/messages</div>
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <label className="mb-1 block text-xs text-text-secondary">
+              Base URL <span className="text-status-failed">*</span>
+            </label>
+            <input
+              type="text"
+              value={customBaseUrl}
+              onChange={(e) => setCustomBaseUrl(e.target.value)}
+              placeholder={
+                customProtocol === 'openai'
+                  ? 'https://api.example.com/v1'
+                  : 'https://api.example.com'
               }
-            }}
-          />
+              className="w-full rounded border border-border bg-surface-2 px-3 py-2 font-mono text-sm placeholder:text-text-secondary focus:border-chief focus:outline-none focus:ring-2 focus:ring-chief/50"
+            />
+            <div className="mt-1 text-[10px] text-text-secondary">
+              {customProtocol === 'openai' ? (
+                <>示例：MIMO OpenAI → <code className="font-mono">https://token-plan-cn.xiaomimimo.com/v1</code></>
+              ) : (
+                <>示例：MIMO Anthropic → <code className="font-mono">https://token-plan-cn.xiaomimimo.com/anthropic</code></>
+              )}
+            </div>
+          </div>
+
+          <div>
+            <label className="mb-1 block text-xs text-text-secondary">
+              API Key <span className="text-status-failed">*</span>
+            </label>
+            <input
+              type="password"
+              value={customApiKey}
+              onChange={(e) => setCustomApiKey(e.target.value)}
+              placeholder="sk-..."
+              className="w-full rounded border border-border bg-surface-2 px-3 py-2 font-mono text-sm placeholder:text-text-secondary focus:border-chief focus:outline-none focus:ring-2 focus:ring-chief/50"
+            />
+          </div>
+
+          <div>
+            <label className="mb-1 block text-xs text-text-secondary">
+              环境变量名（可选，自动生成）
+            </label>
+            <input
+              type="text"
+              value={customEnvVar}
+              onChange={(e) => setCustomEnvVar(e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, '_'))}
+              placeholder={customName ? `ACO_${customName.toUpperCase().replace(/[^A-Z0-9]/g, '_')}_API_KEY` : 'ACO_MY_PROXY_API_KEY'}
+              className="w-full rounded border border-border bg-surface-2 px-3 py-2 font-mono text-sm placeholder:text-text-secondary focus:border-chief focus:outline-none focus:ring-2 focus:ring-chief/50"
+            />
+          </div>
+
           {error && (
             <p className="text-xs text-status-failed">{error}</p>
           )}
           {success && (
             <p className="text-xs text-status-done">✓ 已保存并激活</p>
           )}
+
           <button
             type="button"
-            onClick={handleSave}
-            disabled={busy || !apiKey.trim()}
+            onClick={handleCustomSave}
+            disabled={busy || !customName.trim() || !customBaseUrl.trim() || !customApiKey.trim()}
             className="w-full rounded bg-chief px-3 py-2 text-sm font-medium text-white hover:bg-chief/90 disabled:opacity-50"
           >
-            {busy ? '保存中...' : `保存 ${provider.name} API Key`}
+            {busy ? '保存中...' : '保存自定义供应商'}
           </button>
         </div>
       )}
