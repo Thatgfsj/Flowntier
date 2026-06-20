@@ -541,7 +541,7 @@ export function App() {
           className="w-[360px] shrink-0 overflow-y-auto border-l border-border bg-surface-2 p-3"
           aria-label="任务面板"
         >
-          <RightPanel tasks={tasks} />
+          <RightPanel tasks={tasks} events={events} />
           <div className="mt-3">
             <PluginsPanel />
           </div>
