@@ -24,6 +24,7 @@ Simplifications for v0.2 (per the iterative plan):
 from __future__ import annotations
 
 import asyncio
+import os
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -38,6 +39,7 @@ from aco_runtime_lib.agents import (
     ReporterAgent,
     WorkerAgent,
 )
+from aco_runtime_lib.agents.worker_v2 import WorkerAgentV2
 from aco_runtime_lib.event_bus import EventBus, WfEvent
 from aco_runtime_lib.providers.router import ModelRouter
 
@@ -170,7 +172,8 @@ class WorkflowOrchestrator:
             router_role="critic_b",
             system_prompt=CRITIC_SYSTEM,
         )
-        self.worker = WorkerAgent(router=router)
+        # Use WorkerAgentV2 that actually writes files and executes code
+        self.worker = WorkerAgentV2(router=router, work_dir=os.getcwd())
         self.reporter = ReporterAgent()
         self.final_reviewer = FinalReviewerAgent()
 
