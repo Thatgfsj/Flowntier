@@ -1,0 +1,167 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # ── Build Python runtime sidecar ──────────────────────────────
+  build-runtime:
+    name: Build Python runtime (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            ext: .exe
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            ext: ''
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            ext: ''
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          pip install pyinstaller
+          pip install -e runtime
+          pip install -e apps/runtime
+
+      - name: Build sidecar
+        run: |
+          cd apps/runtime
+          pyinstaller aco_runtime.spec --noconfirm
+
+      - name: Rename binary
+        shell: bash
+        run: |
+          cd apps/runtime/dist
+          mv aco_runtime${{ matrix.ext }} aco_runtime-${{ matrix.target }}${{ matrix.ext }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-${{ matrix.target }}
+          path: apps/runtime/dist/aco_runtime-${{ matrix.target }}${{ matrix.ext }}
+
+  # ── Build Tauri desktop app ───────────────────────────────────
+  build-desktop:
+    name: Build desktop (${{ matrix.os }})
+    needs: build-runtime
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: macos-latest
+            target: aarch64-apple-darwin
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri -> target
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Download runtime artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: runtime-${{ matrix.target }}
+          path: apps/desktop/src-tauri/binaries
+
+      - name: Rename runtime binary (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          cd apps/desktop/src-tauri/binaries
+          chmod +x aco_runtime-${{ matrix.target }}
+          cp aco_runtime-${{ matrix.target }} aco_runtime
+
+      - name: Rename runtime binary (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          cd apps/desktop/src-tauri/binaries
+          cp aco_runtime-${{ matrix.target }}.exe aco_runtime.exe
+          cp aco_runtime-${{ matrix.target }}.exe aco_runtime-${{ matrix.target }}.exe
+
+      - name: Build Tauri app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'Agent Company OS ${{ github.ref_name }}'
+          releaseBody: |
+            See the assets to download and install.
+          releaseDraft: true
+          prerelease: false
+
+  # ── Create release ────────────────────────────────────────────
+  create-release:
+    name: Create Release
+    needs: build-desktop
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: 'Agent Company OS ${{ github.ref_name }}'
+          body: |
+            ## Installation
+
+            ### Windows
+            Download and run the `.exe` installer. No Python installation required.
+
+            ### macOS
+            Download and open the `.dmg` file.
+
+            ### Linux
+            Download and install the `.deb` or `.AppImage` file.
+
+            ## Runtime Requirements
+            - Windows 10/11 x64
+            - macOS 11+
+            - Ubuntu 20.04+ / Debian 10+
+          draft: true
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
