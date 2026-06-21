@@ -1,6 +1,6 @@
 [project]
 name        = "aco-runtime"
-0.2.3
+version     = "0.2.5"
 description = "Python AI runtime sidecar for Agent Company OS (FastAPI + uvicorn)"
 readme      = "README.md"
 license     = { text = "MIT" }
@@ -16,9 +16,13 @@ dependencies = [
     "loguru>=0.7.0",
     "tenacity>=9.0.0",
     "rich>=13.9.0",
-    "websockets>=13.0",
     "asyncio-throttle>=1.0.2",
     "aco-runtime-lib",  # sibling workspace member `runtime/`
+    # Windows named-pipe RPC + server-push events transport between the
+    # Tauri shell and this runtime. Required on Windows; on macOS/Linux
+    # the import is harmless (the Tauri shell only uses pipes on
+    # Windows for now) but kept declared so the lockfile is consistent.
+    "pywin32>=306; sys_platform == 'win32'",
 ]
 
 [project.scripts]

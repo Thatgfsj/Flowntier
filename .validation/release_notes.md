@@ -43,7 +43,7 @@ NSIS is recommended for individual users (smaller, faster install). MSI is suita
 
 ## Deferred
 
-- 24 pre-existing TypeScript strict-mode errors in `apps/desktop/src/simulator.ts`, `apps/desktop/src/zones/*.tsx`, and `packages/ui/src/hooks/useEventStream.ts`. Not in the release path. Tracked as 0.2.3 cleanup.
+- 24 pre-existing TypeScript strict-mode errors in `apps/desktop/src/simulator.ts`, `apps/desktop/src/zones/*.tsx`, and `packages/ui/src/hooks/useEventStream.ts`. Not in the release path. Tracked as 0.2.5 cleanup.
 - `bus.publish` monkey-patch leak (latent; masked by workflow serialization lock). Tracked as 0.3 refactor.
 - `/api/settings/secrets/{name}/reveal` requires no auth (loopback-only; should add Origin check before public exposure). Tracked as 0.3.
 

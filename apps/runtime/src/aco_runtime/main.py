@@ -2,13 +2,18 @@
 
 This process is launched by the Tauri shell (`tauri-plugin-shell`)
 and communicates with the desktop app via:
-  - HTTP for RPC (workflow start, plugin calls)
-  - WebSocket for streaming events (workflow transitions, console)
-  - JSON-RPC 2.0 over stdio for plugin IPC (the Tauri sidecar manages
-    this for builtin plugins).
+  - Windows named pipe `\\\\.\\pipe\\aco_runtime` for JSON-RPC 2.0 RPC
+    (workflow start, secrets, plugin calls, etc.)
+  - Windows named pipe `\\\\.\\pipe\\aco_runtime_events` for streaming
+    events (workflow transitions, console output)
+
+The FastAPI/uvicorn HTTP server is **kept** as an in-process dispatcher
+only — it never binds a socket. The pipe server re-uses the existing
+ASGI route table via `app(scope, receive, send)`, so all route
+definitions, validation, and error shapes are unchanged from v0.2.3.
 
 The actual workflow engine lives in the `runtime/` workspace member
-(`runtime/workflow/...`). This file is the **thin** HTTP shell.
+(`runtime/workflow/...`). This file is the **thin** transport shell.
 """
 
 from __future__ import annotations
@@ -22,7 +27,6 @@ from typing import AsyncIterator
 
 import uvicorn
 from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 
 from aco_runtime_lib import EventBus
@@ -104,30 +108,21 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(
     title="Agent Company OS — Python Runtime",
-    version="0.2.3",
+    version="0.2.5",
     lifespan=lifespan,
 )
 
-# CORS: the Vite dev server runs on 127.0.0.1:1420, so we allow
-# requests from any localhost origin (browser dev mode only).
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "http://127.0.0.1:1420",
-        "http://localhost:1420",
-        "tauri://localhost",
-        "https://tauri.localhost",
-    ],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# No CORS middleware in v0.2.5+: the runtime no longer accepts any
+# browser/origin-based HTTP requests. All RPC and event streaming
+# travels over local Windows named pipes that only the Tauri shell
+# can reach. The FastAPI app exists purely as an ASGI dispatcher
+# that the pipe server invokes in-process.
 
 
 @app.get("/health", response_model=HealthResponse)
 async def health() -> HealthResponse:
     """Liveness check; Tauri polls this on startup."""
-    return HealthResponse(status="ok", version="0.2.3")
+    return HealthResponse(status="ok", version="0.2.5")
 
 
 @app.get("/api/state")
@@ -166,9 +161,10 @@ app.include_router(plugins_module.router, prefix="/api/plugins", tags=["plugins"
 
 
 def main() -> None:
-    """Run uvicorn. Defaults to 127.0.0.1:7317 to avoid clashes."""
-    host = os.environ.get("ACO_RUNTIME_HOST", "127.0.0.1")
-    port = int(os.environ.get("ACO_RUNTIME_PORT", "7317"))
+    """Start the pipe server. The HTTP/uvicorn path is kept importable
+    for unit tests and local dev (curl-based debugging) but is no longer
+    the primary transport. To force HTTP mode, set ACO_RUNTIME_HTTP=1."""
+    force_http = os.environ.get("ACO_RUNTIME_HTTP") == "1"
 
     def _signal_handler(signum: int, _frame: object) -> None:
         logger.info("received signal {}", signum)
@@ -177,14 +173,38 @@ def main() -> None:
     signal.signal(signal.SIGINT, _signal_handler)
     signal.signal(signal.SIGTERM, _signal_handler)
 
-    uvicorn.run(
-        "aco_runtime.main:app",
-        host=host,
-        port=port,
-        log_level="info",
-        access_log=False,
-        reload=False,
-    )
+    if force_http:
+        host = os.environ.get("ACO_RUNTIME_HOST", "127.0.0.1")
+        port = int(os.environ.get("ACO_RUNTIME_PORT", "7317"))
+        logger.warning(
+            "ACO_RUNTIME_HTTP=1 → starting uvicorn on {}:{} (debug only)",
+            host,
+            port,
+        )
+        uvicorn.run(
+            "aco_runtime.main:app",
+            host=host,
+            port=port,
+            log_level="info",
+            access_log=False,
+            reload=False,
+        )
+        return
+
+    # Primary: Windows named pipe transport.
+    if sys.platform != "win32":
+        logger.error(
+            "aco_runtime pipe transport is Windows-only; "
+            "set ACO_RUNTIME_HTTP=1 to fall back to uvicorn."
+        )
+        sys.exit(2)
+
+    from . import pipe_server
+
+    async def _run() -> None:
+        await pipe_server.serve(app, state.bus)
+
+    asyncio.run(_run())
 
 
 if __name__ == "__main__":

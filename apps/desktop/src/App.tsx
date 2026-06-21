@@ -11,6 +11,7 @@ import { PluginsPanel } from './zones/PluginsPanel.js';
 import { ReasoningBubble } from '@aco/ui';
 import { ReviewVerdict } from '@aco/ui';
 import { PlanGraph, type PlanTaskNode, type PlanEdge } from './components/PlanGraph.js';
+import { useEventStream } from './hooks/useEventStream.js';
 import { invoke } from '@tauri-apps/api/core';
 
 interface Phase {
@@ -98,8 +99,17 @@ export function App() {
   const [planEdges, setPlanEdges] = useState<PlanEdge[]>([]);
   const [selectedTask, setSelectedTask] = useState<string | null>(null);
   const [showPlanGraph, setShowPlanGraph] = useState(false);
-  const wsRef = useRef<WebSocket | null>(null);
   const busyRef = useRef(false);
+
+  // Subscribe to the runtime's WfEvent stream. v0.2.5+ delivers events
+  // over the `\\.\pipe\aco_runtime_events` named pipe → Rust → Tauri
+  // `wf:event` broadcast. No more raw WebSocket from the webview.
+  const runtimeEvents = useEventStream();
+  useEffect(() => {
+    if (runtimeEvents.length === 0) return;
+    const latest = runtimeEvents[runtimeEvents.length - 1];
+    if (latest) applyEvent(latest as WfEvent);
+  }, [runtimeEvents]);
 
   // Expose for screenshot / debug scripts.
   useEffect(() => {
@@ -127,10 +137,6 @@ export function App() {
   }, [currentWfId]);
 
   const reset = () => {
-    if (wsRef.current) {
-      wsRef.current.close();
-      wsRef.current = null;
-    }
     setActivePhase(0);
     setPhaseStates({ ...PHASE_STATE });
     setTasks([]);
@@ -214,16 +220,8 @@ export function App() {
     setPhaseStates({ ...PHASE_STATE });
     setAgentStatus({ ...INITIAL_AGENT_STATUS });
 
-    // Connect WebSocket for events (still uses direct WS, not HTTP)
-    const ws = new WebSocket('ws://127.0.0.1:7317/api/events/stream');
-    wsRef.current = ws;
-    ws.onmessage = (ev) => {
-      try {
-        const data = JSON.parse(ev.data);
-        if (data.kind !== 'heartbeat') applyEvent(data as WfEvent);
-      } catch { /* ignore */ }
-    };
-
+    // Events arrive via the useEventStream() hook above (Tauri
+    // `wf:event` events forwarded from the events named pipe).
     try {
       // Use Tauri invoke to start workflow
       const data = await invoke<{ id: string }>('start_workflow_cmd', { text });
@@ -255,7 +253,6 @@ export function App() {
       busyRef.current = false;
       setBusy(false);
       setCompleted(true);
-      ws.close();
     }
   };
 
@@ -268,12 +265,6 @@ export function App() {
     setCmd('');
     void startRealWorkflow(text);
   };
-
-  useEffect(() => {
-    return () => {
-      wsRef.current?.close();
-    };
-  }, []);
 
   return (
     <div className="flex h-screen flex-col">

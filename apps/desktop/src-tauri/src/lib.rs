@@ -1,24 +1,111 @@
 //! Tauri app glue for the desktop shell.
 //!
-//! Architecture: React → invoke() → Rust → HTTP → Python Runtime
-//! Frontend NEVER touches HTTP directly. All API calls go through Tauri commands.
+//! Architecture: React → invoke() → Rust → Windows named pipe → Python Runtime
+//! Frontend NEVER touches HTTP. The webview loads the dev server URL only.
+//! There is no `127.0.0.1:7317` HTTP server anymore — all RPC and event
+//! streaming travel over `\\.\pipe\aco_runtime` (RPC) and
+//! `\\.\pipe\aco_runtime_events` (server-push events).
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
+
 use tauri::Manager;
+use tauri::Emitter;
 use tauri_plugin_shell::ShellExt;
 use tauri_core::{start_workflow, AppState, NewWorkflowRequest, NewWorkflowResponse};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::windows::named_pipe::ClientOptions;
 
-const RUNTIME_URL: &str = "http://127.0.0.1:7317";
+const RPC_PIPE: &str = r"\\.\pipe\aco_runtime";
+const EVENTS_PIPE: &str = r"\\.\pipe\aco_runtime_events";
+
+static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+const MAX_LINE: usize = 1_048_576; // 1 MiB hard cap per pipe message
+
+// ── Pipe RPC client ─────────────────────────────────────────────
+
+/// One connection = one request-response. Reconnects on the next call.
+///
+/// Wire format (newline-delimited JSON):
+///   request  = `{"jsonrpc":"2.0","id":N,"method":VERB,"params":{"path":...,"body":...}}\n`
+///   response = `{"jsonrpc":"2.0","id":N,"result":{"status":S,"body":B}}`  or
+///              `{"jsonrpc":"2.0","id":N,"error":{"code":-32603,"message":"..."}}\n`
+async fn pipe_request(
+    method: &str,
+    path: &str,
+    body: Option<serde_json::Value>,
+) -> Result<serde_json::Value, String> {
+    let mut conn = ClientOptions::new()
+        .open(RPC_PIPE)
+        .map_err(|e| format!("pipe open {RPC_PIPE}: {e}"))?;
+
+    let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+    let req = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "method": method,
+        "params": {"path": path, "body": body}
+    });
+    let mut line = serde_json::to_vec(&req).map_err(|e| e.to_string())?;
+    line.push(b'\n');
+    conn.write_all(&line)
+        .await
+        .map_err(|e| format!("pipe write: {e}"))?;
+
+    let mut buf = Vec::with_capacity(4096);
+    let mut byte = [0u8; 1];
+    loop {
+        conn.read_exact(&mut byte)
+            .await
+            .map_err(|e| format!("pipe read: {e}"))?;
+        if byte[0] == b'\n' {
+            break;
+        }
+        if buf.len() >= MAX_LINE {
+            return Err(format!("pipe response exceeds {MAX_LINE} bytes"));
+        }
+        buf.push(byte[0]);
+    }
+
+    let resp: serde_json::Value =
+        serde_json::from_slice(&buf).map_err(|e| format!("pipe bad json: {e}"))?;
+
+    if let Some(err) = resp.get("error") {
+        return Err(err
+            .get("message")
+            .and_then(|m| m.as_str())
+            .unwrap_or("pipe error")
+            .to_string());
+    }
+    let status = resp
+        .pointer("/result/status")
+        .and_then(|s| s.as_u64())
+        .unwrap_or(0);
+    if !(200..300).contains(&status) {
+        // Non-2xx body is wrapped into a string so the caller can show it
+        // (e.g. "HTTP 422: {detail: '...'}").
+        let body = resp
+            .pointer("/result/body")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
+        return Err(format!("HTTP {status}: {body}"));
+    }
+    Ok(resp
+        .pointer("/result/body")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null))
+}
 
 // ── Sidecar management ──────────────────────────────────────────
 
 fn spawn_runtime_sidecar(app: &tauri::AppHandle) {
-    use std::time::{Duration, Instant};
-    const HEALTH_URL: &str = "http://127.0.0.1:7317/health";
+    use tauri_plugin_shell::process::CommandEvent;
 
-    // Kill stale processes
+    // Kill any stale aco_runtime.exe from a previous session. Pipes are
+    // exclusive, so a dead binary that left the pipe handle open would
+    // block the new instance.
     #[cfg(target_os = "windows")]
     {
         let _ = std::process::Command::new("taskkill")
@@ -29,150 +116,150 @@ fn spawn_runtime_sidecar(app: &tauri::AppHandle) {
         std::thread::sleep(Duration::from_millis(1000));
     }
 
-    // Already up?
-    if ureq_get_status(HEALTH_URL, Duration::from_millis(500)).is_some() {
+    // Already up? Probe the RPC pipe.
+    if try_ping_pipe().is_ok() {
         println!("[aco] runtime already running");
-        return;
+    } else {
+        println!("[aco] spawning sidecar...");
+        let sidecar_command = match app.shell().sidecar("aco_runtime") {
+            Ok(cmd) => cmd,
+            Err(e) => {
+                eprintln!("[aco] failed to create sidecar: {}", e);
+                return;
+            }
+        };
+
+        match sidecar_command.spawn() {
+            Ok((mut rx, child)) => {
+                println!("[aco] sidecar pid={:?}", child.pid());
+                tauri::async_runtime::spawn(async move {
+                    while let Some(event) = rx.recv().await {
+                        match event {
+                            CommandEvent::Stdout(line) => {
+                                println!("[sidecar] {}", String::from_utf8_lossy(&line));
+                            }
+                            CommandEvent::Stderr(line) => {
+                                eprintln!("[sidecar:err] {}", String::from_utf8_lossy(&line));
+                            }
+                            CommandEvent::Terminated(status) => {
+                                eprintln!("[sidecar] terminated: {:?}", status);
+                                break;
+                            }
+                            _ => {}
+                        }
+                    }
+                });
+
+                // Wait until the sidecar is listening on the pipe.
+                let deadline = std::time::Instant::now() + Duration::from_secs(30);
+                while std::time::Instant::now() < deadline {
+                    if try_ping_pipe().is_ok() {
+                        println!("[aco] sidecar healthy!");
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(500));
+                }
+            }
+            Err(e) => {
+                eprintln!("[aco] failed to spawn: {}", e);
+                return;
+            }
+        }
     }
 
-    println!("[aco] spawning sidecar...");
-    let sidecar_command = match app.shell().sidecar("aco_runtime") {
-        Ok(cmd) => cmd,
-        Err(e) => {
-            eprintln!("[aco] failed to create sidecar: {}", e);
-            return;
-        }
-    };
+    // Start the event stream bridge: connect to the events pipe and
+    // forward every WfEvent to the webview via `app.emit("wf:event", …)`.
+    let app_handle = app.clone();
+    tauri::async_runtime::spawn(async move {
+        events_bridge(app_handle).await;
+    });
+}
 
-    match sidecar_command.spawn() {
-        Ok((mut rx, child)) => {
-            println!("[aco] sidecar pid={:?}", child.pid());
-            tauri::async_runtime::spawn(async move {
-                use tauri_plugin_shell::process::CommandEvent;
-                while let Some(event) = rx.recv().await {
-                    match event {
-                        CommandEvent::Stdout(line) => {
-                            println!("[sidecar] {}", String::from_utf8_lossy(&line));
+fn try_ping_pipe() -> Result<(), String> {
+    // A blocking probe — we don't care about the response, just whether
+    // the kernel will hand us a handle.
+    let opts = ClientOptions::new();
+    opts.open(RPC_PIPE).map(|_| ()).map_err(|e| e.to_string())
+}
+
+async fn events_bridge(app: tauri::AppHandle) {
+    let mut backoff_ms = 200u64;
+    loop {
+        match ClientOptions::new().open(EVENTS_PIPE) {
+            Ok(mut conn) => {
+                backoff_ms = 200;
+                let mut buf = Vec::new();
+                let mut byte = [0u8; 1];
+                loop {
+                    match conn.read_exact(&mut byte).await {
+                        Ok(_) => {
+                            if byte[0] == b'\n' {
+                                if buf.is_empty() {
+                                    continue;
+                                }
+                                if let Ok(v) =
+                                    serde_json::from_slice::<serde_json::Value>(&buf)
+                                {
+                                    if let Some(ev) = v.get("event") {
+                                        if let Err(e) = app.emit("wf:event", ev.clone()) {
+                                            eprintln!("[aco] emit wf:event failed: {e}");
+                                        }
+                                    }
+                                }
+                                buf.clear();
+                            } else if buf.len() < MAX_LINE {
+                                buf.push(byte[0]);
+                            }
                         }
-                        CommandEvent::Stderr(line) => {
-                            eprintln!("[sidecar:err] {}", String::from_utf8_lossy(&line));
-                        }
-                        CommandEvent::Terminated(status) => {
-                            eprintln!("[sidecar] terminated: {:?}", status);
+                        Err(e) => {
+                            eprintln!("[aco] events pipe read err: {e}; reconnecting");
                             break;
                         }
-                        _ => {}
                     }
                 }
-            });
-
-            // Wait for health
-            let deadline = Instant::now() + Duration::from_secs(30);
-            while Instant::now() < deadline {
-                if ureq_get_status(HEALTH_URL, Duration::from_millis(500)).is_some() {
-                    println!("[aco] sidecar healthy!");
-                    return;
-                }
-                std::thread::sleep(Duration::from_millis(500));
             }
-            eprintln!("[aco] sidecar timeout");
-        }
-        Err(e) => {
-            eprintln!("[aco] failed to spawn: {}", e);
+            Err(e) => {
+                eprintln!("[aco] events pipe open err: {e}; retry in {backoff_ms}ms");
+                tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
+                backoff_ms = (backoff_ms * 2).min(5_000);
+            }
         }
     }
-}
-
-fn ureq_get_status(url: &str, timeout: std::time::Duration) -> Option<u16> {
-    use std::io::{Read, Write};
-    use std::net::{SocketAddr, TcpStream};
-    let url = url.strip_prefix("http://")?;
-    let (host_port, path) = match url.split_once('/') {
-        Some((hp, rest)) => (hp, format!("/{}", rest)),
-        None => (url, "/".to_string()),
-    };
-    let (host, port) = match host_port.rsplit_once(':') {
-        Some((h, p)) => (h, p),
-        None => return None,
-    };
-    let port: u16 = port.parse().ok()?;
-    let addr: SocketAddr = format!("{}:{}", host, port).parse().ok()?;
-    let mut stream = TcpStream::connect_timeout(&addr, timeout).ok()?;
-    stream.set_read_timeout(Some(timeout)).ok()?;
-    stream.set_write_timeout(Some(timeout)).ok()?;
-    let req = format!("GET {} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n\r\n", path, host_port);
-    stream.write_all(req.as_bytes()).ok()?;
-    let mut buf = [0u8; 64];
-    let n = stream.read(&mut buf).ok()?;
-    let header = std::str::from_utf8(&buf[..n.min(32)]).ok()?;
-    let mut parts = header.split_whitespace();
-    let _ = parts.next()?;
-    parts.next()?.parse().ok()
-}
-
-// ── HTTP helper (Rust → Python) ─────────────────────────────────
-
-fn runtime_get(path: &str) -> Result<serde_json::Value, String> {
-    let url = format!("{}{}", RUNTIME_URL, path);
-    let resp = reqwest::blocking::get(&url).map_err(|e| e.to_string())?;
-    resp.json().map_err(|e| e.to_string())
-}
-
-fn runtime_post(path: &str, body: serde_json::Value) -> Result<serde_json::Value, String> {
-    let url = format!("{}{}", RUNTIME_URL, path);
-    let client = reqwest::blocking::Client::new();
-    let resp = client.post(&url).json(&body).send().map_err(|e| e.to_string())?;
-    resp.json().map_err(|e| e.to_string())
-}
-
-fn runtime_put(path: &str, body: serde_json::Value) -> Result<u16, String> {
-    let url = format!("{}{}", RUNTIME_URL, path);
-    let client = reqwest::blocking::Client::new();
-    let resp = client.put(&url).json(&body).send().map_err(|e| e.to_string())?;
-    Ok(resp.status().as_u16())
-}
-
-fn runtime_delete(path: &str) -> Result<u16, String> {
-    let url = format!("{}{}", RUNTIME_URL, path);
-    let client = reqwest::blocking::Client::new();
-    let resp = client.delete(&url).send().map_err(|e| e.to_string())?;
-    Ok(resp.status().as_u16())
 }
 
 // ── Tauri commands (React → Rust) ───────────────────────────────
 
 #[tauri::command]
-fn health_check() -> Result<bool, String> {
-    match ureq_get_status(&format!("{}/health", RUNTIME_URL), std::time::Duration::from_millis(2000)) {
-        Some(200) => Ok(true),
-        _ => Ok(false),
-    }
+async fn health_check() -> Result<bool, String> {
+    Ok(pipe_request("GET", "/health", None).await.is_ok())
 }
 
 #[tauri::command]
-fn list_secrets() -> Result<serde_json::Value, String> {
-    runtime_get("/api/settings/secrets")
+async fn list_secrets() -> Result<serde_json::Value, String> {
+    pipe_request("GET", "/api/settings/secrets", None).await
 }
 
 #[tauri::command]
-fn save_secret(name: String, value: String) -> Result<serde_json::Value, String> {
+async fn save_secret(name: String, value: String) -> Result<serde_json::Value, String> {
     // 1) Persist to keychain via runtime.
-    let status = runtime_put(
+    pipe_request(
+        "PUT",
         &format!("/api/settings/secrets/{}", name),
-        serde_json::json!({ "value": value }),
-    )?;
-    if !(200..300).contains(&status) {
-        return Err(format!("save failed: HTTP {}", status));
-    }
+        Some(serde_json::json!({ "value": value })),
+    )
+    .await?;
 
-    // 2) Best-effort seed to os.environ. If the seed POST fails for any
-    //    reason (transient, 422 from pydantic, network blip), we MUST NOT
-    //    roll back the persisted key — the keychain write already succeeded.
-    //    Surface the warning to the UI so the user can retry "Re-inject".
-    let warning: Option<String> = match runtime_post(
+    // 2) Best-effort seed to os.environ. The keychain write already
+    //    succeeded; we MUST NOT fail the user-visible save on a seed
+    //    hiccup. Surface the warning so the UI can show "saved, but
+    //    click Re-inject to retry the seed".
+    let warning: Option<String> = match pipe_request(
+        "POST",
         "/api/settings/secrets/seed",
-        serde_json::json!({}),
-    ) {
+        Some(serde_json::json!({})),
+    )
+    .await
+    {
         Ok(_) => None,
         Err(e) => {
             eprintln!("[save_secret] seed post failed (non-fatal): {}", e);
@@ -187,75 +274,109 @@ fn save_secret(name: String, value: String) -> Result<serde_json::Value, String>
 }
 
 #[tauri::command]
-fn delete_secret(name: String) -> Result<(), String> {
-    let status = runtime_delete(&format!("/api/settings/secrets/{}", name))?;
-    if status >= 200 && status < 300 || status == 404 {
-        Ok(())
-    } else {
-        Err(format!("HTTP {}", status))
+async fn delete_secret(name: String) -> Result<(), String> {
+    // The runtime returns 204 on success and 404 when the key was never
+    // set; both are treated as success from the UI's perspective.
+    match pipe_request(
+        "DELETE",
+        &format!("/api/settings/secrets/{}", name),
+        None,
+    )
+    .await
+    {
+        Ok(_) => Ok(()),
+        Err(e) if e.contains("HTTP 404") => Ok(()),
+        Err(e) => Err(e),
     }
 }
 
 #[tauri::command]
-fn reveal_secret(name: String) -> Result<String, String> {
-    let data = runtime_post(
+async fn reveal_secret(name: String) -> Result<String, String> {
+    let data = pipe_request(
+        "POST",
         &format!("/api/settings/secrets/{}/reveal", name),
-        serde_json::json!(null),
-    )?;
-    data["value"].as_str().map(|s| s.to_string()).ok_or_else(|| "no value".to_string())
+        None,
+    )
+    .await?;
+    data["value"]
+        .as_str()
+        .map(|s| s.to_string())
+        .ok_or_else(|| "no value".to_string())
 }
 
 #[tauri::command]
-fn seed_secrets() -> Result<Vec<String>, String> {
-    let data = runtime_post("/api/settings/secrets/seed", serde_json::json!(null))?;
-    let seeded = data["seeded"].as_array()
-        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+async fn seed_secrets() -> Result<Vec<String>, String> {
+    let data = pipe_request(
+        "POST",
+        "/api/settings/secrets/seed",
+        Some(serde_json::json!({})),
+    )
+    .await?;
+    let seeded = data["seeded"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        })
         .unwrap_or_default();
     Ok(seeded)
 }
 
 #[tauri::command]
-fn list_providers() -> Result<serde_json::Value, String> {
-    runtime_get("/api/providers")
+async fn list_providers() -> Result<serde_json::Value, String> {
+    pipe_request("GET", "/api/providers", None).await
 }
 
 #[tauri::command]
-fn list_router_roles() -> Result<serde_json::Value, String> {
-    runtime_get("/api/router/roles")
+async fn list_router_roles() -> Result<serde_json::Value, String> {
+    pipe_request("GET", "/api/router/roles", None).await
 }
 
 #[tauri::command]
-fn list_router_models() -> Result<serde_json::Value, String> {
-    runtime_get("/api/router/models")
+async fn list_router_models() -> Result<serde_json::Value, String> {
+    pipe_request("GET", "/api/router/models", None).await
 }
 
 #[tauri::command]
-fn toggle_provider(id: String, enabled: bool) -> Result<(), String> {
-    let status = runtime_post(
+async fn toggle_provider(id: String, enabled: bool) -> Result<(), String> {
+    // PATCH /api/providers/{id} body {"enabled": bool}
+    pipe_request(
+        "PATCH",
         &format!("/api/providers/{}", id),
-        serde_json::json!({ "enabled": enabled }),
-    )?;
-    if status.is_object() { Ok(()) } else { Ok(()) }
+        Some(serde_json::json!({ "enabled": enabled })),
+    )
+    .await?;
+    Ok(())
 }
 
 #[tauri::command]
-fn update_router_roles(roles: serde_json::Value) -> Result<(), String> {
-    let status = runtime_put("/api/router/roles", serde_json::json!({ "roles": roles }))?;
-    if status >= 200 && status < 300 {
-        Ok(())
-    } else {
-        Err(format!("HTTP {}", status))
-    }
+async fn update_router_roles(roles: serde_json::Value) -> Result<(), String> {
+    pipe_request(
+        "PUT",
+        "/api/router/roles",
+        Some(serde_json::json!({ "roles": roles })),
+    )
+    .await?;
+    Ok(())
 }
 
 #[tauri::command]
-fn list_plugins() -> Result<serde_json::Value, String> {
-    runtime_get("/api/plugins")
+async fn list_plugins() -> Result<serde_json::Value, String> {
+    pipe_request("GET", "/api/plugins", None).await
 }
 
 #[tauri::command]
-fn invoke_plugin(name: String, args: serde_json::Value) -> Result<serde_json::Value, String> {
-    runtime_post(&format!("/api/plugins/{}/invoke", name), serde_json::json!({ "args": args }))
+async fn invoke_plugin(
+    name: String,
+    args: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    pipe_request(
+        "POST",
+        &format!("/api/plugins/{}/invoke", name),
+        Some(serde_json::json!({ "args": args })),
+    )
+    .await
 }
 
 #[tauri::command]
@@ -271,16 +392,24 @@ async fn get_workflow(
     state: tauri::State<'_, AppState>,
     id: String,
 ) -> Result<Option<serde_json::Value>, String> {
-    state.repo.get_workflow(&id).await
+    state
+        .repo
+        .get_workflow(&id)
+        .await
         .map(|opt| opt.map(workflow_to_json))
         .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-async fn cancel_workflow(
-    _state: tauri::State<'_, AppState>,
-    _id: String,
-) -> Result<(), String> {
+async fn cancel_workflow(id: String) -> Result<(), String> {
+    // Was a no-op before; actually call the runtime so the orchestrator
+    // can stop the running workflow.
+    pipe_request(
+        "POST",
+        &format!("/api/workflow/{}/cancel", id),
+        None,
+    )
+    .await?;
     Ok(())
 }
 
@@ -312,13 +441,14 @@ fn workflow_to_json(wf: storage::Workflow) -> serde_json::Value {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
-        .plugin(tauri_plugin_http::init())
         .setup(|app| {
             let handle = app.handle().clone();
             tauri::async_runtime::block_on(async move {
                 spawn_runtime_sidecar(&handle);
                 match AppState::build().await {
-                    Ok(state) => { handle.manage(state); }
+                    Ok(state) => {
+                        handle.manage(state);
+                    }
                     Err(e) => {
                         eprintln!("[aco] failed to build AppState: {}", e);
                         std::process::exit(1);

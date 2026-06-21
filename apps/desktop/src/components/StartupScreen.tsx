@@ -3,11 +3,15 @@
  *
  * Runs health checks in a loop. Once connected, calls onReady exactly once.
  * Uses a ref to avoid re-triggering the effect on callback identity changes.
+ *
+ * v0.2.5+: the health check goes through Tauri `invoke('health_check')`
+ * which talks to the Python sidecar over the `\\.\pipe\aco_runtime`
+ * named pipe. No browser fetch, no port 7317.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 
-const RUNTIME_URL = 'http://127.0.0.1:7317';
 const MAX_ATTEMPTS = 30;
 const CHECK_INTERVAL = 2000;
 
@@ -27,11 +31,7 @@ export function StartupScreen({ onReady }: StartupScreenProps) {
 
     const checkOnce = async (): Promise<boolean> => {
       try {
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 3000);
-        const r = await fetch(`${RUNTIME_URL}/health`, { signal: controller.signal });
-        clearTimeout(timer);
-        return r.ok;
+        return await invoke<boolean>('health_check');
       } catch {
         return false;
       }

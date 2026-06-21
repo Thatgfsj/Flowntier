@@ -128,7 +128,7 @@ Settings UI) to see the same flow with real LLM calls.
 
 ## 🏗️ Status
 
-**Current version:** [`v0.2.3`](https://github.com/Thatgfsj/AgentCompanyOS/releases/tag/v0.2.3)
+**Current version:** [`v0.2.5`](https://github.com/Thatgfsj/AgentCompanyOS/releases/tag/v0.2.5)
 (Phase 2 complete: task graph + multi-provider + plugins.)
 
 | Milestone | Status |
@@ -146,7 +146,7 @@ Settings UI) to see the same flow with real LLM calls.
 | Phase 3 — Memory + replay + cost dashboard | ⏳ Planned |
 | v1.0 — Complete AI Software Company | 🎯 Target |
 
-**Verified working end-to-end (v0.2.3):**
+**Verified working end-to-end (v0.2.5):**
 - 155 runtime tests passing
 - Workflow `POST /api/workflow` → plan → workers → FinalReviewer → DONE
 - `GET /api/workflow/{id}/plan` returns live `parsed_plan` + `task_statuses`

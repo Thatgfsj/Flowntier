@@ -1,1 +1,0 @@
-export function appConfigDir() { return ''; } export function resourceDir() { return ''; }

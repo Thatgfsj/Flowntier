@@ -109,7 +109,7 @@
 - **描述**: LLM 不总是返回正确的 tool call 格式
 - **关系**: `related_to` → E8, `blocks` → 真正的代码生成
 
-### P3: TypeScript 24 个错误 (0.2.3 清理)
+### P3: TypeScript 24 个错误 (0.2.5 清理)
 - **状态**: ✅ 已解决
 - **优先级**: 低
 - **描述**: simulator.ts 和 UI 组件的严格模式错误

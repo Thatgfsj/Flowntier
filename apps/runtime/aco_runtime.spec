@@ -12,6 +12,9 @@ hiddenimports += collect_submodules('aco_runtime_lib')
 hiddenimports += collect_submodules('aco_runtime')
 # Explicitly add worker_v2 in case collect_submodules misses it
 hiddenimports += ['aco_runtime_lib.agents.worker_v2']
+# Windows named-pipe transport (v0.2.5+). pywin32 ships native DLLs in
+# pywin32_system32 that PyInstaller needs to copy next to the EXE.
+hiddenimports += ['win32pipe', 'win32file', 'win32api', 'pywintypes', 'pywin32_system32']
 
 a = Analysis(
     [os.path.join(runtime_src, 'aco_runtime_lib', '__main__.py')],
