@@ -210,20 +210,52 @@ def _dispatch_through_app(app, method: str, path: str, body: Any):
 
 
 async def _serve_rpc(app) -> None:
-    """Accept RPC connections forever, dispatching each in a thread."""
-    loop = asyncio.get_running_loop()
-    logger.info("rpc pipe listening: {}", RPC_PIPE_NAME)
-    while True:
-        handle = await loop.run_in_executor(None, _open_rpc_server_instance)
-        try:
-            await loop.run_in_executor(None, win32pipe.ConnectNamedPipe, handle, None)
-        except pywintypes.error as e:
-            logger.debug("rpc connect err: {}", e)
-            win32file.CloseHandle(handle)
-            continue
-        # Hand the connected handle to a worker thread so a slow request
-        # doesn't block new connections.
-        await loop.run_in_executor(None, _handle_rpc_sync, app, handle)
+    """Pre-spawn N pipe-server instances that each accept in parallel.
+
+    Why not a single accept loop? Because Windows named pipes are
+    per-instance: a new client cannot connect to a pipe instance that
+    is still busy with the previous client. A single accept loop
+    processes requests serially and rejects any concurrent client
+    (`ERROR_FILE_NOT_FOUND`). We spawn one thread per instance so N
+    clients can hit us in parallel.
+    """
+    import threading
+
+    n_workers = 16
+
+    def worker() -> None:
+        while True:
+            handle = _open_rpc_server_instance()
+            try:
+                win32pipe.ConnectNamedPipe(handle, None)
+            except pywintypes.error as e:
+                # Client disconnected before we accepted; loop and try again.
+                logger.debug("rpc connect err: {}; reopening", e)
+                try:
+                    win32file.CloseHandle(handle)
+                except pywintypes.error:
+                    pass
+                continue
+            try:
+                _handle_rpc_sync(app, handle)
+            except Exception as e:  # noqa: BLE001
+                logger.exception("rpc handler crashed: {}", e)
+                try:
+                    win32file.CloseHandle(handle)
+                except pywintypes.error:
+                    pass
+
+    logger.info(
+        "rpc pipe listening: {} ({} accept workers)", RPC_PIPE_NAME, n_workers
+    )
+    threads = [threading.Thread(target=worker, daemon=True, name="rpc-accept")
+               for _ in range(n_workers)]
+    for t in threads:
+        t.start()
+    # Yield forever; workers handle everything.
+    import asyncio as _asyncio
+
+    await _asyncio.Event().wait()
 
 
 # ── Events (long-lived connections) ──────────────────────────────
@@ -284,17 +316,45 @@ def _start_daemon(target):
 
 
 async def _serve_events(bus) -> None:
-    loop = asyncio.get_running_loop()
-    logger.info("events pipe listening: {}", EVENTS_PIPE_NAME)
-    while True:
-        handle = await loop.run_in_executor(None, _open_events_server_instance)
-        try:
-            await loop.run_in_executor(None, win32pipe.ConnectNamedPipe, handle, None)
-        except pywintypes.error as e:
-            logger.debug("events connect err: {}", e)
-            win32file.CloseHandle(handle)
-            continue
-        await loop.run_in_executor(None, _events_loop_for_client, handle, bus, loop)
+    """Same N-worker model as _serve_rpc. Each accepted events client
+    gets its own long-lived pipe instance and its own bus subscription."""
+    import threading
+    import asyncio as _asyncio
+
+    loop = _asyncio.get_running_loop()  # capture NOW, before thread starts
+    n_workers = 4
+
+    def worker() -> None:
+        while True:
+            handle = _open_events_server_instance()
+            try:
+                win32pipe.ConnectNamedPipe(handle, None)
+            except pywintypes.error as e:
+                logger.debug("events connect err: {}; reopening", e)
+                try:
+                    win32file.CloseHandle(handle)
+                except pywintypes.error:
+                    pass
+                continue
+            try:
+                _events_loop_for_client(handle, bus, loop)
+            except Exception as e:  # noqa: BLE001
+                logger.exception("events handler crashed: {}", e)
+                try:
+                    win32file.CloseHandle(handle)
+                except pywintypes.error:
+                    pass
+
+    logger.info(
+        "events pipe listening: {} ({} accept workers)",
+        EVENTS_PIPE_NAME,
+        n_workers,
+    )
+    threads = [threading.Thread(target=worker, daemon=True, name="events-accept")
+               for _ in range(n_workers)]
+    for t in threads:
+        t.start()
+    await _asyncio.Event().wait()
 
 
 # ── Entry point ──────────────────────────────────────────────────
