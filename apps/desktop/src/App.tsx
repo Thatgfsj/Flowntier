@@ -226,7 +226,7 @@ export function App() {
 
     try {
       // Use Tauri invoke to start workflow
-      const data = await invoke<{ id: string }>('start_workflow_cmd', { req: { text } });
+      const data = await invoke<{ id: string }>('start_workflow_cmd', { text });
       setCurrentWfId(data.id);
 
       // Poll for completion using invoke
