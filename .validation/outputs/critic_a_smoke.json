@@ -6,28 +6,28 @@
     {
       "id": 1,
       "severity": "MAJOR",
-      "location": "read_user, line building sql",
-      "description": "SQL injection via f-string interpolation of user_id directly into the query string. An attacker-controlled user_id (e.g., '1 OR 1=1' or '1; DROP TABLE users; --') is concatenated into raw SQL and executed. This is a textbook injection hole.",
-      "reproduction": "read_user(\"1 OR 1=1\") returns all rows. read_user(\"1; DROP TABLE users; --\") drops the table on drivers that stack statements.",
-      "fix": "Use a parameterized query: db.execute(\"SELECT * FROM users WHERE id = ?\", (user_id,)). Never interpolate untrusted input into SQL."
+      "location": "utils.py:divide_numbers",
+      "description": "ZeroDivisionError on b == 0. No guard, no fallback. Common runtime crash for any caller passing 0 (e.g., computing an average of zero items, or a default-initialized denominator).",
+      "repro": "divide_numbers(5, 0)  ->  ZeroDivisionError: division by zero",
+      "fix": "Either raise a domain-specific exception (e.g., ValueError('divisor must be non-zero')) or return a sentinel; document the contract."
     },
     {
       "id": 2,
       "severity": "MAJOR",
-      "location": "divide_numbers, expression a / b",
-      "description": "ZeroDivisionError raised when b == 0 (or b == 0.0). Division by zero is a routine runtime crash in any caller that doesn't pre-filter zero denominators.",
-      "reproduction": "divide_numbers(1, 0) -> ZeroDivisionError. divide_numbers(1, 0.0) -> ZeroDivisionError (Python 3).",
-      "fix": "Guard explicitly: if b == 0: raise ValueError(\"divisor must be non-zero\") (or return a sentinel if that's the API contract). Do not silently swallow."
+      "location": "utils.py:read_user",
+      "description": "SQL injection. user_id is interpolated directly into the SQL string via f-string. Any caller passing attacker-controlled input can read or destroy arbitrary data (UNION-based exfiltration, stacked DROP TABLE, etc.). Classic, fully exploitable.",
+      "repro": "read_user(\"0 OR 1=1\")  ->  returns every user row.\nread_user(\"0; DROP TABLE users; --\")  ->  drops the table (if driver permits stacked statements).",
+      "fix": "Use a parameterized query: db.execute(\"SELECT * FROM users WHERE id = %s\", (user_id,)). Cast/validate user_id to int at the boundary."
     },
     {
       "id": 3,
       "severity": "MINOR",
-      "location": "parse_age, int(s) call",
-      "description": "ValueError on any non-integer string (\"\", \"3.14\", \"abc\", \" \"). TypeError on None. No type/format validation. Edge case, but likely to hit on common bad input from forms or external sources.",
-      "reproduction": "parse_age(\"\") -> ValueError. parse_age(\"3.14\") -> ValueError. parse_age(None) -> TypeError.",
-      "fix": "Validate before converting, or wrap in try/except and raise a domain-specific error (e.g., ValueError(\"age must be a non-negative integer\"))."
+      "location": "utils.py:parse_age",
+      "description": "Unvalidated int() conversion. Raises ValueError on non-numeric or empty/whitespace strings, and TypeError on None. No upper/lower bound check, so negative ages and absurdly large ages pass through silently (e.g., parse_age('-7'), parse_age('999999999')).",
+      "repro": "parse_age('')      -> ValueError\nparse_age(None)    -> TypeError\nparse_age('-7')    -> returns -7\nparse_age('1e9')   -> ValueError (actually fine, but '999999999999999999' returns int)",
+      "fix": "Wrap in try/except returning None or raising a typed error; reject ages outside [0, 150]."
     }
   ],
-  "summary_first_500": "Two MAJOR issues: SQL injection in read_user (unparameterized f-string query) and unhandled ZeroDivisionError in divide_numbers. One MINOR: parse_age crashes on non-integer or None input without a domain-specific error. Must repair before merge.",
-  "summary_total_chars": 245
+  "summary_first_500": "Two MAJOR issues: divide_numbers crashes on b==0 with no guard, and read_user is a textbook SQL injection via f-string interpolation. One MINOR: parse_age has no error handling or range validation. Verdict REPAIR.",
+  "summary_total_chars": 213
 }
