@@ -1,11 +1,15 @@
 import { useEffect, useState } from 'react';
 import { Card } from '@aco/ui';
 import {
-  listSecrets, saveSecret, deleteSecret, revealSecret, seedSecrets,
+  saveSecret,
   listProviders, toggleProvider,
   listRouterRoles, listRouterModels, updateRouterRoles,
-  type SecretInfo, type ProviderInfo, type RoleInfo,
+  fetchProviderModels,
+  addCustomProvider, removeCustomProvider,
+  type ProviderInfo, type RoleInfo,
+  type ProviderModel,
 } from '../lib/api.js';
+import { useCustomModels } from '../hooks/useCustomModels.js';
 
 // ── Quick Add AI ─────────────────────────────────────────────────
 
@@ -132,164 +136,6 @@ function QuickAddAI({ onSaved }: { onSaved: () => void }) {
   );
 }
 
-// ── Secrets View ─────────────────────────────────────────────────
-
-function SecretsView({ onSaved }: { onSaved: () => void }) {
-  const [secrets, setSecrets] = useState<SecretInfo[]>([]);
-  const [editing, setEditing] = useState<string | null>(null);
-  const [draftValue, setDraftValue] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [revealed, setRevealed] = useState<Record<string, string>>({});
-
-  const load = async () => {
-    try {
-      setSecrets(await listSecrets());
-    } catch (e) {
-      setError(`load failed: ${e}`);
-    }
-  };
-
-  useEffect(() => { void load(); }, []);
-
-  const save = async (name: string) => {
-    if (!draftValue) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await saveSecret(name, draftValue);
-      setEditing(null);
-      setDraftValue('');
-      onSaved();
-      void load();
-    } catch (e) {
-      setError(`save failed: ${e}`);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const remove = async (name: string) => {
-    if (!confirm(`Delete ${name}?`)) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await deleteSecret(name);
-      onSaved();
-      void load();
-    } catch (e) {
-      setError(`delete failed: ${e}`);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const reveal = async (name: string) => {
-    try {
-      const value = await revealSecret(name);
-      setRevealed((prev) => ({ ...prev, [name]: value }));
-    } catch (e) {
-      setError(`reveal failed: ${e}`);
-    }
-  };
-
-  const reseed = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      await seedSecrets();
-      onSaved();
-    } catch (e) {
-      setError(`reseed failed: ${e}`);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const setCount = secrets.filter((s) => s.present).length;
-  const sel = secrets.find((s) => s.name === editing);
-
-  return (
-    <div className="flex flex-1 overflow-hidden">
-      <aside className="w-[380px] shrink-0 overflow-y-auto border-r border-border bg-surface-2 p-3">
-        <h3 className="mb-2 px-1 text-xs font-semibold uppercase tracking-wide text-text-secondary">
-          Secrets ({setCount} / {secrets.length})
-        </h3>
-        <div className="flex flex-col gap-2">
-          {secrets.map((s) => (
-            <button key={s.name} type="button" onClick={() => setEditing(s.name)}
-              className={`flex flex-col items-start gap-1 rounded-md border p-2 text-left transition-colors ${editing === s.name ? 'border-chief bg-surface-1' : 'border-border bg-surface-1 hover:border-text-secondary'}`}>
-              <div className="flex w-full items-center justify-between">
-                <span className="font-mono text-sm">{s.name}</span>
-                <span className={`rounded px-1.5 py-0.5 text-[10px] ${s.present ? 'bg-success/20 text-success' : 'bg-surface-3 text-text-secondary'}`}>
-                  {s.present ? 'set' : 'unset'}
-                </span>
-              </div>
-              <div className="font-mono text-[11px] text-text-secondary">{revealed[s.name] ?? s.masked ?? '—'}</div>
-            </button>
-          ))}
-        </div>
-      </aside>
-
-      <main className="flex flex-1 flex-col overflow-hidden bg-surface-1">
-        <div className="flex items-center justify-between border-b border-border bg-surface-2 px-5 py-3">
-          <div>
-            <h3 className="text-sm font-semibold text-primary">{editing ?? 'Select a secret to edit'}</h3>
-            <p className="text-xs text-text-secondary">Stored in OS keychain (Windows Credential Manager).</p>
-          </div>
-          <button type="button" onClick={reseed} disabled={busy}
-            className="rounded-md border border-border bg-surface-1 px-3 py-1.5 text-xs text-text-secondary hover:text-primary disabled:opacity-50">
-            Re-inject to os.environ
-          </button>
-        </div>
-        {error !== null && (
-          <div className="border-b border-danger/30 bg-danger/10 px-5 py-2 text-xs text-danger">{error}</div>
-        )}
-        <div className="flex-1 overflow-y-auto p-5">
-          {editing === null ? (
-            <div className="text-sm text-text-secondary">Pick a secret on the left.</div>
-          ) : (
-            <div className="mx-auto max-w-2xl space-y-4">
-              <div>
-                <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-text-secondary">Env var name</label>
-                <div className="font-mono text-sm text-primary">{editing}</div>
-              </div>
-              <div>
-                <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-text-secondary">Current value (masked)</label>
-                <div className="flex items-center gap-2">
-                  <code className="flex-1 rounded border border-border bg-surface-2 px-3 py-2 font-mono text-sm">{revealed[editing] ?? sel?.masked ?? 'unset'}</code>
-                  <button type="button" onClick={() => void reveal(editing)} disabled={!sel?.present}
-                    className="rounded-md border border-border bg-surface-2 px-3 py-1.5 text-xs text-text-secondary hover:text-primary disabled:opacity-50">
-                    {revealed[editing] ? 'Re-fetch' : 'Show plaintext'}
-                  </button>
-                </div>
-              </div>
-              <div>
-                <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-text-secondary">New value (overwrites)</label>
-                <input type="password" value={draftValue} onChange={(e) => setDraftValue(e.target.value)}
-                  placeholder={sel?.present ? 'new value' : 'value'}
-                  className="w-full rounded border border-border bg-surface-2 px-3 py-2 font-mono text-sm placeholder:text-text-secondary focus:border-chief focus:outline-none focus:ring-2 focus:ring-chief/50" />
-                <div className="mt-2 flex justify-end gap-2">
-                  <button type="button" onClick={() => void save(editing)} disabled={busy || !draftValue}
-                    className="rounded-md bg-chief px-3 py-1.5 text-xs font-medium text-white hover:bg-chief/90 disabled:opacity-50">
-                    {busy ? 'Saving...' : 'Save to keychain'}
-                  </button>
-                  {sel?.present && (
-                    <button type="button" onClick={() => void remove(editing)} disabled={busy}
-                      className="rounded-md border border-danger/40 px-3 py-1.5 text-xs text-danger hover:bg-danger/10 disabled:opacity-50">
-                      Delete
-                    </button>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-      </main>
-    </div>
-  );
-}
-
 // ── Main Settings ────────────────────────────────────────────────
 
 interface RuntimeSnapshot {
@@ -314,7 +160,7 @@ export function Settings({ open, onClose }: SettingsProps) {
   const [selected, setSelected] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<string | null>(null);
-  const [view, setView] = useState<'providers' | 'secrets'>('providers');
+  const customModels = useCustomModels();
 
   const refresh = async () => {
     try {
@@ -325,13 +171,46 @@ export function Settings({ open, onClose }: SettingsProps) {
       ]);
       console.log('[Settings] refresh:', { prov, roles, models });
       if (prov && roles && models) {
-        setSnapshot({ providers: prov.providers, roles: roles.roles, available_models: models.models });
+        // Merge the user-curated custom models per provider into the
+        // model picker so newly-released models (e.g. DeepSeek r2)
+        // are selectable without us shipping a preset update.
+        const enabledIds = new Set(
+          prov.providers.filter((p) => p.enabled).map((p) => p.id),
+        );
+        const displayNameById = new Map(
+          prov.providers.map((p) => [p.id, p.display_name]),
+        );
+        const userModels: typeof models.models = [];
+        for (const pid of enabledIds) {
+          for (const m of customModels.getForProvider(pid)) {
+            userModels.push({
+              provider: pid,
+              provider_display: displayNameById.get(pid) ?? pid,
+              model: m.id,
+              display_name: m.display_name,
+            });
+          }
+        }
+        const merged = [...models.models];
+        for (const um of userModels) {
+          if (!merged.some((m) => m.provider === um.provider && m.model === um.model)) {
+            merged.push(um);
+          }
+        }
+        setSnapshot({ providers: prov.providers, roles: roles.roles, available_models: merged });
         setSavedAt(new Date().toLocaleTimeString());
       }
     } catch (e) {
       console.error('[Settings] refresh failed:', e);
     }
   };
+
+  // Re-merge when custom models change (after add/remove in the modal)
+  // so the model picker updates without a full server refresh.
+  useEffect(() => {
+    if (snapshot.providers.length > 0) void refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [customModels.totalCount]);
 
   useEffect(() => {
     if (!open) return;
@@ -346,6 +225,14 @@ export function Settings({ open, onClose }: SettingsProps) {
         ...prev,
         providers: prev.providers.map((p) => (p.id === id ? { ...p, enabled } : p)),
       }));
+      setSavedAt(new Date().toLocaleTimeString());
+    } catch (e) {
+      console.error('[Settings] toggle failed:', e);
+      setSnapshot((prev) => ({
+        ...prev,
+        // Revert the optimistic UI update on failure.
+        providers: prev.providers.map((p) => (p.id === id ? { ...p, enabled: !enabled } : p)),
+      }));
     } finally {
       setSaving(false);
     }
@@ -354,7 +241,22 @@ export function Settings({ open, onClose }: SettingsProps) {
   const setRoleDefault = async (role: string, model: string) => {
     setSaving(true);
     try {
-      const newRoles = snapshot.roles.map((r) => r.role === role ? { ...r, default_model: model } : r);
+      const newRoles = snapshot.roles.map((r) => (r.role === role ? { ...r, default_model: model } : r));
+      await updateRouterRoles(newRoles);
+      setSnapshot((prev) => ({ ...prev, roles: newRoles }));
+      setSavedAt(new Date().toLocaleTimeString());
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Add or remove a fallback for a single role. The full roles array
+  // is sent so a single round-trip commits the new state — per-role
+  // patching would require a new server endpoint.
+  const setRoleFallback = async (role: string, chain: string[]) => {
+    setSaving(true);
+    try {
+      const newRoles = snapshot.roles.map((r) => (r.role === role ? { ...r, fallback_chain: chain } : r));
       await updateRouterRoles(newRoles);
       setSnapshot((prev) => ({ ...prev, roles: newRoles }));
       setSavedAt(new Date().toLocaleTimeString());
@@ -373,40 +275,63 @@ export function Settings({ open, onClose }: SettingsProps) {
         <header className="flex h-14 shrink-0 items-center justify-between border-b border-border bg-surface-2 px-5">
           <div>
             <h2 className="text-base font-semibold text-primary">设置</h2>
-            <p className="text-xs text-text-secondary">管理 LLM 供应商</p>
+            <p className="text-xs text-text-secondary">管理 LLM 供应商和角色模型</p>
           </div>
           <div className="flex items-center gap-3">
             {savedAt !== null && <span className="text-xs text-text-secondary">已保存 · {savedAt}</span>}
             {saving && <span className="text-xs text-text-secondary">保存中…</span>}
-            <div className="flex items-center rounded-md border border-border bg-surface-2 p-0.5">
-              <button type="button" onClick={() => setView('providers')}
-                className={`rounded px-2.5 py-1 text-xs ${view === 'providers' ? 'bg-surface-1 text-primary' : 'text-text-secondary hover:text-primary'}`}>
-                Providers
-              </button>
-              <button type="button" onClick={() => setView('secrets')}
-                className={`rounded px-2.5 py-1 text-xs ${view === 'secrets' ? 'bg-surface-1 text-primary' : 'text-text-secondary hover:text-primary'}`}>
-                Secrets
-              </button>
-            </div>
             <button type="button" onClick={onClose} className="rounded-md border border-border bg-surface-1 px-3 py-1.5 text-xs text-text-secondary hover:text-primary">关闭</button>
           </div>
         </header>
 
         <div className="flex flex-1 overflow-hidden">
-          {view === 'secrets' ? (
-            <SecretsView onSaved={() => void refresh()} />
-          ) : (
-            <>
-              <aside className="w-[380px] shrink-0 overflow-y-auto border-r border-border bg-surface-2 p-3">
-                <div className="mb-3">
-                  <QuickAddAI onSaved={() => void refresh()} />
-                </div>
+          <aside className="w-[380px] shrink-0 overflow-y-auto border-r border-border bg-surface-2 p-3">
+            <div className="mb-3 flex flex-col gap-2">
+                <QuickAddAI onSaved={() => void refresh()} />
+                <CustomProviderForm onSaved={() => void refresh()} />
+              </div>
                 <h3 className="mb-2 px-1 text-xs font-semibold uppercase tracking-wide text-text-secondary">
-                  供应商（{snapshot.providers.length}）
+                  供应商（{
+                    snapshot.providers.filter((p) => {
+                      if (p.is_local) return true;
+                      if (p.key_present) return true;
+                      const cm = customModels.map[p.id];
+                      if (cm && Object.keys(cm).length > 0) return true;
+                      return false;
+                    }).length
+                  }）
                 </h3>
                 <div className="flex flex-col gap-2">
-                  {snapshot.providers.map((p) => {
+                  {snapshot.providers
+                    .filter((p) => {
+                      // Only show providers the user can actually use:
+                      //  - local providers (Ollama / LM Studio) need no key
+                      //  - providers whose API key is already in the keychain
+                      //  - providers the user has added custom models to
+                      // Everything else (preset listed but key missing AND
+                      // no custom models) is hidden — the user adds it via
+                      // the "Quick Add AI" button in the panel above once
+                      // they paste a key.
+                      if (p.is_local) return true;
+                      if (p.key_present) return true;
+                      const cm = customModels.map[p.id];
+                      if (cm && Object.keys(cm).length > 0) return true;
+                      return false;
+                    })
+                    .map((p) => {
                     const isSel = p.id === selected;
+                    const isCustom = p.notes.includes('Custom relay');
+                    const handleDeleteCustom = async (e: React.MouseEvent) => {
+                      e.stopPropagation();
+                      if (!confirm(`确认删除自定义中转站「${p.display_name}」？`)) return;
+                      try {
+                        await removeCustomProvider(p.id);
+                        if (selected === p.id) setSelected(null);
+                        refresh();
+                      } catch (err) {
+                        alert(err instanceof Error ? err.message : '删除失败');
+                      }
+                    };
                     return (
                       <button key={p.id} type="button" onClick={() => setSelected(p.id)}
                         className={`flex flex-col items-start gap-1 rounded-md border p-2 text-left transition-colors ${isSel ? 'border-chief bg-surface-1' : 'border-border bg-surface-1 hover:border-text-secondary'}`}>
@@ -414,8 +339,14 @@ export function Settings({ open, onClose }: SettingsProps) {
                           <div className="flex items-center gap-2">
                             <span className="font-medium text-sm">{p.display_name}</span>
                             {p.is_local && <span className="rounded bg-surface-3 px-1.5 py-0.5 text-[10px] text-text-secondary">本地</span>}
+                            {isCustom && <span className="rounded bg-chief/20 px-1.5 py-0.5 text-[10px] text-chief">中转站</span>}
                           </div>
-                          <Toggle on={p.enabled} onChange={(v) => void toggle(p.id, v)} disabled={!p.key_present && !p.is_local} />
+                          <div className="flex items-center gap-1.5">
+                            <Toggle on={p.enabled} onChange={(v) => void toggle(p.id, v)} disabled={!p.key_present && !p.is_local} />
+                            {isCustom && (
+                              <button type="button" onClick={handleDeleteCustom} title="删除中转站" className="rounded p-0.5 text-[10px] text-red-400 hover:bg-red-400/10 hover:text-red-300">✕</button>
+                            )}
+                          </div>
                         </div>
                         <div className="text-[11px] text-text-secondary">{p.models.length} 个模型 · {p.api_key_env}</div>
                         <KeyBadge present={p.key_present} />
@@ -454,35 +385,37 @@ export function Settings({ open, onClose }: SettingsProps) {
                         </ul>
                       </div>
                     )}
+
+                    <ProviderModelManager
+                      providerId={sel.id}
+                      providerDisplay={sel.display_name}
+                      customModels={customModels.getForProvider(sel.id)}
+                      onAdd={(models) => customModels.addMany(sel.id, models)}
+                      onRemove={(modelId) => customModels.remove(sel.id, modelId)}
+                      onClear={() => customModels.clear(sel.id)}
+                    />
+
+                    <CompatHints providerId={sel.id} />
                   </Card>
                 )}
 
                 <h3 className="mb-2 px-1 text-xs font-semibold uppercase tracking-wide text-text-secondary">角色 → 模型 分配</h3>
+                <p className="mb-2 px-1 text-[10px] text-text-secondary">
+                  每个角色可以独立选默认模型 + 配回退链。例如：CEO 用 kimi（擅长规划）、Worker 用 minimax（性价比高）。
+                </p>
                 <div className="flex flex-col gap-2">
                   {snapshot.roles.map((r) => (
-                    <Card key={r.role} className="!p-3">
-                      <div className="flex items-center gap-3">
-                        <div className="w-24 shrink-0 text-sm font-medium">{ROLE_LABELS[r.role] ?? r.role}</div>
-                        <select value={r.default_model} onChange={(e) => void setRoleDefault(r.role, e.target.value)} disabled={saving}
-                          className="flex-1 rounded-md border border-border bg-surface-1 px-2 py-1.5 text-xs focus:border-chief focus:outline-none disabled:opacity-50">
-                          {snapshot.available_models.map((m) => {
-                            const ref = `${m.provider}:${m.model}`;
-                            return <option key={ref} value={ref}>{m.provider_display} · {m.display_name}</option>;
-                          })}
-                        </select>
-                      </div>
-                      {r.fallback_chain.length > 0 && (
-                        <div className="mt-2 flex flex-wrap gap-1 text-[10px] text-text-secondary">
-                          <span>回退：</span>
-                          {r.fallback_chain.map((m) => <code key={m} className="rounded bg-surface-2 px-1.5 py-0.5 font-mono">{m}</code>)}
-                        </div>
-                      )}
-                    </Card>
+                    <RoleAssignmentCard
+                      key={r.role}
+                      role={r}
+                      availableModels={snapshot.available_models}
+                      saving={saving}
+                      onDefaultChange={(model) => void setRoleDefault(r.role, model)}
+                      onFallbackChange={(chain) => void setRoleFallback(r.role, chain)}
+                    />
                   ))}
                 </div>
               </main>
-            </>
-          )}
         </div>
       </div>
     </div>
@@ -513,5 +446,641 @@ function KeyBadge({ present }: { present: boolean }) {
     <span className="rounded bg-status-done/20 px-1.5 py-0.5 text-[10px] text-status-done">Key ✓</span>
   ) : (
     <span className="rounded bg-status-warn/20 px-1.5 py-0.5 text-[10px] text-status-warn">Key ✗</span>
+  );
+}
+
+// Per-provider "兼容接口" hint card. Some providers (e.g. minimax)
+// offer multiple SDK-compatible endpoints; surface the snippets so the
+// user knows which env vars to set.
+function CompatHints({ providerId }: { providerId: string }) {
+  if (providerId !== 'minimax') return null;
+  return (
+    <div className="mt-4 rounded-md border border-border bg-surface-2 p-3">
+      <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-text-secondary">
+        兼容接口（任选其一）
+      </h4>
+      <div className="space-y-3 text-[11px]">
+        <div>
+          <div className="mb-1 font-medium">Anthropic SDK 兼容</div>
+          <pre className="overflow-x-auto rounded bg-surface-3 p-2 font-mono leading-relaxed">
+{`export ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic
+export ANTHROPIC_API_KEY=\${YOUR_API_KEY}`}
+          </pre>
+        </div>
+        <div>
+          <div className="mb-1 font-medium">OpenAI SDK 兼容</div>
+          <pre className="overflow-x-auto rounded bg-surface-3 p-2 font-mono leading-relaxed">
+{`export OPENAI_BASE_URL=https://api.minimaxi.com/v1
+export OPENAI_API_KEY=\${YOUR_API_KEY}`}
+          </pre>
+        </div>
+        <div>
+          <div className="mb-1 font-medium">AI SDK 兼容</div>
+          <pre className="overflow-x-auto rounded bg-surface-3 p-2 font-mono leading-relaxed">
+{`export MINIMAX_API_KEY=\${YOUR_API_KEY}`}
+          </pre>
+        </div>
+        <div className="text-text-secondary">
+          把以上命令放进系统环境变量（或者在下面添加 <code className="font-mono">MINIMAX_API_KEY</code> 后由 runtime 自动注入 os.environ），然后重启 runtime。
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Per-role assignment card ──────────────────────────────────────
+
+interface AvailableModel {
+  provider: string;
+  provider_display: string;
+  model: string;
+  display_name: string;
+}
+
+interface RoleAssignmentCardProps {
+  role: import('../lib/api.js').RoleInfo;
+  availableModels: AvailableModel[];
+  saving: boolean;
+  onDefaultChange: (model: string) => void;
+  onFallbackChange: (chain: string[]) => void;
+}
+
+/**
+ * Per-role card: one default model + an editable ordered fallback
+ * chain. Mirrors cc-switch's provider-card-with-failover pattern but
+ * scoped to agent roles (chief / critic / worker) rather than to
+ * external CLI apps.
+ *
+ * Saving is a single round-trip: the full `roles` array is sent to
+ * `update_router_roles`, so adding/removing/reordering all commit in
+ * one backend call.
+ */
+function RoleAssignmentCard({
+  role,
+  availableModels,
+  saving,
+  onDefaultChange,
+  onFallbackChange,
+}: RoleAssignmentCardProps) {
+  const inChain = new Set(role.fallback_chain);
+
+  // Filter out the default and the existing chain entries from the
+  // "add fallback" dropdown so we don't offer the user nonsense options.
+  const addable = availableModels.filter((m) => {
+    const ref = `${m.provider}:${m.model}`;
+    return ref !== role.default_model && !inChain.has(ref);
+  });
+
+  const move = (idx: number, dir: -1 | 1) => {
+    const next = [...role.fallback_chain];
+    const j = idx + dir;
+    if (j < 0 || j >= next.length) return;
+    const tmp = next[idx] as string;
+    next[idx] = next[j] as string;
+    next[j] = tmp;
+    onFallbackChange(next);
+  };
+
+  const removeAt = (idx: number) => {
+    onFallbackChange(role.fallback_chain.filter((_, i) => i !== idx));
+  };
+
+  const addModel = (ref: string) => {
+    if (ref === role.default_model || inChain.has(ref)) return;
+    onFallbackChange([...role.fallback_chain, ref]);
+  };
+
+  return (
+    <Card className="!p-3">
+      <div className="flex items-center gap-3">
+        <div className="w-20 shrink-0">
+          <div className="text-sm font-medium">{ROLE_LABELS[role.role] ?? role.role}</div>
+          <div className="font-mono text-[10px] text-text-secondary">{role.role}</div>
+        </div>
+        <div className="flex-1">
+          <div className="mb-1 text-[10px] uppercase tracking-wide text-text-secondary">默认模型</div>
+          <select
+            value={role.default_model}
+            onChange={(e) => onDefaultChange(e.target.value)}
+            disabled={saving}
+            className="w-full rounded-md border border-border bg-surface-1 px-2 py-1.5 text-xs focus:border-chief focus:outline-none disabled:opacity-50"
+          >
+            {availableModels.length === 0 ? (
+              <option value={role.default_model}>(无可用模型 — 先在上方"添加 AI 供应商"里填 key)</option>
+            ) : (
+              availableModels.map((m) => {
+                const ref = `${m.provider}:${m.model}`;
+                return (
+                  <option key={ref} value={ref}>
+                    {m.provider_display} · {m.display_name}
+                  </option>
+                );
+              })
+            )}
+          </select>
+        </div>
+      </div>
+
+      <div className="mt-3 border-t border-border pt-3">
+        <div className="mb-1 flex items-center justify-between">
+          <div className="text-[10px] uppercase tracking-wide text-text-secondary">
+            回退链（{role.fallback_chain.length}）
+          </div>
+          {addable.length > 0 && (
+            <select
+              defaultValue=""
+              onChange={(e) => {
+                if (e.target.value) {
+                  addModel(e.target.value);
+                  e.target.value = "";
+                }
+              }}
+              disabled={saving}
+              className="rounded border border-border bg-surface-1 px-1.5 py-0.5 text-[11px] focus:border-chief focus:outline-none disabled:opacity-50"
+            >
+              <option value="">+ 添加回退</option>
+              {addable.map((m) => {
+                const ref = `${m.provider}:${m.model}`;
+                return (
+                  <option key={ref} value={ref}>
+                    {m.provider_display} · {m.display_name}
+                  </option>
+                );
+              })}
+            </select>
+          )}
+        </div>
+
+        {role.fallback_chain.length === 0 ? (
+          <div className="text-[11px] text-text-secondary">（暂无回退；主模型失败时该角色会直接报错）</div>
+        ) : (
+          <ol className="space-y-1">
+            {role.fallback_chain.map((ref, idx) => {
+              const m = availableModels.find((x) => `${x.provider}:${x.model}` === ref);
+              const label = m ? `${m.provider_display} · ${m.display_name}` : ref;
+              return (
+                <li
+                  key={`${ref}-${idx}`}
+                  className="flex items-center gap-2 rounded border border-border bg-surface-1 px-2 py-1"
+                >
+                  <span className="w-6 shrink-0 text-center text-[10px] font-mono text-text-secondary">
+                    {idx + 1}
+                  </span>
+                  <span className="flex-1 truncate font-mono text-[11px]" title={ref}>
+                    {label}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => move(idx, -1)}
+                    disabled={idx === 0 || saving}
+                    className="rounded px-1.5 py-0.5 text-[10px] text-text-secondary hover:bg-surface-2 hover:text-primary disabled:opacity-30"
+                    aria-label="上移"
+                  >
+                    ↑
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => move(idx, 1)}
+                    disabled={idx === role.fallback_chain.length - 1 || saving}
+                    className="rounded px-1.5 py-0.5 text-[10px] text-text-secondary hover:bg-surface-2 hover:text-primary disabled:opacity-30"
+                    aria-label="下移"
+                  >
+                    ↓
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => removeAt(idx)}
+                    disabled={saving}
+                    className="rounded px-1.5 py-0.5 text-[10px] text-text-secondary hover:bg-status-failed/20 hover:text-status-failed disabled:opacity-30"
+                    aria-label="删除"
+                  >
+                    ×
+                  </button>
+                </li>
+              );
+            })}
+          </ol>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+// ── Provider model manager (cc-switch style) ─────────────────────
+
+interface ProviderModelManagerProps {
+  providerId: string;
+  providerDisplay: string;
+  customModels: ProviderModel[];
+  onAdd: (models: ProviderModel[]) => void;
+  onRemove: (modelId: string) => void;
+  onClear: () => void;
+}
+
+/**
+ * Pulls a live model list from the provider's own API and lets the
+ * user pick which ones to add to their curated set. Mirrors
+ * cc-switch's per-provider model-fetch flow but stores the user's
+ * selection in localStorage so it survives restarts.
+ *
+ * The Tauri shell forwards to the Python `GET
+ * /api/providers/{id}/models` endpoint, which dispatches the right
+ * per-provider request (Anthropic: /v1/models with x-api-key, Gemini:
+ * /v1beta/models?key=, OpenAI-compat: /models, Ollama: /api/tags,
+ * LM Studio: /models).
+ */
+function ProviderModelManager({
+  providerId,
+  providerDisplay,
+  customModels,
+  onAdd,
+  onRemove,
+  onClear,
+}: ProviderModelManagerProps) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [fetched, setFetched] = useState<ProviderModel[]>([]);
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+
+  const pull = async () => {
+    setBusy(true);
+    setError(null);
+    setFetched([]);
+    setPicked(new Set());
+    setOpen(true);
+    try {
+      const res = await fetchProviderModels(providerId);
+      if (!res.ok) {
+        setError(res.error ?? '拉取失败');
+      } else {
+        setFetched(res.models);
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const togglePick = (id: string) => {
+    setPicked((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const commit = () => {
+    const toAdd = fetched.filter((m) => picked.has(m.id));
+    if (toAdd.length > 0) onAdd(toAdd);
+    setOpen(false);
+  };
+
+  // Models the user has already added to their curated set (so the
+  // fetched list can show "✓ 已添加" badges).
+  const alreadyHave = new Set(customModels.map((m) => m.id));
+
+  return (
+    <div className="mt-3 rounded-md border border-border bg-surface-2 p-3">
+      <div className="mb-2 flex items-center justify-between">
+        <h4 className="text-xs font-semibold uppercase tracking-wide text-text-secondary">
+          自选模型（{customModels.length}）
+        </h4>
+        <button
+          type="button"
+          onClick={() => void pull()}
+          disabled={busy}
+          className="rounded-md border border-chief/40 bg-chief/10 px-2 py-0.5 text-[11px] text-chief hover:bg-chief/20 disabled:opacity-50"
+        >
+          {busy ? '拉取中…' : '🔄 拉取最新模型'}
+        </button>
+      </div>
+
+      {customModels.length === 0 ? (
+        <div className="text-[11px] text-text-secondary">
+          暂无自选模型。点击"拉取最新模型"从 {providerDisplay} 官方 API 拉取可用列表，勾选要加入的即可。
+        </div>
+      ) : (
+        <ul className="grid grid-cols-2 gap-1 text-xs">
+          {customModels.map((m) => (
+            <li
+              key={m.id}
+              className="flex items-center gap-1 rounded bg-surface-1 px-2 py-1 font-mono"
+            >
+              <span className="flex-1 truncate" title={m.id}>{m.display_name}</span>
+              <button
+                type="button"
+                onClick={() => onRemove(m.id)}
+                className="text-[10px] text-text-secondary hover:text-status-failed"
+                aria-label="移除"
+              >
+                ×
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {customModels.length > 0 && (
+        <button
+          type="button"
+          onClick={onClear}
+          className="mt-2 text-[10px] text-text-secondary hover:text-status-failed"
+        >
+          清除全部自选模型
+        </button>
+      )}
+
+      {open && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+          onClick={() => !busy && setOpen(false)}
+        >
+          <div
+            className="flex max-h-[80vh] w-[600px] max-w-full flex-col rounded-lg bg-surface-1 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <header className="flex items-center justify-between border-b border-border px-4 py-3">
+              <h3 className="text-sm font-semibold">
+                拉取 {providerDisplay} 模型
+              </h3>
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                disabled={busy}
+                className="text-text-secondary hover:text-primary disabled:opacity-30"
+                aria-label="关闭"
+              >
+                ×
+              </button>
+            </header>
+
+            <div className="flex-1 overflow-y-auto p-4">
+              {busy ? (
+                <div className="flex items-center justify-center py-8 text-sm text-text-secondary">
+                  正在调用 {providerDisplay} API...
+                </div>
+              ) : error ? (
+                <div className="rounded border border-status-failed/40 bg-status-failed/10 p-3 text-xs text-status-failed">
+                  {error}
+                </div>
+              ) : fetched.length === 0 ? (
+                <div className="py-4 text-sm text-text-secondary">该 provider 暂无可拉取的模型。</div>
+              ) : (
+                <>
+                  <div className="mb-2 text-[11px] text-text-secondary">
+                    共 {fetched.length} 个模型。勾选要加入的，已添加的会标记 ✓。
+                  </div>
+                  <div className="mb-3 flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setPicked(new Set(fetched.map((m) => m.id)))}
+                      className="text-[11px] text-chief hover:underline"
+                    >
+                      全选
+                    </button>
+                    <span className="text-text-secondary">·</span>
+                    <button
+                      type="button"
+                      onClick={() => setPicked(new Set())}
+                      className="text-[11px] text-text-secondary hover:underline"
+                    >
+                      清空选择
+                    </button>
+                    <span className="ml-auto text-[11px] text-text-secondary">
+                      已选 {picked.size} 个
+                    </span>
+                  </div>
+                  <ul className="grid grid-cols-2 gap-1 text-xs">
+                    {fetched.map((m) => {
+                      const have = alreadyHave.has(m.id);
+                      const picked_ = picked.has(m.id);
+                      return (
+                        <li
+                          key={m.id}
+                          className={`flex items-center gap-2 rounded border px-2 py-1 font-mono ${
+                            picked_ ? 'border-chief bg-chief/10' : 'border-border bg-surface-2'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={picked_}
+                            onChange={() => togglePick(m.id)}
+                            className="h-3 w-3"
+                          />
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate text-primary" title={m.id}>
+                              {m.display_name}
+                              {have && <span className="ml-1 text-[10px] text-status-done">✓已添加</span>}
+                            </div>
+                            <div className="truncate text-[10px] text-text-secondary" title={m.id}>
+                              {m.id}
+                            </div>
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </>
+              )}
+            </div>
+
+            <footer className="flex items-center justify-end gap-2 border-t border-border px-4 py-3">
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                disabled={busy}
+                className="rounded-md border border-border bg-surface-2 px-3 py-1.5 text-xs hover:bg-surface-3 disabled:opacity-30"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={commit}
+                disabled={busy || picked.size === 0}
+                className="rounded-md bg-chief px-3 py-1.5 text-xs font-medium text-white hover:bg-chief/90 disabled:opacity-30"
+              >
+                添加 {picked.size > 0 ? `${picked.size} 个` : ''}
+              </button>
+            </footer>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Custom Provider (中转站) ───────────────────────────────────────
+
+const KIND_OPTIONS = [
+  { value: 'anthropic', label: 'Anthropic 协议' },
+  { value: 'openai', label: 'OpenAI 协议' },
+  { value: 'openai_compat', label: 'OpenAI 兼容 (AI SDK)' },
+] as const;
+
+function CustomProviderForm({ onSaved }: { onSaved: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [id, setId] = useState('');
+  const [displayName, setDisplayName] = useState('');
+  const [kind, setKind] = useState<'anthropic' | 'openai' | 'openai_compat'>('openai');
+  const [baseUrl, setBaseUrl] = useState('');
+  const [apiKey, setApiKey] = useState('');
+  const [models, setModels] = useState<{ id: string; display_name: string }[]>([]);
+  const [newModelId, setNewModelId] = useState('');
+  const [newModelName, setNewModelName] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState(false);
+
+  const reset = () => {
+    setId(''); setDisplayName(''); setKind('openai'); setBaseUrl('');
+    setApiKey(''); setModels([]); setNewModelId(''); setNewModelName('');
+    setError(null); setSuccess(false);
+  };
+
+  const addModelRow = () => {
+    const mid = newModelId.trim();
+    if (!mid) return;
+    if (models.some((m) => m.id === mid)) { setError(`模型 ${mid} 已存在`); return; }
+    setModels([...models, { id: mid, display_name: newModelName.trim() || mid }]);
+    setNewModelId(''); setNewModelName(''); setError(null);
+  };
+
+  const removeModelRow = (mid: string) => setModels(models.filter((m) => m.id !== mid));
+
+  const handleSubmit = async () => {
+    // Validate
+    const idTrim = id.trim().toLowerCase();
+    if (!/^[a-z0-9_]+$/.test(idTrim)) { setError('ID 只能包含小写字母、数字和下划线'); return; }
+    if (!displayName.trim()) { setError('请填写显示名称'); return; }
+    if (!baseUrl.trim() || !(baseUrl.startsWith('http://') || baseUrl.startsWith('https://'))) {
+      setError('Base URL 必须以 http:// 或 https:// 开头'); return;
+    }
+    if (!apiKey.trim()) { setError('请填写 API Key'); return; }
+    if (models.length === 0) { setError('请至少添加一个模型'); return; }
+
+    setBusy(true); setError(null);
+    try {
+      // 1. Save API key to keychain
+      const envVarName = `CUSTOM_${idTrim.toUpperCase()}_API_KEY`;
+      const saveResult = await saveSecret(envVarName, apiKey.trim());
+      if (!saveResult || !saveResult.saved) {
+        setError('保存 API Key 失败');
+        setBusy(false);
+        return;
+      }
+
+      // 2. Register custom provider
+      await addCustomProvider({
+        id: idTrim,
+        display_name: displayName.trim(),
+        kind,
+        base_url: baseUrl.trim().replace(/\/+$/, ''),
+        api_key_env: envVarName,
+        models,
+      });
+
+      setSuccess(true);
+      onSaved();
+      setTimeout(() => { setOpen(false); reset(); }, 1200);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '保存失败');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-text-secondary/30 bg-surface-1 px-4 py-2.5 text-sm text-text-secondary transition-colors hover:border-chief/40 hover:text-chief"
+      >
+        <span className="text-lg">＋</span>
+        添加自定义中转站
+      </button>
+    );
+  }
+
+  return (
+    <div className="rounded-lg border border-border bg-surface-1 p-4">
+      <div className="mb-3 flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-primary">添加自定义中转站</h3>
+        <button type="button" onClick={() => { setOpen(false); reset(); }} className="text-xs text-text-secondary hover:text-primary">取消</button>
+      </div>
+
+      <div className="flex flex-col gap-2.5 text-xs">
+        {/* ID */}
+        <label className="flex flex-col gap-1">
+          <span className="text-text-secondary">ID <span className="text-[10px]">(英文+数字+下划线)</span></span>
+          <input value={id} onChange={(e) => setId(e.target.value)} placeholder="my_relay" className="rounded border border-border bg-surface-2 px-2 py-1.5 text-primary outline-none focus:border-chief" />
+        </label>
+
+        {/* Display Name */}
+        <label className="flex flex-col gap-1">
+          <span className="text-text-secondary">显示名称</span>
+          <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder="我的中转站" className="rounded border border-border bg-surface-2 px-2 py-1.5 text-primary outline-none focus:border-chief" />
+        </label>
+
+        {/* Protocol */}
+        <label className="flex flex-col gap-1">
+          <span className="text-text-secondary">协议</span>
+          <select value={kind} onChange={(e) => setKind(e.target.value as typeof kind)} className="rounded border border-border bg-surface-2 px-2 py-1.5 text-primary outline-none focus:border-chief">
+            {KIND_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+        </label>
+
+        {/* Base URL */}
+        <label className="flex flex-col gap-1">
+          <span className="text-text-secondary">Base URL</span>
+          <input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://your-relay.com/v1" className="rounded border border-border bg-surface-2 px-2 py-1.5 text-primary outline-none focus:border-chief" />
+        </label>
+
+        {/* API Key */}
+        <label className="flex flex-col gap-1">
+          <span className="text-text-secondary">API Key</span>
+          <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="sk-..." className="rounded border border-border bg-surface-2 px-2 py-1.5 text-primary outline-none focus:border-chief" />
+        </label>
+
+        {/* Models */}
+        <div className="flex flex-col gap-1">
+          <span className="text-text-secondary">模型列表</span>
+          {models.length > 0 && (
+            <ul className="flex flex-col gap-1">
+              {models.map((m) => (
+                <li key={m.id} className="flex items-center gap-2 rounded bg-surface-2 px-2 py-1">
+                  <span className="min-w-0 flex-1 truncate text-primary" title={m.id}>
+                    {m.display_name} <span className="text-[10px] text-text-secondary">({m.id})</span>
+                  </span>
+                  <button type="button" onClick={() => removeModelRow(m.id)} className="shrink-0 text-[10px] text-red-400 hover:text-red-300">✕</button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="flex gap-1.5">
+            <input value={newModelId} onChange={(e) => setNewModelId(e.target.value)} placeholder="model-id" className="flex-1 rounded border border-border bg-surface-2 px-2 py-1 text-primary outline-none focus:border-chief" onKeyDown={(e) => e.key === 'Enter' && addModelRow()} />
+            <input value={newModelName} onChange={(e) => setNewModelName(e.target.value)} placeholder="显示名(可选)" className="flex-1 rounded border border-border bg-surface-2 px-2 py-1 text-primary outline-none focus:border-chief" onKeyDown={(e) => e.key === 'Enter' && addModelRow()} />
+            <button type="button" onClick={addModelRow} className="shrink-0 rounded bg-surface-3 px-2 py-1 text-text-secondary hover:text-primary">+</button>
+          </div>
+        </div>
+      </div>
+
+      {error && <p className="mt-2 text-[11px] text-red-400">{error}</p>}
+      {success && <p className="mt-2 text-[11px] text-status-done">✓ 添加成功</p>}
+
+      <div className="mt-3 flex justify-end">
+        <button
+          type="button"
+          onClick={handleSubmit}
+          disabled={busy}
+          className="rounded-md bg-chief px-4 py-1.5 text-xs font-medium text-white hover:bg-chief/90 disabled:opacity-30"
+        >
+          {busy ? '保存中…' : '添加中转站'}
+        </button>
+      </div>
+    </div>
   );
 }
