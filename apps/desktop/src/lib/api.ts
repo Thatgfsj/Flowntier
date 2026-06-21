@@ -35,8 +35,13 @@ export async function listSecrets(): Promise<SecretInfo[]> {
   return invoke<SecretInfo[]>('list_secrets');
 }
 
-export async function saveSecret(name: string, value: string): Promise<void> {
-  return invoke('save_secret', { name, value });
+export interface SaveSecretResult {
+  saved: boolean;
+  warning: string | null;
+}
+
+export async function saveSecret(name: string, value: string): Promise<SaveSecretResult> {
+  return invoke<SaveSecretResult>('save_secret', { name, value });
 }
 
 export async function deleteSecret(name: string): Promise<void> {

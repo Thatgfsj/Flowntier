@@ -37,10 +37,16 @@ function QuickAddAI({ onSaved }: { onSaved: () => void }) {
     setError(null);
     try {
       console.log('[QuickAddAI] saving:', provider.envVar);
-      await saveSecret(provider.envVar, apiKey.trim());
-      console.log('[QuickAddAI] saved, seeding...');
-      await seedSecrets();
-      console.log('[QuickAddAI] seeded');
+      const result = await saveSecret(provider.envVar, apiKey.trim());
+      console.log('[QuickAddAI] save result:', result);
+      if (!result || !result.saved) {
+        setError('保存失败：返回结果无效');
+        return;
+      }
+      if (result.warning) {
+        // Key persisted, but seed to os.environ failed — non-fatal.
+        console.warn('[QuickAddAI] seed warning:', result.warning);
+      }
       setSuccess(true);
       setApiKey('');
       onSaved();

@@ -155,18 +155,35 @@ fn list_secrets() -> Result<serde_json::Value, String> {
 }
 
 #[tauri::command]
-fn save_secret(name: String, value: String) -> Result<(), String> {
+fn save_secret(name: String, value: String) -> Result<serde_json::Value, String> {
+    // 1) Persist to keychain via runtime.
     let status = runtime_put(
         &format!("/api/settings/secrets/{}", name),
         serde_json::json!({ "value": value }),
     )?;
-    if status >= 200 && status < 300 {
-        // Seed to env
-        let _ = runtime_post("/api/settings/secrets/seed", serde_json::json!(null));
-        Ok(())
-    } else {
-        Err(format!("HTTP {}", status))
+    if !(200..300).contains(&status) {
+        return Err(format!("save failed: HTTP {}", status));
     }
+
+    // 2) Best-effort seed to os.environ. If the seed POST fails for any
+    //    reason (transient, 422 from pydantic, network blip), we MUST NOT
+    //    roll back the persisted key — the keychain write already succeeded.
+    //    Surface the warning to the UI so the user can retry "Re-inject".
+    let warning: Option<String> = match runtime_post(
+        "/api/settings/secrets/seed",
+        serde_json::json!({}),
+    ) {
+        Ok(_) => None,
+        Err(e) => {
+            eprintln!("[save_secret] seed post failed (non-fatal): {}", e);
+            Some(format!("seed failed: {}", e))
+        }
+    };
+
+    Ok(serde_json::json!({
+        "saved": true,
+        "warning": warning,
+    }))
 }
 
 #[tauri::command]
