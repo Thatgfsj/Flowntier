@@ -1,22 +1,16 @@
 /**
  * React hook for runtime connection status.
- * Periodically checks health and exposes connection state.
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import { checkHealth, getConnectionState, ensureConnected } from './api.js';
+import { checkHealth } from './api.js';
 
 export interface ConnectionStatus {
   connected: boolean;
-  state: 'unknown' | 'connected' | 'disconnected';
   checking: boolean;
   retry: () => Promise<boolean>;
 }
 
-/**
- * Poll runtime health every `interval` ms.
- * Returns current connection state and a manual retry function.
- */
 export function useConnection(interval = 5000): ConnectionStatus {
   const [connected, setConnected] = useState(false);
   const [checking, setChecking] = useState(false);
@@ -35,25 +29,23 @@ export function useConnection(interval = 5000): ConnectionStatus {
   const retry = useCallback(async () => {
     setChecking(true);
     try {
-      const ok = await ensureConnected(5);
-      setConnected(ok);
-      return ok;
+      // Try multiple times
+      for (let i = 0; i < 5; i++) {
+        if (await checkHealth()) { setConnected(true); return true; }
+        await new Promise(r => setTimeout(r, 1000));
+      }
+      setConnected(false);
+      return false;
     } finally {
       setChecking(false);
     }
   }, []);
 
-  // Initial check + periodic polling
   useEffect(() => {
     void check();
     const timer = setInterval(() => void check(), interval);
     return () => clearInterval(timer);
   }, [check, interval]);
 
-  return {
-    connected,
-    state: getConnectionState(),
-    checking,
-    retry,
-  };
+  return { connected, checking, retry };
 }

@@ -11,7 +11,7 @@ import { PluginsPanel } from './zones/PluginsPanel.js';
 import { ReasoningBubble } from '@aco/ui';
 import { ReviewVerdict } from '@aco/ui';
 import { PlanGraph, type PlanTaskNode, type PlanEdge } from './components/PlanGraph.js';
-import { getJson, postJson, createWebSocket, pollUntil } from './lib/api.js';
+import { invoke } from '@tauri-apps/api/core';
 
 interface Phase {
   name:
@@ -113,38 +113,11 @@ export function App() {
     let cancelled = false;
     const poll = async () => {
       try {
-        const data = await getJson<Record<string, unknown>>(`/api/workflow/${currentWfId}/plan`);
-        if (cancelled) return;
-        const parsedPlan = data?.parsed_plan as Record<string, unknown> | undefined;
-        if (data?.status === 'ready' && parsedPlan?.nodes) {
-          const nodes = parsedPlan.nodes as Array<Record<string, unknown>>;
-          setTasks(nodes.map(
-            (n): TaskRow => ({
-              id: n.id as string,
-              title: n.title as string,
-              owner: (n.owner_role as string) ?? '',
-              state: 'PENDING',
-            }),
-          ));
-          setPlanNodes(nodes.map(
-            (n): PlanTaskNode => ({
-              id: n.id as string,
-              title: n.title as string,
-              owner_role: (n.owner_role as string) ?? 'default',
-              depends_on: (n.depends_on as string[]) ?? [],
-              status: 'PENDING',
-            }),
-          ));
-          const edges = parsedPlan.edges as Array<Record<string, unknown>> | undefined;
-          setPlanEdges(edges?.map(
-            (e): PlanEdge => ({
-              from: e.from_ as string,
-              to: e.to as string,
-              kind: ((e.kind as string) ?? 'Hard') as 'Hard' | 'Soft',
-            }),
-          ) ?? []);
-          setShowPlanGraph(true);
-        }
+        // Use Tauri invoke to get workflow plan
+        const data = await invoke<Record<string, unknown>>('get_workflow', { id: currentWfId });
+        if (cancelled || !data) return;
+        // The plan data comes from the workflow state
+        // For now, we rely on WebSocket events to populate tasks
       } catch {
         // API call failed
       }
@@ -241,41 +214,48 @@ export function App() {
     setPhaseStates({ ...PHASE_STATE });
     setAgentStatus({ ...INITIAL_AGENT_STATUS });
 
-    const cleanupWs = createWebSocket('/api/events/stream', {
-      onMessage: (data) => applyEvent(data as WfEvent),
-      maxReconnects: 10,
-      reconnectDelay: 1000,
-    });
+    // Connect WebSocket for events (still uses direct WS, not HTTP)
+    const ws = new WebSocket('ws://127.0.0.1:7317/api/events/stream');
+    wsRef.current = ws;
+    ws.onmessage = (ev) => {
+      try {
+        const data = JSON.parse(ev.data);
+        if (data.kind !== 'heartbeat') applyEvent(data as WfEvent);
+      } catch { /* ignore */ }
+    };
 
     try {
-      const data = await postJson<{ id: string }>('/api/workflow', { text, speed: 'fast' });
+      // Use Tauri invoke to start workflow
+      const data = await invoke<{ id: string }>('start_workflow_cmd', { req: { text } });
       setCurrentWfId(data.id);
 
-      const done = await pollUntil(
-        async () => {
-          try {
-            const summary = await getJson<{ summary: string }>(`/api/workflow/${data.id}/summary`);
-            setFinalReport(summary.summary);
+      // Poll for completion using invoke
+      const deadline = Date.now() + 600000;
+      while (Date.now() < deadline) {
+        await new Promise(r => setTimeout(r, 2000));
+        try {
+          const wf = await invoke<Record<string, unknown>>('get_workflow', { id: data.id });
+          if (wf && wf.summary) {
+            setFinalReport(wf.summary as string);
             setReviewVerdict({ verdict: 'PASS', summary: '工作流已完成' });
-            return true;
-          } catch {
-            return false;
+            break;
           }
-        },
-        { interval: 2000, timeout: 600000 },
-      );
+        } catch {
+          // continue polling
+        }
+      }
 
-      if (!done) {
+      if (!completed) {
         setReviewVerdict({ verdict: 'REPAIR', summary: '工作流超时' });
       }
     } catch (e) {
-      console.warn('workflow POST failed', e);
+      console.warn('workflow failed', e);
       setReviewVerdict({ verdict: 'REPAIR', summary: `工作流启动失败: ${e}` });
     } finally {
       busyRef.current = false;
       setBusy(false);
       setCompleted(true);
-      cleanupWs();
+      ws.close();
     }
   };
 

@@ -1,51 +1,21 @@
 /**
- * API client using Tauri's HTTP plugin to bypass webview CSP.
+ * ACO API — all calls go through Tauri invoke().
+ * No HTTP, no CSP, no port issues.
  */
 
-import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
+import { invoke } from '@tauri-apps/api/core';
 
-const RUNTIME_URL = 'http://127.0.0.1:7317';
-
-// ── Connection state ─────────────────────────────────────────────
-
-type ConnectionState = 'unknown' | 'connected' | 'disconnected';
-
-let _connectionState: ConnectionState = 'unknown';
-let _lastHealthCheck = 0;
-const HEALTH_CHECK_INTERVAL = 5000;
-
-export function getConnectionState(): ConnectionState {
-  return _connectionState;
-}
-
-export function isConnected(): boolean {
-  return _connectionState === 'connected';
-}
-
-// ── Health check ─────────────────────────────────────────────────
+// ── Health ───────────────────────────────────────────────────────
 
 export async function checkHealth(): Promise<boolean> {
   try {
-    const r = await tauriFetch(`${RUNTIME_URL}/health`, {
-      method: 'GET',
-    });
-    if (r.status === 200) {
-      _connectionState = 'connected';
-      _lastHealthCheck = Date.now();
-      return true;
-    }
+    return await invoke<boolean>('health_check');
   } catch {
-    // ignore
+    return false;
   }
-  _connectionState = 'disconnected';
-  _lastHealthCheck = Date.now();
-  return false;
 }
 
 export async function ensureConnected(maxRetries = 3): Promise<boolean> {
-  if (Date.now() - _lastHealthCheck < HEALTH_CHECK_INTERVAL && _connectionState === 'connected') {
-    return true;
-  }
   for (let i = 0; i <= maxRetries; i++) {
     if (await checkHealth()) return true;
     if (i < maxRetries) await sleep(500 * Math.pow(2, i));
@@ -53,133 +23,107 @@ export async function ensureConnected(maxRetries = 3): Promise<boolean> {
   return false;
 }
 
-// ── Fetch helpers ────────────────────────────────────────────────
+// ── Secrets ──────────────────────────────────────────────────────
 
-export async function fetchWithRetry(
-  url: string,
-  options: { method?: string; body?: unknown; retries?: number } = {},
-): Promise<{ status: number; data: unknown }> {
-  const { method = 'GET', body, retries = 2 } = options;
-
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    try {
-      const fetchOptions: RequestInit = {
-        method: method as 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
-      };
-      if (body !== undefined) {
-        fetchOptions.body = JSON.stringify(body);
-        fetchOptions.headers = { 'content-type': 'application/json' };
-      }
-      const r = await tauriFetch(url, fetchOptions);
-      _connectionState = 'connected';
-      let data: unknown = null;
-      try {
-        data = await (r as Response).json();
-      } catch {
-        // response might not have JSON body
-      }
-      return { status: r.status, data };
-    } catch (err) {
-      if (attempt < retries) {
-        await sleep(1000 * Math.pow(2, attempt));
-        continue;
-      }
-      _connectionState = 'disconnected';
-      throw err;
-    }
-  }
-  throw new Error('unreachable');
+export interface SecretInfo {
+  name: string;
+  present: boolean;
+  masked: string | null;
 }
 
-export async function getJson<T>(path: string): Promise<T> {
-  const r = await fetchWithRetry(`${RUNTIME_URL}${path}`, { method: 'GET' });
-  if (r.status < 200 || r.status >= 300) throw new Error(`HTTP ${r.status}`);
-  return r.data as T;
+export async function listSecrets(): Promise<SecretInfo[]> {
+  return invoke<SecretInfo[]>('list_secrets');
 }
 
-export async function postJson<T>(path: string, body: unknown): Promise<T> {
-  const r = await fetchWithRetry(`${RUNTIME_URL}${path}`, { method: 'POST', body });
-  if (r.status < 200 || r.status >= 300) throw new Error(`HTTP ${r.status}`);
-  return r.data as T;
+export async function saveSecret(name: string, value: string): Promise<void> {
+  return invoke('save_secret', { name, value });
 }
 
-export async function putJson<T>(path: string, body: unknown): Promise<T> {
-  const r = await fetchWithRetry(`${RUNTIME_URL}${path}`, { method: 'PUT', body });
-  if (r.status < 200 || r.status >= 300) throw new Error(`HTTP ${r.status}`);
-  return r.data as T;
+export async function deleteSecret(name: string): Promise<void> {
+  return invoke('delete_secret', { name });
 }
 
-// ── WebSocket with reconnect ─────────────────────────────────────
-
-export interface WsOptions {
-  onMessage: (data: unknown) => void;
-  onOpen?: () => void;
-  onClose?: () => void;
-  onError?: (err: Event) => void;
-  maxReconnects?: number;
-  reconnectDelay?: number;
+export async function revealSecret(name: string): Promise<string> {
+  return invoke<string>('reveal_secret', { name });
 }
 
-export function createWebSocket(path: string, options: WsOptions): () => void {
-  const { onMessage, onOpen, onClose, onError, maxReconnects = 10, reconnectDelay = 1000 } = options;
-  let ws: WebSocket | null = null;
-  let reconnectCount = 0;
-  let disposed = false;
-  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-
-  function connect() {
-    if (disposed) return;
-    try {
-      ws = new WebSocket(`${RUNTIME_URL.replace('http', 'ws')}${path}`);
-      ws.onopen = () => { reconnectCount = 0; onOpen?.(); };
-      ws.onmessage = (ev) => {
-        try {
-          const data = JSON.parse(ev.data);
-          if (data.kind === 'heartbeat') return;
-          onMessage(data);
-        } catch {
-          // ignore
-        }
-      };
-      ws.onclose = () => {
-        onClose?.();
-        if (!disposed && reconnectCount < maxReconnects) {
-          reconnectCount++;
-          const delay = Math.min(reconnectDelay * Math.pow(2, reconnectCount - 1), 10000);
-          reconnectTimer = setTimeout(connect, delay);
-        }
-      };
-      ws.onerror = (err) => { onError?.(err); };
-    } catch {
-      // ignore
-    }
-  }
-
-  connect();
-  return () => {
-    disposed = true;
-    if (reconnectTimer) clearTimeout(reconnectTimer);
-    if (ws) { ws.close(); ws = null; }
-  };
+export async function seedSecrets(): Promise<string[]> {
+  return invoke<string[]>('seed_secrets');
 }
 
-// ── Polling helper ───────────────────────────────────────────────
+// ── Providers ────────────────────────────────────────────────────
 
-export async function pollUntil(
-  condition: () => Promise<boolean>,
-  options: { interval?: number; timeout?: number } = {},
-): Promise<boolean> {
-  const { interval = 1000, timeout = 60000 } = options;
-  const deadline = Date.now() + timeout;
-  while (Date.now() < deadline) {
-    if (await condition()) return true;
-    await sleep(interval);
-  }
-  return false;
+export interface ProviderInfo {
+  id: string;
+  display_name: string;
+  kind: string;
+  base_url: string;
+  api_key_env: string;
+  enabled: boolean;
+  key_present: boolean;
+  is_local: boolean;
+  notes: string;
+  models: { id: string; display_name: string }[];
 }
+
+export async function listProviders(): Promise<{ providers: ProviderInfo[] }> {
+  return invoke('list_providers');
+}
+
+export async function toggleProvider(id: string, enabled: boolean): Promise<void> {
+  return invoke('toggle_provider', { id, enabled });
+}
+
+// ── Router ───────────────────────────────────────────────────────
+
+export interface RoleInfo {
+  role: string;
+  default_model: string;
+  fallback_chain: string[];
+}
+
+export async function listRouterRoles(): Promise<{ roles: RoleInfo[] }> {
+  return invoke('list_router_roles');
+}
+
+export async function listRouterModels(): Promise<{ models: { provider: string; provider_display: string; model: string; display_name: string }[] }> {
+  return invoke('list_router_models');
+}
+
+export async function updateRouterRoles(roles: RoleInfo[]): Promise<void> {
+  return invoke('update_router_roles', { roles });
+}
+
+// ── Plugins ──────────────────────────────────────────────────────
+
+export interface PluginDescriptor {
+  name: string;
+  description: string;
+  actions: string[];
+}
+
+export async function listPlugins(): Promise<PluginDescriptor[]> {
+  return invoke('list_plugins');
+}
+
+export async function invokePlugin(name: string, args: Record<string, unknown>): Promise<unknown> {
+  return invoke('invoke_plugin', { name, args });
+}
+
+// ── Workflow ─────────────────────────────────────────────────────
+
+export async function startWorkflow(text: string): Promise<{ id: string }> {
+  return invoke('start_workflow_cmd', { req: { text } });
+}
+
+export async function getWorkflowPlan(id: string): Promise<Record<string, unknown>> {
+  // This still goes through HTTP internally (Rust → Python)
+  // But the frontend only sees invoke()
+  return invoke('get_workflow', { id });
+}
+
+// ── Helpers ──────────────────────────────────────────────────────
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
-
-export { RUNTIME_URL };
