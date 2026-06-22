@@ -1,12 +1,12 @@
 # Architecture
 
-> End-to-end architecture of Agent Company OS
+> End-to-end architecture of Agent Company OS (v0.3+)
 
-**Version:** v0.1 RFC
-**Status:** Draft
+**Version:** v0.3 RFC
+**Status:** Active
 **Author:** Thatgfsj
-**Related:** [PROJECT_SPEC.md](./PROJECT_SPEC.md) · [TECH_STACK.md](./TECH_STACK.md)
-**Last updated:** 2026-06-18
+**Related:** [TECH_STACK.md](./TECH_STACK.md) · [AGENT_PROTOCOL.md](./AGENT_PROTOCOL.md)
+**Last updated:** 2026-06-22
 
 ---
 
@@ -17,12 +17,11 @@
    parallel without colliding.
 3. Make every cross-module call **typed** and **versioned** — never
    `serde_json::Value` across crates without a contract.
-4. Make the **Python ⇄ Rust** boundary explicit: where, why, and what
-   types cross it.
+4. **No Python in the runtime path.** Everything agent-related is Rust.
 
 ---
 
-## 2. One-Page Diagram
+## 2. One-Page Diagram (v0.3)
 
 ```
                           ┌────────────────────────────────┐
@@ -30,34 +29,56 @@
                           │                                │
                           │   React 19 + TS + Tailwind v4  │
                           │   ┌────────────────────────┐   │
-                          │   │  Mission Control UI    │   │
-                          │   │  (Z1–Z5 + Timeline)    │   │
+                          │   │  IDE-style UI           │   │
+                          │   │  文件树 │ Monaco │ Timeline │   │
+                          │   │       │  diff  │          │   │
+                          │   │       │ xterm.js│  Chat   │   │
                           │   └────────────┬───────────┘   │
                           │                │ Tauri IPC     │
-                          │   ┌────────────┴───────────┐   │
-                          │   │  Event Bus (typed)     │   │
-                          │   └────────────┬───────────┘   │
-                          │                │ WebSocket     │
                           └────────────────┼───────────────┘
                                            │
               ┌────────────────────────────┼────────────────────────────┐
+              │   Tauri Backend (Rust, single process)                  │
               │                            │                            │
-   ┌──────────▼─────────┐       ┌───────────▼──────────┐     ┌───────────▼──────────┐
-   │  Tauri Core (Rust) │       │  Claude Code CLI     │     │  Python Runtime      │
-   │  (crates/*)        │       │  (sidecar, PTY)      │     │  (apps/runtime)      │
-   │                    │       │                      │     │                      │
-   │  tauri-core        │       │  - Read/Edit files   │     │  - FastAPI /uvicorn  │
-   │  event-bus         │       │  - Run tests         │     │  - Workflow engine   │
-   │  config            │       │  - Stream output     │     │  - Agent framework   │
-   │  storage (SQLx)    │       │                      │     │  - Provider manager  │
-   │  claude-adapter    │◄──────┤                      │     │  - Plugin loader     │
-   └──────────┬─────────┘       └──────────────────────┘     └──────────┬───────────┘
-              │                                                          │
-              │                       ┌──────────────────┐               │
-              └───────────────────────┤   SQLite (WAL)   │◄──────────────┘
-                                      │   + FTS5         │
-                                      └──────────────────┘
+              │   crates/tauri-core        │   crates/agent-core        │
+              │     commands, menu, tray   │     agent loop, context    │
+              │     Tauri events  ◀────────┤     tool trait + registry  │
+              │                            │     provider trait + impls │
+              │   crates/event-bus         │     prompt engine          │
+              │     in-process pub/sub     │     bash/read/write/patch  │
+              │                            │     unified SSE streaming  │
+              │   crates/storage            │                            │
+              │     SQLx (SQLite + FTS5)    │   crates/provider-presets  │
+              │     workflows, usage       │     built-in providers     │
+              │                            │     (OpenAI/Anthropic/...) │
+              │   crates/pipe-server       │                            │
+              │     \\.\pipe\aco_runtime    │                            │
+              │     JSON-RPC + events      │                            │
+              │     (optional external API) │                            │
+              │                            │                            │
+              │   crates/config            │                            │
+              │     providers.toml, ...    │                            │
+              └────────────────────────────┴────────────────────────────┘
+                                           │
+                                           │ HTTPS (provider API calls)
+                                           ▼
+                              ┌────────────────────────┐
+                              │  LLM Providers          │
+                              │  OpenAI · Anthropic ·    │
+                              │  Google · DeepSeek · ... │
+                              │  (any OpenAI-compat)     │
+                              └────────────────────────┘
 ```
+
+**One process tree (v0.3):**
+
+| Runtime | Language | Role |
+|---------|----------|------|
+| Tauri webview | TS/React | UI only |
+| Tauri core + agent-core | Rust | IPC, FS, SQLite, agent loop, provider calls, event bus, pipe server |
+
+**No Python. No external CLI.** The only outbound network calls go
+directly from `agent-core` to LLM provider APIs over HTTPS.
 
 ---
 
@@ -65,187 +86,231 @@
 
 ```
 crates/
-├── tauri-core/        # the binary glue; Tauri commands, menus, tray
-├── event-bus/         # in-process pub/sub; events flow Tauri ⇄ webview ⇄ Python
-├── claude-adapter/    # spawns `claude` CLI in a portable-pty; pipes stdout/stderr
-├── config/            # parses providers.toml, router.toml, aco.toml
-└── storage/           # SQLx repositories (workflows, usage, sessions)
+├── tauri-core/        # Tauri app glue; commands, menu, tray, window
+├── event-bus/         # in-process pub/sub; events flow Rust ⇄ webview
+├── agent-core/        # ⭐ v0.3 — agent loop, tools, providers, context
+│   ├── loop.rs
+│   ├── context.rs
+│   ├── tools/
+│   ├── providers/
+│   └── prompt/
+├── provider-presets/  # ⭐ v0.3 — built-in provider catalog (data only)
+├── pipe-server/       # ⭐ v0.3 — Rust named-pipe server (was Python)
+├── config/            # providers.toml, aco.toml parsing
+├── storage/           # SQLx repositories (workflows, usage, sessions)
+└── shared/            # cross-crate types (events, errors, IPC)
 ```
 
 **Rules:**
 
-* `tauri-core` is the only crate that depends on `tauri`. All others are
-  library-only and can be tested in isolation.
-* `event-bus` has **no** deps except `serde`, `tokio`, `thiserror`.
-* `storage` is the **only** crate that talks to SQLite directly; everyone
+* `tauri-core` is the only crate that depends on `tauri`. All others
+  are library-only and unit-testable in isolation.
+* `event-bus` has no deps except `serde`, `tokio`, `thiserror`.
+* `storage` is the only crate that talks to SQLite directly; everyone
   else goes through its `Repository` trait.
-* `claude-adapter` owns the portable-pty; nothing else spawns processes.
+* `agent-core` owns all LLM calls; nothing else spawns HTTP requests
+  to providers.
+* The `bash` tool inside `agent-core/tools/bash.rs` is the only place
+  that spawns processes; every invocation is logged and surfaced to
+  the UI in real time.
+* No Python in this tree. The `apps/runtime/` and `runtime/` Python
+  packages are **deleted** as of v0.3.
 
 ---
 
-## 4. Module Boundaries (Python side)
+## 4. agent-core Deep Dive
 
 ```
-runtime/
-├── agents/
-│   ├── chief.py        # orchestrates planning + dispatch + repair
-│   ├── critic_a.py     # bug-hunter
-│   ├── critic_b.py     # architect
-│   ├── worker.py       # generic worker
-│   ├── planner.py      # (re-)plan doc producer
-│   ├── reporter.py     # final user-facing summary
-│   └── merger.py       # consolidates worker outputs into a single deliverable
-├── workflow/
-│   ├── state_machine.py    # implements WORKFLOW_SPEC.md §3
-│   ├── transitions.py      # transition table + guards
-│   ├── persistence.py      # JSONL append-only log
-│   └── recovery.py         # resume after crash
+crates/agent-core/src/
+├── lib.rs              public API: Agent::run(task) -> Stream<AgentEvent>
+├── loop.rs             main loop: stream LLM → tool_calls → execute → repeat
+├── context.rs          token counting + truncation + summarization
+├── events.rs           AgentEvent enum (TextDelta, ToolStarted, ToolFinished, ...)
+├── tools/
+│   ├── mod.rs          Tool trait + ToolRegistry
+│   ├── read.rs         cat a file with line range
+│   ├── write.rs        atomic write + .bak before any change
+│   ├── patch.rs        apply unified diff (bidirectional fuzzy match)
+│   ├── bash.rs         tokio::process with timeout + live stdout
+│   ├── grep.rs         ripgrep wrapper
+│   └── glob.rs         glob pattern matcher
 ├── providers/
-│   ├── base.py             # Provider protocol (mirrors Rust trait)
-│   ├── anthropic.py
-│   ├── openai.py
-│   ├── google.py
-│   ├── minimax.py
-│   ├── moonshot.py
-│   ├── deepseek.py
-│   ├── ollama.py
-│   ├── openrouter.py
-│   └── openai_compat.py    # base for custom endpoints
-├── plugins/
-│   ├── loader.py            # reads plugins/*/plugin.toml
-│   ├── rpc.py               # JSON-RPC over stdio client
-│   └── builtin/             # shipped: git, docker, browser, mcp
-├── prompts/
-│   └── ...                  # mirrored from /prompts/ at root
-├── memory/
-│   ├── project.py           # project-scoped memory
-│   └── workflow.py          # per-workflow scratchpad
-└── api/
-    ├── main.py              # FastAPI entry
-    ├── routes/
-    │   ├── workflow.py
-    │   ├── events.py        # WebSocket
-    │   └── plugins.py
-    └── schemas.py           # Pydantic models (mirrors agent-protocol/v0.1)
+│   ├── mod.rs          Provider trait: stream_chat(messages) -> Stream<Chunk>
+│   ├── openai.rs       OpenAI-compat (also covers DeepSeek, Moonshot, custom)
+│   ├── anthropic.rs    Anthropic messages API + SSE
+│   ├── google.rs       Gemini
+│   └── custom.rs       user-defined relay (from provider-presets)
+├── prompt/
+│   ├── system.rs       system prompts per role (首席 / 缺陷猎手 / 工匠 / ...)
+│   └── template.rs     placeholder substitution + context injection
+└── tests/              unit tests per module + e2e mock provider tests
 ```
 
-**Rules:**
+### 4.1 Agent loop (sketch)
 
-* The `Provider` protocol **must** stay in lock-step with the Rust
-  trait in [PROVIDER_SPEC §3](./PROVIDER_SPEC.md). Drift is caught by
-  the `types-sync` CI check.
-* `workflow/state_machine.py` is the **only** module that owns state
-  transitions. Agents call it; they don't mutate state directly.
-* `plugins/loader.py` refuses to load a plugin whose declared
-  capabilities are not satisfied by the runtime.
+```rust
+pub async fn run(self, task: TaskEnvelope) -> Result<()> {
+    let mut history = self.build_initial_messages(&task);
+
+    loop {
+        let resp = self.provider.stream_chat(&history).await?;
+        let mut tool_calls = Vec::new();
+        let mut text_buf = String::new();
+
+        while let Some(chunk) = resp.next().await {
+            match chunk? {
+                Chunk::Text(s) => {
+                    text_buf.push_str(&s);
+                    self.bus.emit(AgentEvent::TextDelta {
+                        agent: self.role,
+                        delta: s,
+                    });
+                }
+                Chunk::ToolUse(tc) => tool_calls.push(tc),
+            }
+        }
+
+        history.push(Message::Assistant(
+            text_buf.clone(),
+            tool_calls.iter().map(|t| t.id.clone()).collect(),
+        ));
+
+        if tool_calls.is_empty() { break; }
+
+        for tc in tool_calls {
+            self.bus.emit(AgentEvent::ToolStarted {
+                agent: self.role, name: tc.name.clone(), args: tc.args.clone(),
+            });
+            let result = self.tools.execute(&tc.name, tc.args, &self.workspace).await?;
+            self.bus.emit(AgentEvent::ToolFinished {
+                agent: self.role, name: tc.name.clone(), result: result.preview(),
+            });
+            history.push(Message::ToolResult {
+                tool_call_id: tc.id, content: result.full(),
+            });
+        }
+
+        if history.token_count() > self.context_budget {
+            history = self.context.compact(history).await?;
+        }
+    }
+    Ok(())
+}
+```
+
+### 4.2 Tool trait
+
+```rust
+#[async_trait]
+pub trait Tool: Send + Sync {
+    fn name(&self) -> &'static str;
+    fn schema(&self) -> serde_json::Value;
+    async fn execute(&self, args: serde_json::Value, ws: &Workspace)
+        -> Result<ToolOutput>;
+}
+```
+
+### 4.3 Patch algorithm
+
+The `patch` tool accepts a unified diff:
+
+1. **Bidirectional fuzzy match** — try forward, then reverse.
+2. **Context-line trim** — tolerate whitespace drift.
+3. **Atomic apply** — temp file + `fsync` + `rename(2)`. Original
+   becomes `<file>.bak`.
+4. **Rollback** — on error, restore `.bak`.
 
 ---
 
-## 5. Module Boundaries (TypeScript side)
+## 5. Frontend Layout
 
 ```
-packages/
-├── ui/                 # React components (Z1–Z5)
-├── workflow/           # client-side state types, TanStack Query hooks
-├── providers/          # provider metadata tables (no SDK; data only)
-├── prompts/            # prompt template renderer (uses Handlebars-like syntax)
-└── shared/             # cross-language event/error/IPC types (source of truth)
-apps/
-└── desktop/            # Tauri app: webview + Rust src-tauri/
+apps/desktop/src/
+├── zones/              (legacy zone layout, kept for Settings & Plugins)
+├── pages/              (v0.3 — new IDE-style single page)
+│   ├── WorkspacePage.tsx       ⭐ the new IDE shell
+│   ├── FileTreePanel.tsx
+│   ├── MonacoDiffPanel.tsx
+│   ├── TimelinePanel.tsx
+│   ├── ConsolePanel.tsx
+│   └── ChatDock.tsx
+├── hooks/
+│   ├── useEventStream.ts        (already exists)
+│   ├── useAgentStream.ts        ⭐ text delta subscription
+│   ├── useToolEvents.ts         ⭐ tool started/finished subscription
+│   └── useFileTree.ts           ⭐ live file tree (notify-rs backend)
+├── stores/             (Zustand)
+└── lib/api.ts
 ```
-
-**Rules:**
-
-* `packages/shared` is the **source of truth** for IPC events. Python
-  and Rust generate their types from a JSON Schema committed in this
-  package; drift is caught by `types-sync`.
-* No package may import another package's internals — only its
-  `index.ts` entry point.
 
 ---
 
 ## 6. Cross-Language Type Safety
 
+Only TS ⇄ Rust now (no Python).
+
 ```
-packages/shared/src/events.ts        ← source of truth
-        │           │           │
-        │ codegen   │ codegen   │ codegen
-        ▼           ▼           ▼
-Python Pydantic   Rust serde   (TS already)
-runtime/api/      crates/event-bus/
-schemas.py        src/events.rs
+packages/shared/src/events.ts         ← source of truth
+        │
+        ▼
+crates/shared/src/events.rs           (hand-mirrored, checked by CI)
 ```
-
-**Codegen tooling:**
-
-* TS → JSON Schema: `ts-json-schema-generator`
-* JSON Schema → Python: `datamodel-code-generator`
-* JSON Schema → Rust: `schemars` + a small build script
-
-CI runs `pnpm run types:sync` on every PR. Failure = blocked.
 
 ---
 
 ## 7. Data Flow: One Workflow Run
 
 ```
-User                 Chief           Critics         Workers        Storage
- │                     │                │               │              │
- │─── new request ────▶│                │               │              │
- │                     │─── analyze ────┐│               │              │
- │                     │                ││               │              │
- │◀── USER_QUERY ──────│                ││               │              │
- │─── response ───────▶│                ││               │              │
- │                     │── plan ────────┘│               │              │
- │                     │────── REVIEW_REQUEST ──────────▶│              │
- │                     │◀───── REVIEW_RESPONSE ──────────│              │
- │                     │── plan_approved ─┐              │              │
- │                     │                  │              │              │
- │                     │── TASK_ASSIGN ──────────────────▶│              │
- │                     │                  │              │── read code ─│
- │                     │                  │              │── write ─────▶│
- │                     │                  │              │── test ──────▶│
- │                     │◀──── TASK_RESULT ────────────────│              │
- │                     │────── REVIEW_REQUEST ──────────▶│              │
- │                     │◀───── REVIEW_RESPONSE ──────────│              │
- │                     │── REPAIR_REQUEST ───────────────▶│              │
- │                     │                  │              │── fix ──────▶│
- │                     │◀──── TASK_RESULT (repaired) ─────│              │
- │                     │── report ─┐     │               │              │
- │                     │           │     │               │              │
- │◀── final summary ───│           │     │               │              │
+User           UI          agent-core       Provider       SQLite
+ │              │                │              │             │
+ │── 任务 ────▶│                │              │             │
+ │              │── invoke ────▶│              │             │
+ │              │                │── stream ──▶│             │
+ │              │                │◀─ tokens ───│             │
+ │              │◀── text delta ─│              │             │
+ │              │ (render live)  │              │             │
+ │              │                │── tool_call: read foo.rs   │
+ │              │                │── emit ToolStarted         │
+ │              │                │── fs.read()                │
+ │              │                │── emit ToolFinished        │
+ │              │                │── stream ──▶│             │
+ │              │                │◀─ tokens ───│             │
+ │              │                │── tool_call: patch foo.rs  │
+ │              │                │── atomic write + .bak      │
+ │              │                │── emit ToolFinished        │
+ │              │                │── stream ──▶│             │
+ │              │                │◀─ tokens ───│             │
+ │              │                │── no tool_calls → done     │
+ │              │                │── save run ──────────────▶│
+ │◀── done ─────│                │              │             │
 ```
-
-Every arrow above is a **typed** message with a `schema` field
-(see [AGENT_PROTOCOL §3](./AGENT_PROTOCOL.md)).
 
 ---
 
 ## 8. Concurrency Model
 
-* **One workflow = one Chief.** Workers and Critics are async tasks
-  spawned by the Chief, not threads.
+* **One workflow = one 首席.** 工匠 / 缺陷猎手 / 质检师 are async
+  tasks spawned by the 首席, not threads.
 * **Tauri webview** runs on the main thread; React state updates go
   through TanStack Query → event-bus → Tauri IPC.
-* **Python runtime** is a single uvicorn process. Workflows are
-  cooperative-multitasked (asyncio); CPU-heavy work is offloaded to
-  `asyncio.to_thread`.
-* **SQLite** uses WAL mode. One writer, many readers. No long-held
-  transactions.
+* **agent-core** uses tokio multi-thread. Each provider call is a
+  cancellable `tokio::select!`.
+* **SQLite** uses WAL mode. One writer, many readers.
+* **SSE streams** are per-call `Stream` impls, not shared; cancel on
+  agent abort.
 
 ---
 
 ## 9. Failure Domains
 
-| Failure                       | Boundary that catches it        | Recovery                    |
-|-------------------------------|----------------------------------|-----------------------------|
-| Model API timeout             | `runtime/providers/*`           | Router failover (PROVIDER_SPEC §6.2) |
-| Worker crash mid-task         | Chief via heartbeat timeout     | REPAIR or ABORT             |
-| Claude Code CLI crash         | `claude-adapter` PTY watcher    | Restart, retry once, else ABORT |
-| SQLite corruption             | `storage` integrity check       | Backup restore (STORAGE_SPEC §7) |
-| Tauri webview crash           | Tauri main process              | Tauri auto-reload webview   |
-| Python runtime crash          | Tauri supervisor (`tauri-plugin-shell` restart policy) | Restart runtime, resume workflow from log |
-| Whole-process crash           | OS                               | Reopen app, scan `storage/workflows/*.jsonl`, offer resume |
+| Failure | Boundary that catches it | Recovery |
+|---------|--------------------------|----------|
+| Model API timeout | `agent-core/providers/*` | Router failover |
+| 工匠 crash mid-task | 首席 via heartbeat timeout | REPAIR or ABORT |
+| Provider 5xx / 429 | `agent-core/providers/*` | Backoff + retry, then failover |
+| SQLite corruption | `storage` integrity check | Backup restore |
+| Tauri webview crash | Tauri main process | Auto-reload webview |
+| Whole-process crash | OS | Reopen app, scan workflows/*.jsonl, offer resume |
 
 ---
 
@@ -263,30 +328,25 @@ Every arrow above is a **typed** message with a `schema` field
    │  - Workflow state                                          │
    │  - SQLite                                                 │
    │  - File system                                            │
+   │  - Tool execution (patch / bash)                          │
    └────────────────────────────────────────────────────────────┘
 ```
 
 * The **user** trusts the core to do what they asked.
-* The **core** does **not** trust plugins or providers — they run
-  sandboxed (see [PLUGIN_SPEC §8](./PLUGIN_SPEC.md)) and their
-  responses are validated against the contract (see
-  [AGENT_PROTOCOL §11](./AGENT_PROTOCOL.md)).
+* The **core** does **not** trust plugins or providers.
 * **Providers** are explicitly untrusted; never trust a model's
-  output as code or SQL — it's just text until the runtime validates it.
+  output as code or SQL — it's just text until agent-core
+  validates it.
 
 ---
 
 ## 11. Open Questions
 
-1. Should the Python runtime be a **single process** (simpler) or
-   one-process-per-workflow (more isolated, heavier)? (proposed: single
-   for v0.1, per-workflow in v0.3)
-2. Should we run providers in a **separate sandbox process** (gVisor,
-   Firecracker) for untrusted endpoints? (proposed: not in v0.1;
-   rely on network egress allowlist)
-3. Should the Tauri webview communicate with the Python runtime
-   **directly** (skipping the Rust core) for lower latency? (proposed:
-   no — all traffic through the Rust core for one source of truth)
+1. Ship a Rust `aco doctor` CLI before v0.4? (proposed: yes)
+2. Should `bash` tool require approval per invocation, or only for
+   "dangerous" patterns? (proposed: dangerous patterns only)
+3. Open-source the agent-core prompts? (proposed: yes, under
+   `crates/agent-core/prompts/`)
 
 ---
 

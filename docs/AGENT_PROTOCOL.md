@@ -2,11 +2,10 @@
 
 > Inter-agent communication contract for Agent Company OS
 
-**Version:** v0.1 RFC
-**Status:** Draft
+**Version:** v0.3 RFC
+**Status:** Active
 **Author:** Thatgfsj
-**Supersedes:** PROJECT_SPEC.md §3, §4 (formal contract)
-**Last updated:** 2026-06-18
+**Last updated:** 2026-06-22
 
 ---
 
@@ -25,13 +24,15 @@ agents in ACO use to talk to each other. The contract must:
 
 ## 2. Actors
 
-| Role                | Talks to             | Talks with        |
-|---------------------|----------------------|-------------------|
-| Chief Agent         | Critics, Workers, User | All              |
-| Critic A / B        | Chief                | Chief only        |
-| Worker              | Chief                | Chief only        |
-| Reporter (optional) | Chief                | Chief only        |
-| User                | Chief                | Chief only        |
+| 中文名 | 协议名 | Talks to | Talks with |
+|--------|--------|----------|------------|
+| **首席** (Chief) | `agent:chief` | 缺陷猎手 / 质检师 / 工匠 / 军师 / 传令官 / User | All |
+| **缺陷猎手** (Critic A) | `agent:critic:a` | 首席 | 首席 only |
+| **质检师** (Critic B) | `agent:critic:b` | 首席 | 首席 only |
+| **军师** (Planner) | `agent:planner` | 首席 | 首席 only |
+| **工匠** (Worker) | `agent:worker:<task-slug>` | 首席 | 首席 only |
+| **传令官** (Reporter) | `agent:reporter` | 首席 | 首席 only |
+| **User** | `agent:user` | 首席 | 首席 only |
 
 **Rule:** Only the Chief is a hub. All other agents are **leaves**.
 
@@ -393,11 +394,46 @@ retry by default.
 
 ---
 
-## 12. Open Questions
+## 12. v0.3 Implementation Map
+
+This protocol is **implementation-agnostic**. v0.3 implements it as
+follows:
+
+| Protocol concept | v0.3 implementation |
+|------------------|---------------------|
+| Envelope (the JSON above) | `crates/agent-core/src/protocol.rs::Envelope` (Rust serde) |
+| Transport | In-process `tokio::mpsc` between role handlers in `crates/agent-core/src/loop.rs` |
+| Agent IDs | `首席::id() = "agent:chief"`, etc., derived from role |
+| Persistence | Each envelope appended to `storage/workflows/<wf_id>.jsonl` |
+| UI surface | Streamed to webview via `crates/event-bus` → Tauri `wf:event` |
+
+**Removed as of v0.3:**
+
+* The Python `runtime/aco_runtime_lib/agents/` package. The Chief /
+  Critic / Worker classes there are now Rust structs in
+  `crates/agent-core/src/roles/`.
+* The Claude Code CLI adapter (`crates/claude-adapter/`) — replaced
+  by `crates/agent-core/src/providers/` (HTTPS SSE) and
+  `crates/agent-core/src/tools/` (in-process execution).
+* The `portable-pty` dependency. Subprocess execution goes through
+  `tokio::process` inside the `bash` tool only.
+
+The **protocol** itself is unchanged: same envelope, same types,
+same isolation rules. Only the implementation language and runtime
+location changed.
+
+---
+
+## 13. Open Questions
 
 1. Should `TASK_QUESTION` block the worker, or be best-effort? (proposed: blocking)
 2. Should `USER_QUERY` have a default option (timeout → pick first option)? (proposed: yes, with a "no default — abort" override)
-3. Should we sign messages (HMAC) for tamper detection? (proposed: not in v0.1)
+3. Should we sign messages (HMAC) for tamper detection? (proposed: not in v0.3)
+4. v0.3 deprecates the English role names (`Chief`, `Critic`, …) in
+   favor of 中文 (`首席`, `缺陷猎手`, …). Should we keep the protocol
+   field `from: "agent:chief"` for backward compat, or change to
+   `from: "agent:shouxi"`? (proposed: keep `agent:chief` for wire
+   compat; map to 中文 only in UI)
 
 ---
 
