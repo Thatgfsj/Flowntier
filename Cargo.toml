@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/tauri-core",
     "crates/event-bus",
+    "crates/agent-core",
     "crates/claude-adapter",
     "crates/config",
     "crates/storage",
