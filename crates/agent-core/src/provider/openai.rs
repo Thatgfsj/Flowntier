@@ -125,11 +125,19 @@ impl Provider for OpenAiProvider {
                             }
                         };
 
-                        if event.event.as_str() != "data" {
-                            // ping / error / etc. — ignore
+                        // SSE spec: when no `event:` field is given, the
+                        // event type is `message`. OpenAI's streaming
+                        // endpoint doesn't emit `event:` at all, so
+                        // eventsource-stream surfaces it as "message".
+                        // Treat both "message" and "data" as chat-chunk
+                        // carriers.
+                        let et = event.event.as_str();
+                        if et != "data" && et != "message" {
+                            tracing::debug!(event = %et, "ignoring SSE event");
                             continue;
                         }
                         let data = event.data;
+                        tracing::debug!(data = %data.chars().take(120).collect::<String>(), "SSE data");
                         if data.trim() == "[DONE]" {
                             yield Ok(StreamChunk::Done {
                                 reason: finish_reason.clone().unwrap_or_else(|| "stop".into()),
