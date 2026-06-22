@@ -13,6 +13,7 @@ import { ReviewVerdict } from '@aco/ui';
 import { PlanGraph, type PlanTaskNode, type PlanEdge } from './components/PlanGraph.js';
 import { useEventStream } from './hooks/useEventStream.js';
 import { invoke } from '@tauri-apps/api/core';
+import { ChatZone } from './zones/ChatZone.js';
 
 interface Phase {
   name:
@@ -99,6 +100,7 @@ export function App() {
   const [planEdges, setPlanEdges] = useState<PlanEdge[]>([]);
   const [selectedTask, setSelectedTask] = useState<string | null>(null);
   const [showPlanGraph, setShowPlanGraph] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
   const busyRef = useRef(false);
 
   // Subscribe to the runtime's WfEvent stream. v0.2.5+ delivers events
@@ -278,6 +280,8 @@ export function App() {
               : '准备就绪'
         }
         onSettingsClick={() => setSettingsOpen(true)}
+        onChatClick={() => setChatOpen((v) => !v)}
+        chatOpen={chatOpen}
       />
 
       <div className="flex flex-1 overflow-hidden">
@@ -412,6 +416,39 @@ export function App() {
         busy={busy}
         {...(completed ? { resetLabel: '重置' } : {})}
       />
+
+      {/* v0.3 ChatZone — progressive. Collapsed by default; toggle via TopBar. */}
+      <div
+        className={`relative flex shrink-0 border-t border-border transition-[height] ${
+          chatOpen ? 'h-[420px]' : 'h-9'
+        }`}
+      >
+        {chatOpen ? (
+          <>
+            <div className="h-full w-full">
+              <ChatZone />
+            </div>
+            <button
+              type="button"
+              onClick={() => setChatOpen(false)}
+              className="absolute right-2 top-1 rounded border border-border bg-surface-2 px-2 py-0.5 text-xs text-text-secondary hover:bg-surface-1"
+              aria-label="折叠 ChatZone"
+            >
+              ▾ 折叠
+            </button>
+          </>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setChatOpen(true)}
+            className="flex h-9 w-full items-center justify-between gap-2 bg-surface-2 px-4 text-left text-xs text-text-secondary hover:bg-surface-1"
+            aria-label="打开 ChatZone"
+          >
+            <span className="font-mono">ChatZone ▸</span>
+            <span>直接驱动 agent-core · 点这里展开</span>
+          </button>
+        )}
+      </div>
 
       <BottomConsole events={events} />
 

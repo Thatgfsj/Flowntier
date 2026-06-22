@@ -8,9 +8,19 @@ export interface TopBarProps {
   subtitle?: string;
   /** Optional onClick for the settings button. */
   onSettingsClick?: () => void;
+  /** Optional onClick for the chat-zone toggle. */
+  onChatClick?: () => void;
+  /** Whether the chat zone is currently expanded. */
+  chatOpen?: boolean;
 }
 
-export function TopBar({ projectName, subtitle, onSettingsClick }: TopBarProps) {
+export function TopBar({
+  projectName,
+  subtitle,
+  onSettingsClick,
+  onChatClick,
+  chatOpen,
+}: TopBarProps) {
   return (
     <header className="flex h-14 shrink-0 items-center gap-4 border-b border-border bg-surface-2 px-4">
       <div className="flex items-baseline gap-2">
@@ -21,6 +31,20 @@ export function TopBar({ projectName, subtitle, onSettingsClick }: TopBarProps) 
         <span className="text-xs text-text-secondary">/ {subtitle}</span>
       )}
       <div className="flex-1" />
+      {onChatClick && (
+        <button
+          type="button"
+          onClick={onChatClick}
+          aria-pressed={chatOpen}
+          className={`rounded-md border px-3 py-1.5 text-xs transition-colors focus:outline-none focus:ring-2 focus:ring-chief/50 ${
+            chatOpen
+              ? 'border-chief bg-chief/10 text-chief'
+              : 'border-border bg-surface-1 text-text-secondary hover:text-primary'
+          }`}
+        >
+          Chat
+        </button>
+      )}
       <button
         type="button"
         onClick={onSettingsClick}
@@ -31,4 +55,3 @@ export function TopBar({ projectName, subtitle, onSettingsClick }: TopBarProps) 
     </header>
   );
 }
-
