@@ -5,7 +5,7 @@
 //! * **RPC** — request/response. One connection = one round-trip.
 //!   - request  : `{"jsonrpc":"2.0","id":N,"method":M,"params":{"path":...,"body":...}}`
 //!   - response : `{"jsonrpc":"2.0","id":N,"result":{"status":S,"body":B}}`
-//!             or `{"jsonrpc":"2.0","id":N,"error":{"code":-N,"message":"..."}}`
+//!     or `{"jsonrpc":"2.0","id":N,"error":{"code":-N,"message":"..."}}`
 //!
 //! * **Events** — long-lived connection; server pushes one
 //!   JSON object per event: `{"kind":K,"agent_id":A,"...":...}`

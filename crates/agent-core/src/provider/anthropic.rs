@@ -162,12 +162,16 @@ impl Provider for AnthropicProvider {
                                 }
                                 if let Ok(d) = serde_json::from_str::<Delta>(&event.data) {
                                     match (current_block.as_mut(), d.delta) {
-                                        (Some(PartialBlock::Text), DeltaInner::TextDelta { text }) => {
-                                            if !text.is_empty() {
-                                                yield Ok(StreamChunk::Text { delta: text });
-                                            }
+                                        (
+                                            Some(PartialBlock::Text),
+                                            DeltaInner::TextDelta { text },
+                                        ) if !text.is_empty() => {
+                                            yield Ok(StreamChunk::Text { delta: text });
                                         }
-                                        (Some(PartialBlock::Tool { args, .. }), DeltaInner::InputJsonDelta { partial_json }) => {
+                                        (
+                                            Some(PartialBlock::Tool { args, .. }),
+                                            DeltaInner::InputJsonDelta { partial_json },
+                                        ) => {
                                             args.push_str(&partial_json);
                                         }
                                         _ => {}

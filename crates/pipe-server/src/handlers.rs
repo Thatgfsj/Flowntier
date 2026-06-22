@@ -154,14 +154,11 @@ async fn run_task(body: Value, state: Arc<ServerState>) -> Result<(u16, Value), 
     while let Some(ev) = rx.recv().await {
         // Best-effort fan-out; if no subscribers, that's fine.
         let _ = state.events.send(ev.clone());
-        match ev {
-            AgentEvent::Done { status, summary: s, .. } => {
-                last_status = status;
-                summary = s;
-            }
-            _ => {}
+        if let AgentEvent::Done { status, summary: s, .. } = ev {
+            last_status = status;
+            summary = s;
         }
-        if matches!(last_status.as_str(), "DONE" | "FAILED" | "ABORTED") {
+        if matches!(last_status.as_str(), "DONE" | "FAILED" | "ABORTED" | "ABORTED_REPEAT") {
             // If the wf_id was provided, replace the empty one.
             if !wf_id.is_empty() {
                 last_status = format!("{last_status} (wf={wf_id})");

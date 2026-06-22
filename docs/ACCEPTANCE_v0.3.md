@@ -422,30 +422,37 @@ e8d419b docs(v0.3): scope to Chat Zone + OpenAI-only + Deletion Manifest
 
 ## 10. Limitations / known gaps
 
-These are recorded honestly, not hidden:
+These are recorded honestly, not hidden.
 
-1. **`max_iterations = 50` (per turn).** A failed
-   `npm install` cost us ~30 tool calls of model "trying
-   things"; we are close to the cap. Future work: detect
-   repeated identical failed calls and abort early.
+### Resolved in v0.4 (post-acceptance)
+
+1. **`max_iterations` + repeat-failure detection** — `AgentConfig::repeat_abort_after`
+   (default 3) emits `Done { status: "ABORTED_REPEAT" }` after
+   the same `(tool, args)` pair fails N times in a row. The
+   `better-sqlite3` loop in §6.1 would now be cut off at
+   attempt 3 instead of 50. ✅
+4. **Workspace capability token** — `ToolContext::capabilities`
+   gates `read` / `write` / `bash` / `network`. Convenience
+   constructors `read_only()` / `no_modify()` / `network_off()`
+   for the three common sandbox profiles. ✅ (no
+   `path_allowlist` yet — that's a v0.5 hardening.)
+
+### Still open
+
 2. **Per-call timeout is 60 s** (hard cap 600 s for `bash`).
    `npm install` would have hit it. `node:sqlite` doesn't have
    this issue; we suggest new tasks prefer it.
 3. **Anthropic provider SSE bug** (deferred — see §5.3).
-4. **No sandboxing of agent file writes.** The agent has full
-   `bash` + `write` + `patch` on whatever directory the host
-   process can write to. This is fine for the current dev loop;
-   v0.4 needs a `Workspace` capability token.
 5. **Chinese-UI strings are hand-written** in
    `ChatZone.tsx`. They are not yet extracted to a translation
-   file; v0.4 will introduce i18n.
+   file; i18n planned for v0.5.
 6. **No streaming from ChatZone UI to provider yet through the
    Tauri command.** The Tauri command `run_agent_task` blocks
    until `Done` and returns the final summary. Streaming text
    deltas to the UI relies on the **events pipe** path, which is
    wired but not yet exercised end-to-end from ChatZone. The
    smoke example proves the *path* works; the UI-level
-   streaming needs one more focused test in v0.4.
+   streaming needs one more focused test in v0.5.
 
 ---
 

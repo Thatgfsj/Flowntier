@@ -57,7 +57,7 @@ impl Tool for WriteTool {
         }
 
         write_atomic(&abs, content).await?;
-        let bytes = content.as_bytes().len();
+        let bytes = content.len();
         Ok(ToolOutput::ok(format!(
             "wrote {} bytes to {}",
             bytes,

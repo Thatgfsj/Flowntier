@@ -104,7 +104,7 @@ mod tests {
     #[test]
     fn count_increases_with_content() {
         let m1 = Message::user("hi");
-        let m2 = Message::user(&"a".repeat(4000));
+        let m2 = Message::user("a".repeat(4000));
         assert!(ContextManager::count_message(&m2) > ContextManager::count_message(&m1));
     }
 
@@ -114,8 +114,8 @@ mod tests {
         let m = ContextManager::new(cfg);
         let msgs = vec![
             Message::system("you are concise"),
-            Message::user(&"a".repeat(400)),  // ~100 tokens
-            Message::assistant(&"b".repeat(400), vec![]), // ~100 tokens
+            Message::user("a".repeat(400)),  // ~100 tokens
+            Message::assistant("b".repeat(400), vec![]), // ~100 tokens
             Message::user("recent"), // 1 token
         ];
         let compacted = m.compact(msgs);

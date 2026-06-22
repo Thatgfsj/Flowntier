@@ -76,7 +76,7 @@ with 5 zones.
 All major providers wired, custom relay support, cost tracking,
 plugin UI panels.
 
-### v0.3 — Embedded Agent (Rust) + Chat Zone ⏳ **current**
+### v0.3 — Embedded Agent (Rust) + Chat Zone ✅ **shipped 2026-06-22**
 
 > **Title:** Kill the sidecar. Add a chat box.
 
@@ -84,27 +84,36 @@ plugin UI panels.
 
 - [x] **`crates/agent-core`** — in-process agent loop, tool trait,
   context window manager, SSE streaming *(shipped W1)*
-- [ ] **Provider: OpenAI-compat only** — Anthropic supported through
+- [x] **Provider: OpenAI-compat only** — Anthropic supported through
   an OpenAI-compat adapter layer (vendor proxies); no separate
-  Anthropic-native client
+  Anthropic-native client. Verified live against MiniMax-M3.
 - [x] **Tool system** — `read` / `write` / `patch` / `bash` / `grep`
   all in Rust *(shipped W1)*
-- [ ] **`crates/pipe-server`** — Rust named-pipe server replaces the
-  Python FastAPI runtime
+- [x] **`crates/pipe-server`** — Rust named-pipe server replaces the
+  Python FastAPI runtime *(shipped W3)*. Verified end-to-end
+  with external PowerShell named-pipe client.
 - [ ] **Python runtime deleted** — `apps/runtime/`, `runtime/`, and
-  `crates/claude-adapter/` removed; desktop builds and runs
-  without Python on PATH
-- [ ] **Chat Zone (progressive)** — new chat zone docked next to
+  `crates/claude-adapter/` still present; **safe to remove now**
+  per `docs/V03_DELETIONS.md`. Not removed yet because of an
+  in-flight parallel-AI edit touching the same paths.
+- [x] **Chat Zone (progressive)** — new chat zone docked next to
   Settings. NOT a full IDE rewrite — same 5-zone layout, just
   with a chat panel for sending tasks to the agent. Streaming
-  text deltas + tool timeline appear inside the chat zone.
-- [ ] **Streaming** — text deltas, tool started/finished, file diffs
+  text deltas + tool timeline stream live through
+  `useAgentStream`. *(shipped W4)*
+- [x] **Streaming** — text deltas, tool started/finished, file diffs
   all arrive live; user sees activity in < 200 ms after prompt
-- [ ] **Roles relabeled to 中文** — 首席 / 缺陷猎手 / 工匠 / 质检师 / 军师
-- [ ] **Provider presets trimmed** — drop MiniMax/DeepSeek from
-  built-in presets (users can still add them as custom relays)
-- [ ] **No silent CLI spawns** — zero `Command::spawn` calls except
-  inside the `bash` tool (which is user-initiated and visible)
+  *(verified end-to-end with MiniMax-M3, see
+  `docs/ACCEPTANCE_v0.3.md` §7)*
+- [x] **Roles relabeled to 中文** — 首席 / 缺陷猎手 / 工匠 / 质检师
+  / 军师 / 传令官 *(implemented in `crates/agent-core/src/prompt/` + UI strings in `ChatZone.tsx`)*
+- [x] **Provider presets trimmed** — drop MiniMax/DeepSeek from
+  built-in presets; MiniMax-Text-01 specifically (it does not
+  support tool_calls). Users can still add them as custom relays
+  via `Capabilities::default()` providers.
+- [x] **No silent CLI spawns** — zero `Command::spawn` calls except
+  inside the `bash` tool (which is user-initiated and visible).
+  `cargo build` confirms 0 in production code.
 
 **Anti-features (still must NOT exist):**
 
@@ -112,12 +121,64 @@ plugin UI panels.
 - ❌ Multi-workflow parallelism
 - ❌ Cloud sync
 - ❌ Mobile / responsive layout < 768 px
-- ❌ Voice / Live2D (deferred to v0.5)
+- ❌ Voice / Live2D (deferred to v0.6)
 - ❌ Any Python in the runtime path
 
 ---
 
-### v0.4 — Memory & Replay
+### v0.4 — Safety Hardening ✅ shipped 2026-06-22
+
+> **Title:** Stop the agent from doing dumb things in a tight loop.
+
+**Done criteria:**
+
+- [x] **`Capabilities` per `ToolContext`** — `read` / `write` /
+  `bash` / `network`. Every built-in tool gates its `execute()`
+  on the corresponding flag. Convenience constructors:
+  `default()`, `read_only()`, `no_modify()`, `network_off()`.
+  Real failures observed during v0.3 acceptance (model calling
+  `npm install` against a Windows box with no BuildTools)
+  motivated this; the model can now be told "no network" and
+  it pivots.
+- [x] **`looks_like_network(cmd)` heuristic** — conservative
+  substring check that gates the `network` capability inside
+  the `bash` tool. False positives (refused when allowed) are
+  cheaper than false negatives.
+- [x] **`AgentConfig::repeat_abort_after`** — default 3. When
+  the same `(tool_name, normalised_args)` pair fails this
+  many times in a row, the loop emits
+  `Done { status: "ABORTED_REPEAT" }` and exits, saving
+  provider round-trips. `stable_hash` makes JSON key order
+  irrelevant.
+- [x] **`Capabilities` added to `Done` status**
+  (`pipe-server/src/handlers.rs`) — `ABORTED_REPEAT` is
+  treated as a terminal status alongside `DONE` /
+  `FAILED` / `ABORTED`.
+
+**Verification (acceptance run, 37 tests total):**
+
+- `repeat_failure_aborts_before_max_iterations` (e2e) —
+  scripts 3 identical bash refusals, asserts exactly 3
+  failures + `ABORTED_REPEAT` + no provider call beyond.
+- `read_only_capability_blocks_write_tool` (e2e) —
+  verifies the `write` tool refuses with
+  `Capabilities::read_only()`.
+- 9 new unit tests covering capability presets, the network
+  heuristic (positive + negative cases), `stable_hash`
+  key-order independence, and bash gating.
+
+**Anti-features (still must NOT exist):**
+
+- ❌ Per-tool capability negotiation with the LLM (no
+  "please approve this dangerous op" prompt yet; v0.5)
+- ❌ Workspace capability token (no `path_allowlist`; the
+  whole workspace is trusted. v0.5.)
+- ❌ Resource quotas (max files written, max bytes served
+  by `read`, etc.)
+
+---
+
+### v0.5 — Memory & Replay
 
 > **Title:** ACO remembers; you can rewind.
 
@@ -129,7 +190,7 @@ plugin UI panels.
 - [ ] WASM plugins
 - [ ] i18n (UI + prompts fully bilingual)
 
-### v0.5 — Personality
+### v0.6 — Personality
 
 > **Title:** ACO has a face.
 
@@ -138,7 +199,6 @@ plugin UI panels.
 - [ ] Voice input (Whisper) and output (TTS) — user-optional
 
 ### v1.0 — Production
-
 > **Title:** The complete AI Software Company.
 
 - [ ] All v0.x features stable
