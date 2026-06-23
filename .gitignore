@@ -99,6 +99,11 @@ out/
 *.rpm
 *.AppImage
 
+# ─── SQLite runtime databases (regenerated per acceptance run) ───
+*.db
+*.db-shm
+*.db-wal
+
 # ─── Rust ────────────────────────────────────────────────
 # Cargo.lock IS committed (the apps are binaries, not a library
 # crate — see docs/TECH_STACK.md §2). Do NOT add `Cargo.lock`

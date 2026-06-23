@@ -17,6 +17,7 @@
  *   - token usage + final status
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import { useAgentStream, type AgentEvent } from '../hooks/useAgentStream.js';
 
 interface RoleSpec {
@@ -98,7 +99,6 @@ export function ChatZone({
     reset();
     setSending(true);
     try {
-      const { invoke } = await import('@tauri-apps/api/core');
       // The Tauri shell doesn't yet expose /api/run_task directly
       // as a command; once the v0.3 backend wires this in, we
       // call `run_agent_task` here. Until then, fall through to
