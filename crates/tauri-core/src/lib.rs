@@ -22,8 +22,6 @@ pub struct AppState {
     pub config: Arc<config::AcoConfig>,
     /// The storage repository.
     pub repo: Arc<storage::Repository>,
-    /// The Claude Code adapter.
-    pub claude: Arc<dyn claude_adapter::ClaudeRunner>,
 }
 
 impl AppState {
@@ -78,14 +76,11 @@ impl AppState {
                 require_signature_for_plugins: true,
             },
         };
-        let claude: Arc<dyn claude_adapter::ClaudeRunner> =
-            Arc::new(claude_adapter::PtyClaudeRunner::default());
 
         Ok(Self {
             bus: Arc::new(bus),
             config: Arc::new(config),
             repo: Arc::new(repo),
-            claude,
         })
     }
 }
@@ -103,6 +98,8 @@ pub enum BuildError {
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
 }
+
+
 
 /// Tauri command payload: a new workflow request from the user.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

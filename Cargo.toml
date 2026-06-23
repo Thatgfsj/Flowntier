@@ -5,7 +5,6 @@ members = [
     "crates/event-bus",
     "crates/agent-core",
     "crates/pipe-server",
-    "crates/claude-adapter",
     "crates/config",
     "crates/storage",
     "apps/desktop/src-tauri",

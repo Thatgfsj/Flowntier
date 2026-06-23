@@ -27,7 +27,6 @@ anyhow        = { workspace = true }
 event-bus     = { path = "../event-bus" }
 config        = { path = "../config" }
 storage       = { path = "../storage" }
-claude-adapter = { path = "../claude-adapter" }
 ulid          = { workspace = true }
 chrono        = { workspace = true }
 

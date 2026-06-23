@@ -1,0 +1,332 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>家庭记账本 — ACO 验收 demo</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  body { font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; }
+  .pill { padding: 2px 10px; border-radius: 9999px; font-size: 12px; }
+  .pill-in { background:#dcfce7; color:#166534; }
+  .pill-out { background:#fee2e2; color:#991b1b; }
+</style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+
+<header class="bg-white shadow-sm border-b border-slate-200">
+  <div class="max-w-6xl mx-auto px-6 py-4 flex items-baseline gap-3">
+    <h1 class="text-2xl font-semibold text-slate-900">家庭记账本</h1>
+    <span class="text-xs text-slate-500">ACO v0.3 端到端验收 · backend :4401</span>
+    <div class="ml-auto text-xs text-slate-500" id="status-bar">加载中…</div>
+  </div>
+</header>
+
+<main class="max-w-6xl mx-auto px-6 py-6 space-y-6">
+
+  <!-- 1. 用户卡片 -->
+  <section class="bg-white rounded-lg shadow p-5">
+    <h2 class="text-sm font-semibold text-slate-500 mb-3">用户</h2>
+    <div class="flex flex-wrap items-center gap-3" id="users-list">加载中…</div>
+  </section>
+
+  <!-- 2. 账户卡片 -->
+  <section class="bg-white rounded-lg shadow p-5">
+    <div class="flex items-baseline mb-3">
+      <h2 class="text-sm font-semibold text-slate-500">账户</h2>
+      <span class="ml-2 text-xs text-slate-400" id="accounts-summary"></span>
+      <button id="add-account" class="ml-auto px-3 py-1 text-xs rounded bg-slate-900 text-white hover:bg-slate-700">+ 新账户</button>
+    </div>
+    <div id="accounts-list" class="grid grid-cols-1 md:grid-cols-3 gap-3">加载中…</div>
+  </section>
+
+  <!-- 3. 流水表格 -->
+  <section class="bg-white rounded-lg shadow p-5">
+    <div class="flex items-baseline mb-3">
+      <h2 class="text-sm font-semibold text-slate-500">流水</h2>
+      <select id="tx-filter" class="ml-auto text-xs px-2 py-1 border border-slate-300 rounded">
+        <option value="">所有账户</option>
+      </select>
+      <button id="add-tx" class="ml-2 px-3 py-1 text-xs rounded bg-slate-900 text-white hover:bg-slate-700">+ 新流水</button>
+    </div>
+    <table class="w-full text-sm">
+      <thead>
+        <tr class="text-left text-xs text-slate-500 border-b border-slate-200">
+          <th class="py-2">日期</th><th>账户</th><th>类别</th><th>备注</th>
+          <th class="text-right">金额</th><th></th>
+        </tr>
+      </thead>
+      <tbody id="tx-body"><tr><td colspan="6" class="py-4 text-center text-slate-400">加载中…</td></tr></tbody>
+    </table>
+  </section>
+
+  <!-- 4. 报表 / Chart.js -->
+  <section class="bg-white rounded-lg shadow p-5">
+    <h2 class="text-sm font-semibold text-slate-500 mb-3">报表</h2>
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4" id="kpi-grid"></div>
+    <canvas id="cat-chart" height="80"></canvas>
+  </section>
+
+</main>
+
+<!-- Modal: add account -->
+<dialog id="dlg-account" class="rounded-lg shadow-2xl p-6 w-96">
+  <h3 class="text-lg font-semibold mb-3">新增账户</h3>
+  <form id="form-account" class="space-y-3">
+    <label class="block text-sm">名称<input name="name" required class="mt-1 w-full px-2 py-1 border rounded" placeholder="现金 / 银行卡" /></label>
+    <label class="block text-sm">类型
+      <select name="kind" class="mt-1 w-full px-2 py-1 border rounded">
+        <option value="cash">现金</option><option value="bank">银行卡</option><option value="alipay">支付宝</option><option value="wechat">微信</option>
+      </select>
+    </label>
+    <label class="block text-sm">初始余额<input name="balance" type="number" step="0.01" value="0" class="mt-1 w-full px-2 py-1 border rounded" /></label>
+    <div class="flex justify-end gap-2 pt-2">
+      <button type="button" onclick="document.getElementById('dlg-account').close()" class="px-3 py-1 text-sm text-slate-600">取消</button>
+      <button class="px-3 py-1 text-sm bg-slate-900 text-white rounded">保存</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Modal: add transaction -->
+<dialog id="dlg-tx" class="rounded-lg shadow-2xl p-6 w-96">
+  <h3 class="text-lg font-semibold mb-3">新增流水</h3>
+  <form id="form-tx" class="space-y-3">
+    <label class="block text-sm">账户
+      <select name="account_id" required class="mt-1 w-full px-2 py-1 border rounded"></select>
+    </label>
+    <label class="block text-sm">金额（负数=支出）<input name="amount" type="number" step="0.01" required class="mt-1 w-full px-2 py-1 border rounded" /></label>
+    <label class="block text-sm">类别<input name="category" required class="mt-1 w-full px-2 py-1 border rounded" placeholder="food / salary / shopping" /></label>
+    <label class="block text-sm">备注<input name="note" class="mt-1 w-full px-2 py-1 border rounded" /></label>
+    <div class="flex justify-end gap-2 pt-2">
+      <button type="button" onclick="document.getElementById('dlg-tx').close()" class="px-3 py-1 text-sm text-slate-600">取消</button>
+      <button class="px-3 py-1 text-sm bg-slate-900 text-white rounded">保存</button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+const API = 'http://127.0.0.1:4401';
+const $ = (s) => document.querySelector(s);
+const fmt = (n) => (n >= 0 ? '+' : '') + Number(n).toFixed(2);
+const STATUS = $('#status-bar');
+
+let state = { users: [], accounts: [], transactions: [], report: null, chart: null, currentUser: null };
+
+async function api(path, opts = {}) {
+  const r = await fetch(API + path, {
+    headers: { 'Content-Type': 'application/json' },
+    ...opts,
+    body: opts.body ? JSON.stringify(opts.body) : undefined,
+  });
+  const text = await r.text();
+  if (!r.ok) {
+    STATUS.textContent = '✗ ' + r.status + ' ' + path;
+    STATUS.classList.add('text-red-500');
+    throw new Error('HTTP ' + r.status + ': ' + text);
+  }
+  STATUS.textContent = '✓ ' + r.status + ' ' + path;
+  STATUS.classList.remove('text-red-500');
+  return text ? JSON.parse(text) : null;
+}
+
+async function loadAll() {
+  try {
+    state.users = await api('/api/users');
+    if (state.users.length === 0) {
+      const u = await api('/api/users', { method: 'POST', body: { name: '默认用户' } });
+      state.users = [u];
+    }
+    state.currentUser = state.users[0].id;
+
+    state.accounts = await api('/api/users/' + state.currentUser + '/accounts');
+
+    // Load transactions for all accounts
+    let allTx = [];
+    for (const a of state.accounts) {
+      const txs = await api('/api/accounts/' + a.id + '/transactions');
+      for (const t of txs) allTx.push({ ...t, _accountName: a.name });
+    }
+    allTx.sort((a, b) => (b.occurred_at || '').localeCompare(a.occurred_at || ''));
+    state.transactions = allTx;
+
+    state.report = await api('/api/report/summary?user_id=' + state.currentUser);
+
+    renderAll();
+  } catch (e) {
+    STATUS.textContent = '加载失败: ' + e.message;
+    STATUS.classList.add('text-red-500');
+  }
+}
+
+function renderAll() {
+  renderUsers();
+  renderAccounts();
+  renderTx();
+  renderReport();
+}
+
+function renderUsers() {
+  const el = $('#users-list');
+  el.innerHTML = '';
+  for (const u of state.users) {
+    const span = document.createElement('span');
+    span.className = 'inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-slate-100 text-sm';
+    span.textContent = u.name;
+    if (u.role && u.role !== 'member') {
+      const tag = document.createElement('span');
+      tag.className = 'ml-1 pill bg-slate-900 text-white';
+      tag.textContent = u.role;
+      span.appendChild(tag);
+    }
+    el.appendChild(span);
+  }
+}
+
+function renderAccounts() {
+  const el = $('#accounts-list');
+  el.innerHTML = '';
+  let total = 0;
+  for (const a of state.accounts) {
+    total += Number(a.balance);
+    const card = document.createElement('div');
+    card.className = 'border border-slate-200 rounded-lg p-4';
+    card.innerHTML = `
+      <div class="text-xs text-slate-500">${escape(a.kind)}</div>
+      <div class="text-base font-medium text-slate-800">${escape(a.name)}</div>
+      <div class="text-2xl font-semibold mt-2">¥${Number(a.balance).toFixed(2)}</div>
+    `;
+    el.appendChild(card);
+  }
+  $('#accounts-summary').textContent = `共 ${state.accounts.length} 个，总余额 ¥${total.toFixed(2)}`;
+}
+
+function renderTx() {
+  const sel = $('#tx-filter');
+  sel.innerHTML = '<option value="">所有账户</option>';
+  for (const a of state.accounts) {
+    const o = document.createElement('option');
+    o.value = a.id;
+    o.textContent = `${a.name} (#${a.id})`;
+    sel.appendChild(o);
+  }
+
+  const filter = sel.value;
+  const tbody = $('#tx-body');
+  tbody.innerHTML = '';
+  const rows = state.transactions.filter(t => !filter || String(t.account_id) === filter);
+  if (rows.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6" class="py-6 text-center text-slate-400">暂无流水</td></tr>';
+    return;
+  }
+  for (const t of rows) {
+    const tr = document.createElement('tr');
+    tr.className = 'border-b border-slate-100';
+    const sign = Number(t.amount) >= 0;
+    tr.innerHTML = `
+      <td class="py-2 text-xs text-slate-500">${escape(t.occurred_at)}</td>
+      <td>${escape(t._accountName)}</td>
+      <td><span class="pill ${sign ? 'pill-in' : 'pill-out'}">${escape(t.category)}</span></td>
+      <td class="text-slate-600">${escape(t.note || '')}</td>
+      <td class="text-right font-mono ${sign ? 'text-green-700' : 'text-red-700'}">${fmt(t.amount)}</td>
+      <td class="text-right">
+        <button class="text-xs text-red-500 hover:underline" data-id="${t.id}">删除</button>
+      </td>
+    `;
+    tbody.appendChild(tr);
+  }
+  for (const btn of tbody.querySelectorAll('button[data-id]')) {
+    btn.onclick = () => deleteTx(Number(btn.dataset.id));
+  }
+}
+
+function renderReport() {
+  const kpi = $('#kpi-grid');
+  kpi.innerHTML = '';
+  const r = state.report;
+  if (!r) return;
+  const kpis = [
+    { label: '总收入', value: r.total_in, cls: 'text-green-700' },
+    { label: '总支出', value: r.total_out, cls: 'text-red-700' },
+    { label: '结余', value: r.balance, cls: 'text-slate-900' },
+  ];
+  for (const k of kpis) {
+    const d = document.createElement('div');
+    d.className = 'border border-slate-200 rounded-lg p-3';
+    d.innerHTML = `
+      <div class="text-xs text-slate-500">${k.label}</div>
+      <div class="text-2xl font-semibold ${k.cls}">¥${Number(k.value).toFixed(2)}</div>
+    `;
+    kpi.appendChild(d);
+  }
+
+  // Chart
+  const labels = Object.keys(r.by_category);
+  const data = Object.values(r.by_category).map(v => Number(v));
+  const colors = data.map(v => v >= 0 ? 'rgba(34,197,94,0.7)' : 'rgba(239,68,68,0.7)');
+  if (state.chart) state.chart.destroy();
+  state.chart = new Chart($('#cat-chart'), {
+    type: 'bar',
+    data: { labels, datasets: [{ label: '金额 (¥)', data, backgroundColor: colors }] },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: { y: { beginAtZero: true } },
+    },
+  });
+}
+
+async function deleteTx(id) {
+  if (!confirm('删除流水 #' + id + '?')) return;
+  await api('/api/transactions/' + id, { method: 'DELETE' });
+  await loadAll();
+}
+
+function escape(s) { return String(s ?? '').replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c])); }
+
+// Dialogs
+$('#add-account').onclick = () => $('#dlg-account').showModal();
+$('#add-tx').onclick = () => {
+  const sel = $('#form-tx select[name=account_id]');
+  sel.innerHTML = '';
+  for (const a of state.accounts) {
+    const o = document.createElement('option');
+    o.value = a.id;
+    o.textContent = `${a.name} (#${a.id})`;
+    sel.appendChild(o);
+  }
+  $('#dlg-tx').showModal();
+};
+$('#tx-filter').onchange = renderTx;
+
+$('#form-account').onsubmit = async (e) => {
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  await api('/api/accounts', { method: 'POST', body: {
+    user_id: state.currentUser,
+    name: fd.get('name'),
+    kind: fd.get('kind'),
+    balance: Number(fd.get('balance')),
+  }});
+  $('#dlg-account').close();
+  await loadAll();
+};
+
+$('#form-tx').onsubmit = async (e) => {
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  await api('/api/transactions', { method: 'POST', body: {
+    account_id: Number(fd.get('account_id')),
+    amount: Number(fd.get('amount')),
+    category: fd.get('category'),
+    note: fd.get('note') || '',
+  }});
+  $('#dlg-tx').close();
+  await loadAll();
+};
+
+loadAll();
+</script>
+
+</body>
+</html>

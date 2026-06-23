@@ -24,7 +24,6 @@ tauri-core    = { path = "../../../crates/tauri-core" }
 event-bus     = { path = "../../../crates/event-bus" }
 config        = { path = "../../../crates/config" }
 storage       = { path = "../../../crates/storage" }
-claude-adapter = { path = "../../../crates/claude-adapter" }
 tracing       = { workspace = true }
 
 [features]

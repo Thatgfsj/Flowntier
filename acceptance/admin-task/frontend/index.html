@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>用户管理后台</title>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --card: #ffffff;
+    --border: #e3e6ea;
+    --text: #1f2328;
+    --muted: #6a737d;
+    --primary: #2563eb;
+    --primary-hover: #1d4ed8;
+    --danger: #dc2626;
+    --danger-hover: #b91c1c;
+    --row-alt: #fafbfc;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+          "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  }
+  .container {
+    max-width: 960px;
+    margin: 32px auto;
+    padding: 0 16px;
+  }
+  h1 {
+    margin: 0 0 16px;
+    font-size: 22px;
+    font-weight: 600;
+  }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+  .toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+  }
+  .toolbar h2 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  th, td {
+    text-align: left;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 240px;
+  }
+  th {
+    background: #f3f4f6;
+    font-weight: 600;
+    color: var(--muted);
+  }
+  tbody tr:nth-child(even) { background: var(--row-alt); }
+  tbody tr:hover { background: #eef2ff; }
+  .role-badge {
+    display: inline-block;
+    padding: 1px 8px;
+    border-radius: 10px;
+    font-size: 12px;
+    background: #e5e7eb;
+    color: #374151;
+  }
+  .role-badge.admin { background: #fef3c7; color: #92400e; }
+  form.add-form {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+  }
+  form.add-form label {
+    display: flex;
+    flex-direction: column;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  form.add-form input,
+  form.add-form select {
+    margin-top: 2px;
+    padding: 6px 8px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-size: 13px;
+    background: #fff;
+    min-width: 140px;
+  }
+  button {
+    padding: 6px 12px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: #fff;
+    color: var(--text);
+    font-size: 13px;
+    cursor: pointer;
+  }
+  button:hover { background: #f3f4f6; }
+  button.primary {
+    background: var(--primary);
+    border-color: var(--primary);
+    color: #fff;
+  }
+  button.primary:hover { background: var(--primary-hover); }
+  button.danger {
+    background: var(--danger);
+    border-color: var(--danger);
+    color: #fff;
+  }
+  button.danger:hover { background: var(--danger-hover); }
+  .msg {
+    font-size: 12px;
+    color: var(--muted);
+    min-height: 16px;
+    margin-left: 8px;
+  }
+  .msg.error { color: var(--danger); }
+  .empty {
+    text-align: center;
+    color: var(--muted);
+    padding: 20px 0;
+  }
+</style>
+</head>
+<body>
+  <div class="container">
+    <h1>用户管理后台</h1>
+
+    <div class="card">
+      <div class="toolbar">
+        <h2>新增用户</h2>
+        <span class="msg" id="formMsg"></span>
+      </div>
+      <form class="add-form" id="addForm" autocomplete="off">
+        <label>姓名
+          <input type="text" name="name" id="name" required maxlength="64" />
+        </label>
+        <label>邮箱
+          <input type="email" name="email" id="email" required maxlength="128" />
+        </label>
+        <label>角色
+          <select name="role" id="role">
+            <option value="user">user</option>
+            <option value="admin">admin</option>
+          </select>
+        </label>
+        <button type="submit" class="primary">新增</button>
+      </form>
+    </div>
+
+    <div class="card">
+      <div class="toolbar">
+        <h2>用户列表</h2>
+        <div>
+          <span class="msg" id="listMsg"></span>
+          <button id="refreshBtn" class="primary">刷新</button>
+        </div>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>姓名</th>
+            <th>邮箱</th>
+            <th>角色</th>
+            <th>创建时间</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody id="userTbody">
+          <tr><td colspan="6" class="empty">加载中…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+<script type="module">
+const API = 'http://127.0.0.1:4400/api/users';
+
+const $tbody = document.getElementById('userTbody');
+const $listMsg = document.getElementById('listMsg');
+const $formMsg = document.getElementById('formMsg');
+const $form = document.getElementById('addForm');
+const $refresh = document.getElementById('refreshBtn');
+
+function setMsg(el, text, isError = false) {
+  el.textContent = text || '';
+  el.classList.toggle('error', !!isError);
+  if (text) {
+    clearTimeout(el._t);
+    el._t = setTimeout(() => { el.textContent = ''; el.classList.remove('error'); }, 3000);
+  }
+}
+
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[c]));
+}
+
+function render(users) {
+  if (!users || users.length === 0) {
+    $tbody.innerHTML = '<tr><td colspan="6" class="empty">暂无用户</td></tr>';
+    return;
+  }
+  $tbody.innerHTML = users.map(u => `
+    <tr>
+      <td>${u.id}</td>
+      <td>${escapeHtml(u.name)}</td>
+      <td>${escapeHtml(u.email)}</td>
+      <td><span class="role-badge ${u.role === 'admin' ? 'admin' : ''}">${escapeHtml(u.role)}</span></td>
+      <td>${escapeHtml(u.created_at || '')}</td>
+      <td><button class="danger" data-del="${u.id}">删除</button></td>
+    </tr>
+  `).join('');
+}
+
+async function loadUsers() {
+  setMsg($listMsg, '加载中…');
+  try {
+    const res = await fetch(API);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    render(data.users || []);
+    setMsg($listMsg, '已刷新');
+  } catch (e) {
+    setMsg($listMsg, '加载失败: ' + e.message, true);
+    $tbody.innerHTML = '<tr><td colspan="6" class="empty">加载失败</td></tr>';
+  }
+}
+
+async function createUser(payload) {
+  const res = await fetch(API, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
+  return data;
+}
+
+async function deleteUser(id) {
+  const res = await fetch(`${API}/${id}`, { method: 'DELETE' });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
+  return data;
+}
+
+$form.addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const name = $form.name.value.trim();
+  const email = $form.email.value.trim();
+  const role = $form.role.value;
+  if (!name || !email) {
+    setMsg($formMsg, '姓名和邮箱必填', true);
+    return;
+  }
+  try {
+    await createUser({ name, email, role });
+    $form.reset();
+    setMsg($formMsg, '已新增');
+    loadUsers();
+  } catch (e) {
+    setMsg($formMsg, '新增失败: ' + e.message, true);
+  }
+});
+
+$tbody.addEventListener('click', async (ev) => {
+  const btn = ev.target.closest('button[data-del]');
+  if (!btn) return;
+  const id = btn.dataset.del;
+  if (!confirm(`确认删除用户 #${id}？`)) return;
+  try {
+    await deleteUser(id);
+    setMsg($listMsg, '已删除 #' + id);
+    loadUsers();
+  } catch (e) {
+    setMsg($listMsg, '删除失败: ' + e.message, true);
+  }
+});
+
+$refresh.addEventListener('click', loadUsers);
+
+loadUsers();
+</script>
+</body>
+</html>

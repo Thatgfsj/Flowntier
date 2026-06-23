@@ -1,0 +1,23 @@
+当前工作目录下有一个 backend/ 子目录，里面是一个完整的 Node + node:sqlite 用户管理后端（监听 127.0.0.1:4400，REST 端点：GET/POST /api/users, GET/PUT/DELETE /api/users/:id）。
+
+请创建一个极简前端 admin 页面，纯静态（零依赖、零构建步骤），单 HTML 文件 + JS。
+
+具体步骤：
+
+1. 用 bash 创建子目录 frontend/
+2. 用 write 创建 frontend/index.html，包含：
+   - 中文标题 "用户管理后台"
+   - 一个表格显示所有用户（id, name, email, role, created_at）
+   - 一个 "刷新" 按钮（fetch GET /api/users）
+   - 一个表单：name + email + role（select: user/admin），"新增" 按钮（POST）
+   - 每行有"删除"按钮（DELETE）
+   - 内联 CSS（干净一些，不要花哨）
+   - 内联 <script type="module"> 调用 fetch
+3. 用 bash 后台启动一个 HTTP server：
+   `cd frontend && python -m http.server 5500 > fe.log 2>&1 &`
+   （Python 在 Windows 上几乎肯定可用）
+4. sleep 2
+5. 用 bash 跑：curl http://localhost:5500/ 应该返回 index.html 内容
+6. 用 bash 跑：curl http://127.0.0.1:4400/api/users 确认后端还在（如果停了，先 cd backend && node server.js > server.log 2>&1 &）
+
+最后回复一句简短总结（不超过 100 字）：HTML 大小 + curl 看到什么。

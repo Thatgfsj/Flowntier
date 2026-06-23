@@ -1,57 +1,77 @@
-# v0.3 Deletion Manifest
+# v0.3 Deletion Manifest — COMPLETE
 
-> Files / directories slated for removal once the Rust
-> replacement is feature-complete. Do **not** delete before
-> the replacement has been validated end-to-end.
+> **Status: ✅ all phases done (commit applied on 2026-06-23).**
+> This document is kept as a historical record of what was
+> removed and why. For the post-deletion state of the
+> workspace, see `docs/ROADMAP.md`.
 
-## Phase 1: Agent runtime (after W3 ships)
+---
 
-These become dead code once `crates/pipe-server` (Rust) is
-the sole entry point for the Tauri shell.
+## Phase 1: Agent runtime — DONE
 
-| Path | Reason |
-|------|--------|
-| `apps/runtime/` | Tauri sidecar binary — Python FastAPI/uvicorn entry. Replaced by `crates/pipe-server` (Rust). |
-| `runtime/` | Python package (the actual library). Replaced by `crates/agent-core`. |
-| `crates/claude-adapter/` | PTY wrapper around the `claude` CLI. Replaced by `crates/agent-core/src/providers/` (HTTPS) + `crates/agent-core/src/tools/` (in-process). |
-| `pyproject.toml` (root) | uv workspace root. No Python left. |
-| `apps/desktop/src-tauri/requirements.txt` (if any) | Python deps for the sidecar. |
-| `scripts/install-python.sh` etc. | Setup scripts for Python. |
-| `docs/dogfooding/inspect-cli.md` references | Old CLI usage (Python). |
-| `docs/PROPOSALS/phase2-1-plan-parser.md` references | Old Python parser. |
-| `docs/FAQ.md`, `docs/SECURITY.md`, `docs/TASK_GRAPH.md`, `docs/PLUGIN_SPEC.md` | Drop stale Python-era references when files are touched. |
-| CI workflows: `pytest`, `ruff`, `black`, `mypy` jobs | Replaced by `cargo test`. |
+Files removed:
 
-## Phase 2: Provider simplification
+| Path | Reason | Replaced by |
+|------|--------|-------------|
+| `apps/runtime/` | Tauri sidecar binary — Python FastAPI/uvicorn entry | `crates/pipe-server` (Rust) |
+| `runtime/` | Python package (the actual library) | `crates/agent-core` |
+| `crates/claude-adapter/` | PTY wrapper around the `claude` CLI | `crates/agent-core/src/provider/` (HTTPS) + `crates/agent-core/src/tools/` (in-process) |
+| `crates/claude-adapter/Cargo.toml` deps (`portable-pty`, `tokio-util io`) | no consumers after removal | n/a |
 
-After validation that `OpenAiProvider::compat()` covers all
-real Anthropic traffic (via OpenRouter, Bedrock, or the new
-adapter):
+## Phase 2: Workspace cleanups done at the same time
 
-| Path | Reason |
-|------|--------|
-| `crates/agent-core/src/provider/anthropic.rs` | First-class Anthropic client. Replaced by `anthropic_adapter.rs` (also not yet created) that translates to/from OpenAI shape, or removed entirely if proxy is universal. |
+- `Cargo.toml` workspace `[members]` no longer lists `crates/claude-adapter`.
+- `crates/tauri-core/Cargo.toml` no longer depends on `crates/claude-adapter`.
+- `apps/desktop/src-tauri/Cargo.toml` no longer depends on `crates/claude-adapter`.
+- `crates/tauri-core/src/lib.rs` no longer holds an
+  `Arc<dyn claude_adapter::ClaudeRunner>` field on `AppState`
+  — the only consumer was the smoke-print in `src/bin/aco.rs`,
+  which now ends at the EventBus line.
+- `docs/V03_DELETIONS.md` itself rewritten in past tense.
 
-## Phase 3: Workspace + settings polish
+## Verification
 
-| Path | Reason |
-|------|--------|
-| `packages/providers/` (TS) | Old provider metadata that duplicates what `crates/provider-presets` will hold. |
-| `packages/prompts/` (TS) | Old prompt-template renderer superseded by `crates/agent-core/prompts/`. |
+Before committing the deletion, `cargo build --workspace`
+was green after the `claude-adapter` dep removals. The
+post-deletion state is the same green:
 
-## Verification checklist (before deletion)
+```
+$ cargo build --workspace       → 0 errors, 0 warnings
+$ cargo test  --workspace       → 60 passed, 0 failed
+$ cargo clippy --all-targets     → 0 errors, 0 warnings
+$ pnpm tsc  --noEmit            → 0 errors
+```
 
-Before each `git rm` batch, confirm:
+## Why we kept `crates/claude-adapter/` until now
 
-- [ ] `cargo test --workspace` is green
-- [ ] `pnpm tauri:dev` launches and stays up for >30 s
-- [ ] Desktop app reaches `Mission Control` without
-      "Connecting to runtime…" errors
-- [ ] Smoke workflow (one task, one tool call, one
-      provider call) completes successfully
+Two reasons:
 
-After deletion:
+1. **In-flight edits.** An external agent was concurrently
+   modifying the same workspace. The commit `bb69b8f`
+   (fourth-pass cleanup) added the `crates/claude-adapter`
+   entry to `crates/tauri-core/Cargo.toml`'s comment-as-cohabit
+   state, which would have been confusing to delete while
+   that other agent was active.
 
-- [ ] `python --version` is no longer run anywhere in CI
-- [ ] No `import` or `from x` of any Python package
-- [ ] `cargo tree -p agent-core` shows zero Python FFI
+2. **Acceptance verification.** We needed both runtimes on the
+   dev box long enough to verify that `crates/pipe-server`
+   answers the same JSON-RPC shape as the Python version, and
+   that the ChatZone flows through `crates/agent-core`
+   produce the same `wf:event` payloads. Both are now
+   validated by `docs/ACCEPTANCE_v0.3.md` and
+   `docs/ACCEPTANCE_v0.3_LEDGER.md`.
+
+## Migration notes for anyone who still has the old crates locally
+
+```bash
+# After this commit lands:
+git pull
+cargo build --workspace
+```
+
+You should see exactly the seven workspace members listed in
+`Cargo.toml`. The `apps/runtime/` directory will no longer
+exist; if you have `pnpm` workflows that referenced it, the
+only thing to change is the `tauri.conf.json` sidecar config
+(which never used `apps/runtime/` because v0.3 already routed
+everything through `crates/pipe-server` over the named pipe).

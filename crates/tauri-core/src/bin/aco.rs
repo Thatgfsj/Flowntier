@@ -65,7 +65,6 @@ async fn doctor() -> Result<()> {
     println!("✓ Repository opened");
     println!("✓ EventBus initialized");
     println!("  subscribers: {}", state.bus.subscriber_count());
-    println!("✓ Claude adapter: {:?}", state.claude);
     println!("\nAll systems nominal.");
     Ok(())
 }

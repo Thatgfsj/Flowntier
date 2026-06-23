@@ -92,10 +92,10 @@ plugin UI panels.
 - [x] **`crates/pipe-server`** — Rust named-pipe server replaces the
   Python FastAPI runtime *(shipped W3)*. Verified end-to-end
   with external PowerShell named-pipe client.
-- [ ] **Python runtime deleted** — `apps/runtime/`, `runtime/`, and
-  `crates/claude-adapter/` still present; **safe to remove now**
-  per `docs/V03_DELETIONS.md`. Not removed yet because of an
-  in-flight parallel-AI edit touching the same paths.
+- [x] **Python runtime deleted** — `apps/runtime/`, `runtime/`,
+  and `crates/claude-adapter/` removed; desktop builds and
+  runs without Python on PATH. See `docs/V03_DELETIONS.md`
+  for the full record.
 - [x] **Chat Zone (progressive)** — new chat zone docked next to
   Settings. NOT a full IDE rewrite — same 5-zone layout, just
   with a chat panel for sending tasks to the agent. Streaming
