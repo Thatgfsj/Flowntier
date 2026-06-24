@@ -4,7 +4,7 @@ version     = { workspace = true }
 edition     = { workspace = true }
 rust-version = { workspace = true }
 license     = { workspace = true }
-description = "SQLite + FTS5 storage layer for ACO (workflows, tasks, usage, memory, prompts, plugins)"
+description = "SQLite + FTS5 storage layer for Flowntier (workflows, tasks, usage, memory, prompts, plugins)"
 
 [lints.clippy]
 all = { level = "deny", priority = -1 }
@@ -24,3 +24,4 @@ dirs         = "5"
 [dev-dependencies]
 insta        = { workspace = true }
 tempfile     = "3"
+sqlx         = { workspace = true }

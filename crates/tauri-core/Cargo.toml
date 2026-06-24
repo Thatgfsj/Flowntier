@@ -4,10 +4,18 @@ version     = { workspace = true }
 edition     = { workspace = true }
 rust-version = { workspace = true }
 license     = { workspace = true }
-description = "Tauri app entry, commands, and glue for Agent Company OS"
+description = "Tauri app entry, commands, and glue for Flowntier"
 
 [lints.clippy]
 all = { level = "deny", priority = -1 }
+
+# Binary name was renamed from `aco` to `flowntier` in the
+# 2026-06-24 rebrand; the source file is kept as `aco.rs` to
+# preserve git rename detection, so we bind the artifact name
+# explicitly here.
+[[bin]]
+name = "flowntier"
+path = "src/bin/aco.rs"
 
 [features]
 default = ["custom-protocol"]

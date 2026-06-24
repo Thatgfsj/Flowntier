@@ -3,23 +3,6 @@
 version = 4
 
 [[package]]
-name = "aco-desktop"
-version = "0.2.5"
-dependencies = [
- "config",
- "event-bus",
- "serde",
- "serde_json",
- "storage",
- "tauri",
- "tauri-build",
- "tauri-core",
- "tauri-plugin-shell",
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "adler2"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1216,6 +1199,23 @@ checksum = "843fba2746e448b37e26a819579957415c8cef339bf08564fe8b7ddbd959573c"
 dependencies = [
  "crc32fast",
  "miniz_oxide",
+]
+
+[[package]]
+name = "flowntier-desktop"
+version = "0.3.0"
+dependencies = [
+ "config",
+ "event-bus",
+ "serde",
+ "serde_json",
+ "storage",
+ "tauri",
+ "tauri-build",
+ "tauri-core",
+ "tauri-plugin-shell",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

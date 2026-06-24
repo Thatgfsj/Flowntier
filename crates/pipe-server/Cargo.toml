@@ -4,11 +4,19 @@ version     = { workspace = true }
 edition     = { workspace = true }
 rust-version = { workspace = true }
 license     = { workspace = true }
-description = "JSON-RPC + event-push server over a local IPC channel. Replaces apps/runtime/src/aco_runtime/pipe_server.py. Windows named pipes + Unix domain sockets."
+description = "JSON-RPC + event-push server over a local IPC channel for Flowntier. Replaces apps/runtime/src/aco_runtime/pipe_server.py. Windows named pipes + Unix domain sockets."
 
 [lints.clippy]
 all      = { level = "deny", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
+
+# Binary name was renamed from `aco-runtime` to `flowntier-runtime`
+# in the 2026-06-24 rebrand; the source file is kept as
+# `aco-runtime.rs` to preserve git history, so we bind the artifact
+# name explicitly here.
+[[bin]]
+name = "flowntier-runtime"
+path = "src/bin/aco-runtime.rs"
 
 [dependencies]
 tokio        = { workspace = true, features = ["full"] }

@@ -1,4 +1,4 @@
-//! `aco` CLI — doctor, run, repl, and other headless operations.
+//! `flowntier` CLI — doctor, run, repl, and other headless operations.
 //!
 //! The Tauri app uses the same library; this binary is for users
 //! who want to run workflows without the UI.
@@ -56,7 +56,7 @@ async fn main() -> Result<()> {
 }
 
 async fn doctor() -> Result<()> {
-    println!("aco doctor — pre-flight diagnostic\n");
+    println!("flowntier doctor — pre-flight diagnostic\n");
     let state = AppState::build().await.context("build AppState")?;
     println!("✓ AppState built");
     println!("  data_dir: {}", state.config.app.data_dir);
