@@ -1,10 +1,10 @@
 //! Tauri app glue for the desktop shell.
 //!
-//! Architecture: React → invoke() → Rust → Windows named pipe → Python Runtime
+//! Architecture: React → invoke() → Rust → Windows named pipe → pipe-server
 //! Frontend NEVER touches HTTP. The webview loads the dev server URL only.
 //! There is no `127.0.0.1:7317` HTTP server anymore — all RPC and event
-//! streaming travel over `\\.\pipe\aco_runtime` (RPC) and
-//! `\\.\pipe\aco_runtime_events` (server-push events).
+//! streaming travel over `\\.\pipe\flowntier_runtime` (RPC) and
+//! `\\.\pipe\flowntier_runtime_events` (server-push events).
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
@@ -18,8 +18,8 @@ use tauri_core::{start_workflow, AppState, NewWorkflowRequest, NewWorkflowRespon
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::windows::named_pipe::ClientOptions;
 
-const RPC_PIPE: &str = r"\\.\pipe\aco_runtime";
-const EVENTS_PIPE: &str = r"\\.\pipe\aco_runtime_events";
+const RPC_PIPE: &str = r"\\.\pipe\flowntier_runtime";
+const EVENTS_PIPE: &str = r"\\.\pipe\flowntier_runtime_events";
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 const MAX_LINE: usize = 1_048_576; // 1 MiB hard cap per pipe message
@@ -103,13 +103,13 @@ async fn pipe_request(
 fn spawn_runtime_sidecar(app: &tauri::AppHandle) {
     use tauri_plugin_shell::process::CommandEvent;
 
-    // Kill any stale aco_runtime.exe from a previous session. Pipes are
-    // exclusive, so a dead binary that left the pipe handle open would
-    // block the new instance.
+// Kill any stale flowntier-runtime.exe from a previous session. Pipes
+    // are exclusive, so a dead binary that left the pipe handle open
+    // would block the new instance.
     #[cfg(target_os = "windows")]
     {
         let _ = std::process::Command::new("taskkill")
-            .args(["/f", "/im", "aco_runtime.exe"])
+            .args(["/f", "/im", "flowntier-runtime.exe"])
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .status();
@@ -118,20 +118,20 @@ fn spawn_runtime_sidecar(app: &tauri::AppHandle) {
 
     // Already up? Probe the RPC pipe.
     if try_ping_pipe().is_ok() {
-        println!("[aco] runtime already running");
+        println!("[flowntier] runtime already running");
     } else {
-        println!("[aco] spawning sidecar...");
-        let sidecar_command = match app.shell().sidecar("aco_runtime") {
+        println!("[flowntier] spawning sidecar...");
+        let sidecar_command = match app.shell().sidecar("flowntier_runtime") {
             Ok(cmd) => cmd,
             Err(e) => {
-                eprintln!("[aco] failed to create sidecar: {}", e);
+                eprintln!("[flowntier] failed to create sidecar: {}", e);
                 return;
             }
         };
 
         match sidecar_command.spawn() {
             Ok((mut rx, child)) => {
-                println!("[aco] sidecar pid={:?}", child.pid());
+                println!("[flowntier] sidecar pid={:?}", child.pid());
                 tauri::async_runtime::spawn(async move {
                     while let Some(event) = rx.recv().await {
                         match event {
@@ -154,14 +154,14 @@ fn spawn_runtime_sidecar(app: &tauri::AppHandle) {
                 let deadline = std::time::Instant::now() + Duration::from_secs(30);
                 while std::time::Instant::now() < deadline {
                     if try_ping_pipe().is_ok() {
-                        println!("[aco] sidecar healthy!");
+                        println!("[flowntier] sidecar healthy!");
                         break;
                     }
                     std::thread::sleep(Duration::from_millis(500));
                 }
             }
             Err(e) => {
-                eprintln!("[aco] failed to spawn: {}", e);
+                eprintln!("[flowntier] failed to spawn: {}", e);
                 return;
             }
         }
@@ -202,7 +202,7 @@ async fn events_bridge(app: tauri::AppHandle) {
                                 {
                                     if let Some(ev) = v.get("event") {
                                         if let Err(e) = app.emit("wf:event", ev.clone()) {
-                                            eprintln!("[aco] emit wf:event failed: {e}");
+                                            eprintln!("[flowntier] emit wf:event failed: {e}");
                                         }
                                     }
                                 }
@@ -212,14 +212,14 @@ async fn events_bridge(app: tauri::AppHandle) {
                             }
                         }
                         Err(e) => {
-                            eprintln!("[aco] events pipe read err: {e}; reconnecting");
+                            eprintln!("[flowntier] events pipe read err: {e}; reconnecting");
                             break;
                         }
                     }
                 }
             }
             Err(e) => {
-                eprintln!("[aco] events pipe open err: {e}; retry in {backoff_ms}ms");
+                eprintln!("[flowntier] events pipe open err: {e}; retry in {backoff_ms}ms");
                 tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
                 backoff_ms = (backoff_ms * 2).min(5_000);
             }
@@ -244,8 +244,8 @@ async fn list_secrets() -> Result<serde_json::Value, String> {
 /// Bridges the React `ChatZone` to the embedded pipe-server's
 /// `/api/run_task` handler. The handler drives the in-process
 /// agent-core loop, which streams events back over
-/// `\\.\pipe\aco_runtime_events` and surfaces them through the
-/// normal `wf:event` Tauri channel.
+/// `\\.\pipe\flowntier_runtime_events` and surfaces them through
+/// the normal `wf:event` Tauri channel.
 ///
 /// Body shape matches `run_task` in `crates/pipe-server/src/handlers.rs`:
 ///   { task: string, role?: string, provider_kind?: string,
@@ -254,6 +254,13 @@ async fn list_secrets() -> Result<serde_json::Value, String> {
 #[tauri::command]
 async fn run_agent_task(body: serde_json::Value) -> Result<serde_json::Value, String> {
     pipe_request("POST", "/api/run_task", Some(body)).await
+}
+
+/// Draw one hexagram at random from the 64-entry I Ching dataset.
+/// Stateless; safe to spam-click from the oracle UI.
+#[tauri::command]
+async fn draw_i_ching() -> Result<serde_json::Value, String> {
+    pipe_request("POST", "/api/i_ching/draw", None).await
 }
 
 #[tauri::command]
@@ -513,7 +520,7 @@ pub fn run() {
                         handle.manage(state);
                     }
                     Err(e) => {
-                        eprintln!("[aco] failed to build AppState: {}", e);
+                        eprintln!("[flowntier] failed to build AppState: {}", e);
                         std::process::exit(1);
                     }
                 }

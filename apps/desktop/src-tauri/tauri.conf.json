@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2.0.0",
-  "productName": "Agent Company OS",
-  "version": "0.2.5",
-  "identifier": "dev.acos.desktop",
+  "productName": "Flowntier",
+  "version": "0.3.0",
+  "identifier": "ai.flowntier.desktop",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:1420",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Agent Company OS",
+        "title": "Flowntier",
         "width": 1440,
         "height": 900,
         "minWidth": 1024,
@@ -31,10 +31,10 @@
       "icons/icon.ico"
     ],
     "category": "DeveloperTool",
-    "shortDescription": "AI Software Company OS",
-    "longDescription": "Agent Company OS — a visual AI software company powered by multi-agent workflow.",
+    "shortDescription": "Flowntier — AI software company on your desktop",
+    "longDescription": "Flowntier — a visual AI software company powered by multi-agent workflow.",
     "externalBin": [
-      "binaries/aco_runtime"
+      "binaries/flowntier_runtime"
     ],
     "resources": [
       "WebView2Loader.dll"

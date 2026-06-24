@@ -1,7 +1,7 @@
 [package]
-name        = "aco-desktop"
-version     = "0.2.5"
-description = "Tauri 2 shell for Agent Company OS"
+name        = "flowntier-desktop"
+version     = "0.3.0"
+description = "Tauri 2 shell for Flowntier"
 edition     = "2021"
 rust-version = "1.85"
 license     = "MIT"
