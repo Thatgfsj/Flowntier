@@ -33,7 +33,7 @@ impl ServerState {
         Self {
             events,
             tools: Arc::new(ToolRegistry::with_builtins()),
-            workspace: Workspace::new(workspace_root, "aco"),
+            workspace: Workspace::new(workspace_root, "flowntier"),
         }
     }
 }
@@ -49,7 +49,7 @@ pub fn register_all(d: &mut Dispatcher, state: ServerState) {
         Box::pin(async {
             Ok((200, json!({
                 "ok": true,
-                "runtime": "aco-rs",
+                "runtime": "flowntier-rs",
                 "version": env!("CARGO_PKG_VERSION"),
             })))
         })

@@ -1,10 +1,10 @@
 //! Local IPC server.
 //!
-//! * **Windows**: `\\.\pipe\aco_runtime` (RPC) and
-//!   `\\.\pipe\aco_runtime_events` (events). Multiple accept
+//! * **Windows**: `\\.\pipe\flowntier_runtime` (RPC) and
+//!   `\\.\pipe\flowntier_runtime_events` (events). Multiple accept
 //!   workers per pipe, see [CONCURRENCY] below.
 //! * **Unix**: a Unix domain socket pair under the user's
-//!   runtime dir (XDG_RUNTIME_DIR or ~/.cache/aco/sockets/).
+//!   runtime dir (XDG_RUNTIME_DIR or ~/.cache/flowntier/sockets/).
 //!
 //! ## CONCURRENCY
 //!
@@ -32,10 +32,10 @@ fn socket_paths() -> (std::path::PathBuf, std::path::PathBuf) {
     let base = std::env::var_os("XDG_RUNTIME_DIR")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| {
-            dirs_cache_dir().unwrap_or_else(|| std::env::temp_dir()).join("aco")
+            dirs_cache_dir().unwrap_or_else(|| std::env::temp_dir()).join("flowntier")
         });
     let _ = std::fs::create_dir_all(&base);
-    (base.join("aco_runtime.sock"), base.join("aco_runtime_events.sock"))
+    (base.join("flowntier_runtime.sock"), base.join("flowntier_runtime_events.sock"))
 }
 
 #[cfg(not(windows))]
@@ -58,8 +58,8 @@ impl Default for ServerConfig {
         #[cfg(windows)]
         {
             Self {
-                rpc_path: r"\\.\pipe\aco_runtime".into(),
-                events_path: r"\\.\pipe\aco_runtime_events".into(),
+                rpc_path: r"\\.\pipe\flowntier_runtime".into(),
+                events_path: r"\\.\pipe\flowntier_runtime_events".into(),
             }
         }
         #[cfg(not(windows))]

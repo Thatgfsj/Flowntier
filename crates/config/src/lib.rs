@@ -306,8 +306,38 @@ pub fn load_router_config(path: &Path) -> Result<RouterConfig, ConfigError> {
 }
 
 /// Default user config directory.
+///
+/// Honors the `aco` → `flowntier` rename (2026-06-24). On first
+/// call after upgrading, if a legacy `aco/` directory exists at the
+/// same parent and the new `flowntier/` directory does not yet, the
+/// legacy directory is renamed in place. The migration is logged
+/// once and is best-effort: an `aco/` dir owned by another process
+/// or with unreadable permissions is left untouched and the new
+/// directory is returned.
 pub fn default_user_config_dir() -> Option<PathBuf> {
-    dirs::config_dir().map(|p| p.join("aco"))
+    let new = dirs::config_dir().map(|p| p.join("flowntier"));
+    if let Some(dir) = &new {
+        if !dir.exists() {
+            if let Some(legacy) = dirs::config_dir().map(|p| p.join("aco")) {
+                if legacy.exists() {
+                    match std::fs::rename(&legacy, dir) {
+                        Ok(()) => eprintln!(
+                            "[flowntier] migrated config dir: {} -> {}",
+                            legacy.display(),
+                            dir.display()
+                        ),
+                        Err(e) => eprintln!(
+                            "[flowntier] could not migrate legacy config dir {} ({}); using fresh {}",
+                            legacy.display(),
+                            e,
+                            dir.display()
+                        ),
+                    }
+                }
+            }
+        }
+    }
+    new
 }
 
 #[cfg(test)]

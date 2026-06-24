@@ -192,9 +192,38 @@ impl Repository {
     }
 
     /// Default location of the SQLite file.
+    ///
+    /// Honors the `aco` → `flowntier` rename (2026-06-24). On first
+    /// call after upgrading, if a legacy `aco/` directory exists at
+    /// the same parent and the new `flowntier/` directory does not
+    /// yet, the legacy directory is renamed in place. The migration
+    /// is best-effort and logged once; if the rename fails (perms,
+    /// locked file, ...) we silently fall back to the new path.
     #[must_use]
     pub fn default_data_dir() -> Option<PathBuf> {
-        dirs::data_dir().map(|p| p.join("aco"))
+        let new = dirs::data_dir().map(|p| p.join("flowntier"));
+        if let Some(dir) = &new {
+            if !dir.exists() {
+                if let Some(legacy) = dirs::data_dir().map(|p| p.join("aco")) {
+                    if legacy.exists() {
+                        match std::fs::rename(&legacy, dir) {
+                            Ok(()) => eprintln!(
+                                "[flowntier] migrated data dir: {} -> {}",
+                                legacy.display(),
+                                dir.display()
+                            ),
+                            Err(e) => eprintln!(
+                                "[flowntier] could not migrate legacy data dir {} ({}); using fresh {}",
+                                legacy.display(),
+                                e,
+                                dir.display()
+                            ),
+                        }
+                    }
+                }
+            }
+        }
+        new
     }
 }
 
