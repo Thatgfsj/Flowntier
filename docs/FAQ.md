@@ -1,6 +1,6 @@
 # FAQ
 
-> Frequently asked questions about Agent Company OS
+> Frequently asked questions about Flowntier
 
 **Version:** v0.1 RFC
 **Status:** Draft
@@ -10,27 +10,27 @@
 
 ## General
 
-### What is ACO?
+### What is Flowntier?
 
 An **AI Software Company Operating System**. A desktop app where
 specialized AI agents (Chief, Critics, Workers) collaborate through
 an 8-phase workflow to ship software. The IDE is the visualization
 layer; the workflow is the product.
 
-### Is ACO an AI IDE?
+### Is Flowntier an AI IDE?
 
-**No.** ACO does not edit code directly. The user writes nothing.
+**No.** Flowntier does not edit code directly. The user writes nothing.
 The Chief delegates to Workers, who use Claude Code (or a future
 adapter) to do the actual edits. The user reviews, approves, and
 steers.
 
 ### Why not just use Claude Code / Cursor / Devin?
 
-* **Claude Code** is one CLI. ACO is a **team** of agents with
+* **Claude Code** is one CLI. Flowntier is a **team** of agents with
   different roles, planning, review, and repair loops.
-* **Cursor** is a code editor. ACO is the operating system
+* **Cursor** is a code editor. Flowntier is the operating system
   *around* an editor.
-* **Devin** is one agent. ACO's design philosophy is that **no
+* **Devin** is one agent. Flowntier's design philosophy is that **no
   single agent owns the whole project** — only the Chief does,
   and even the Chief doesn't write code.
 
@@ -115,7 +115,7 @@ its unit of work, then transitions to `ABORTED`.
 
 ### Can I resume after a crash?
 
-Yes. On startup, ACO scans `workflows/*.jsonl` and offers
+Yes. On startup, Flowntier scans `workflows/*.jsonl` and offers
 **Resume** / **Discard** / **Inspect** for any incomplete run.
 
 ### What if a plan is bad?
@@ -161,9 +161,9 @@ tasks wait in `PENDING` until the window clears. See
 
 ## Security & Privacy
 
-### Does ACO send my code anywhere?
+### Does Flowntier send my code anywhere?
 
-Only to the LLM providers you configure. ACO does not have a
+Only to the LLM providers you configure. Flowntier does not have a
 telemetry endpoint. All your code, plans, and history stay on
 your machine.
 
@@ -205,7 +205,7 @@ plugin in `plugins/git/` is a fully worked example.
 Any language that can speak JSON-RPC over stdio. Reference impls
 in Rust and Python are in `plugins/_examples/`.
 
-### Can a plugin call back into ACO?
+### Can a plugin call back into Flowntier?
 
 Yes, via the `event` JSON-RPC method (e.g., to log to the
 console). It cannot read the workflow state — that's the host's
@@ -214,7 +214,7 @@ responsibility.
 ### When are MCP plugins supported?
 
 MCP is supported as a **first-class plugin** in v0.1. The
-`mcp` plugin bridges MCP servers into ACO's plugin model.
+`mcp` plugin bridges MCP servers into Flowntier's plugin model.
 
 ---
 
@@ -225,14 +225,14 @@ MCP is supported as a **first-class plugin** in v0.1. The
 Target 16–24 weeks after v0.5 ships (Q1 2027 estimate, depends on
 audit + freeze). See [ROADMAP.md](./ROADMAP.md).
 
-### Will ACO be open source?
+### Will Flowntier be open source?
 
 The plan is **yes**, MIT-licensed. The repo is public at
 `https://github.com/Thatgfsj/Flowntier`.
 
 ### Will there be a cloud version?
 
-Not in v1.0. ACO is local-first. A cloud-hosted version is on
+Not in v1.0. Flowntier is local-first. A cloud-hosted version is on
 the post-v1.0 roadmap.
 
 ### Will there be a mobile / web version?
@@ -259,7 +259,7 @@ or disable the provider with `enabled = false`.
 
 Most likely a rate-limit. Check the bottom console for
 `rate_limited` events. Increase `max_tokens_per_minute` in
-`aco.toml` or wait.
+`flowntier.toml` or wait.
 
 ### "All repair loops exhausted"
 
@@ -275,7 +275,7 @@ Workflow JSONL and SQLite grow over time. Settings → Storage →
 "Compact" runs VACUUM and prunes old `usage` / `prompts` rows
 per the retention policy.
 
-### "ACO won't start"
+### "Flowntier won't start"
 
 Run `aco doctor` for a structured diagnostic. It checks:
 * Config file schema validity

@@ -54,7 +54,7 @@ Out of scope for this acceptance: deletion of the Python code
 └─────────────────────────┬────────────────────────────────────────┘
                           │ newline-delimited JSON
 ┌─────────────────────────┴────────────────────────────────────────┐
-│           aco-runtime (Rust, single process)                    │
+│           flowntier-runtime (Rust, single process)                    │
 │   crates/pipe-server                                            │
 │     ├── ServerConfig (RPC + Events pipe names)                 │
 │     ├── Server (16 RPC + 4 events accept workers on Windows)   │
@@ -319,7 +319,7 @@ custom relay with explicit awareness that tool use is unsupported.
 ### 7.1  Files actually written to disk
 
 ```
-O:/clawwork/AgentCompanyOS/acceptance/admin-task/
+O:/clawwork/Flowntier/acceptance/admin-task/
 ├── backend/
 │   ├── package.json        91 bytes    "type":"module", zero deps
 │   ├── db.js               ~600 bytes  node:sqlite + CREATE TABLE

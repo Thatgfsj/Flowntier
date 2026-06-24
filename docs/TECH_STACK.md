@@ -1,6 +1,6 @@
 # Tech Stack
 
-> Locked-in technology choices for Agent Company OS v0.3+
+> Locked-in technology choices for Flowntier v0.3+
 
 **Version:** v0.3 RFC
 **Status:** Active
@@ -245,7 +245,7 @@ Path: `$APPDATA/aco/storage.sqlite` (Windows) /
 
 | Format | Used for |
 |--------|----------|
-| **TOML** | `providers.toml`, `router.toml`, `aco.toml` |
+| **TOML** | `providers.toml`, `router.toml`, `flowntier.toml` |
 | **YAML** | Project-level `.aco/config.yaml` |
 | **dotenv** | Local dev overrides (`.env`, gitignored) |
 
@@ -297,7 +297,7 @@ and the event bus directly.
 * **Rust:** `tracing` + `tracing-subscriber` (JSON in prod, pretty in dev)
 * **Tauri webview:** console logs piped to Rust via `tauri-plugin-log`
 
-Log levels, sampling, and redaction live in `aco.toml`:
+Log levels, sampling, and redaction live in `flowntier.toml`:
 
 ```toml
 [logging]
@@ -404,7 +404,7 @@ GitHub Actions on `.github/workflows/`:
 ## 20. Monorepo Layout
 
 ```
-AgentCompanyOS/
+Flowntier/
 ├── apps/
 │   └── desktop/        # Tauri app (src-tauri + src/)
 │                        # NO apps/runtime/ (Python removed)
@@ -437,7 +437,7 @@ AgentCompanyOS/
 ├── .github/workflows/
 ├── Cargo.toml          # Rust workspace root
 ├── pnpm-workspace.yaml # TS workspace root
-├── aco.toml            # Top-level ACO config
+├── flowntier.toml            # Top-level Flowntier config
 └── README.md
 ```
 
@@ -448,7 +448,7 @@ AgentCompanyOS/
 | TS | **pnpm** 9.x | `pnpm-workspace.yaml` |
 | Rust | **Cargo** 1.85 | `Cargo.toml` (workspace) |
 
-No Makefile needed — `cargo run -p aco-desktop` starts everything.
+No Makefile needed — `cargo run -p flowntier-desktop` starts everything.
 
 ---
 
@@ -467,7 +467,7 @@ TypeScript and Rust.
 
 ## 22. Out of Scope (v0.3)
 
-* Cloud-hosted ACO
+* Cloud-hosted Flowntier
 * Multi-user / multi-tenant
 * Voice / Live2D
 * WASM plugins (v0.4)

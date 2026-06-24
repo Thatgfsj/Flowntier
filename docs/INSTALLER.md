@@ -1,6 +1,6 @@
 # Installer Build
 
-> **How to build the ACO desktop installer for Windows.**
+> **How to build the Flowntier desktop installer for Windows.**
 >
 > Last verified: 2026-06-24
 > Maintainer: Thatgfsj
@@ -14,13 +14,13 @@ artifacts in `target/release/`:
 
 | Artifact | Path | Size (Windows, x64) |
 |----------|------|---------------------|
-| Standalone `.exe` | `target/release/aco-desktop.exe` | ~16 MB |
-| MSI installer | `target/release/bundle/msi/Agent Company OS_0.2.5_x64_en-US.msi` | ~40 MB |
-| NSIS setup | `target/release/bundle/nsis/Agent Company OS_0.2.5_x64-setup.exe` | ~31 MB |
+| Standalone `.exe` | `target/release/flowntier-desktop.exe` | ~16 MB |
+| MSI installer | `target/release/bundle/msi/Flowntier_0.2.5_x64_en-US.msi` | ~40 MB |
+| NSIS setup | `target/release/bundle/nsis/Flowntier_0.2.5_x64-setup.exe` | ~31 MB |
 
 The MSI is the right format for **corporate / Group Policy**
 deployment. The NSIS setup is the right format for **public
-distribution** — it puts a "ACO" shortcut on the desktop,
+distribution** — it puts a "Flowntier" shortcut on the desktop,
 registers an uninstaller under "Add or remove programs", and
 shows a licence dialog (currently the default Tauri one).
 
@@ -56,7 +56,7 @@ cargo build --release -p pipe-server
 
 # Stage the Rust sidecar binary into the bundle resources
 mkdir -p apps/desktop/src-tauri/binaries
-cp target/release/aco-runtime.exe \
+cp target/release/flowntier-runtime.exe \
    apps/desktop/src-tauri/binaries/aco_runtime-x86_64-pc-windows-msvc.exe
 
 # Build the installer
@@ -76,9 +76,9 @@ Apps/desktop's `target/` is git-ignored.
 Get-Item 'target\release\bundle\msi\*.msi' | Format-List Name,Length,LastWriteTime
 
 # 2. Try a silent install + uninstall (in a VM!)
-msiexec /i 'target\release\bundle\msi\Agent Company OS_0.2.5_x64_en-US.msi' /qn
+msiexec /i 'target\release\bundle\msi\Flowntier_0.2.5_x64_en-US.msi' /qn
 # Launch the app
-& 'C:\Program Files\Agent Company OS\aco-desktop.exe'
+& 'C:\Program Files\Flowntier\flowntier-desktop.exe'
 # Uninstall
 msiexec /x 'target\release\bundle\msi\*.msi' /qn
 ```
@@ -86,9 +86,9 @@ msiexec /x 'target\release\bundle\msi\*.msi' /qn
 For the NSIS setup:
 
 ```powershell
-'.\target\release\bundle\nsis\Agent Company OS_0.2.5_x64-setup.exe' /S   # silent install
-& 'C:\Program Files\Agent Company OS\aco-desktop.exe'
-'C:\Program Files\Agent Company OS\uninstall.exe' /S                       # silent uninstall
+'.\target\release\bundle\nsis\Flowntier_0.2.5_x64-setup.exe' /S   # silent install
+& 'C:\Program Files\Flowntier\flowntier-desktop.exe'
+'C:\Program Files\Flowntier\uninstall.exe' /S                       # silent uninstall
 ```
 
 ---
@@ -99,9 +99,9 @@ The interesting fields:
 
 ```json
 {
-  "productName": "Agent Company OS",
+  "productName": "Flowntier",
   "version": "0.2.5",
-  "identifier": "dev.acos.desktop",
+  "identifier": "ai.flowntier.desktop",
   "bundle": {
     "active": true,
     "targets": "all",
@@ -115,7 +115,7 @@ The interesting fields:
 ```
 
 * `identifier` must NOT end in `.app` (Tauri's own warning).
-  We use `dev.acos.desktop`.
+  We use `ai.flowntier.desktop`.
 * `externalBin` lists sidecar binaries that ship next to the
   app exe. Currently just `aco_runtime` (the JSON-RPC + event
   pipe server). The Tauri shell can either `Command::new`
@@ -180,12 +180,12 @@ Run on 2026-06-24 (commit immediately after `pnpm tauri:build`):
 ```
 ✓ built in 9.51s    (Vite frontend build)
 ✓ 8m 06s             (Rust release compile, tauri + tao + wry + plugins)
-✓ MSI    Agent Company OS_0.2.5_x64_en-US.msi         40,726,528 bytes (38.8 MB)
-✓ NSIS   Agent Company OS_0.2.5_x64-setup.exe         31,228,408 bytes (29.8 MB)
-✓ exe    target/release/aco-desktop.exe              ~16 MB
+✓ MSI    Flowntier_0.2.5_x64_en-US.msi         40,726,528 bytes (38.8 MB)
+✓ NSIS   Flowntier_0.2.5_x64-setup.exe         31,228,408 bytes (29.8 MB)
+✓ exe    target/release/flowntier-desktop.exe              ~16 MB
 ```
 
-Smoke-tested by spawning `aco-desktop.exe` from a fresh shell:
+Smoke-tested by spawning `flowntier-desktop.exe` from a fresh shell:
 the window opened, the React UI rendered, and the
 `run_agent_task` Tauri command registered correctly.
 

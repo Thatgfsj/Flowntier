@@ -1,6 +1,6 @@
 # Agent Protocol
 
-> Inter-agent communication contract for Agent Company OS
+> Inter-agent communication contract for Flowntier
 
 **Version:** v0.3 RFC
 **Status:** Active
@@ -12,7 +12,7 @@
 ## 1. Goals
 
 Define a **single, versioned, machine-readable contract** that all
-agents in ACO use to talk to each other. The contract must:
+agents in Flowntier use to talk to each other. The contract must:
 
 1. Be transport-agnostic (in-process queue, Redis, HTTP, Unix socket — all OK)
 2. Be strictly **envelope-shaped** so unknown fields don't break parsers

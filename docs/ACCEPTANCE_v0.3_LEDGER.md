@@ -1,7 +1,7 @@
 # v0.3 Ledger Acceptance Report
 
 > **End-to-end acceptance test #2: build a full multi-table
-> CRUD app (frontend + backend) using only the ACO v0.3
+> CRUD app (frontend + backend) using only the Flowntier v0.3
 > agent loop.**
 >
 > Date: 2026-06-23
@@ -95,7 +95,7 @@ Content-Length: 12 649
 <!doctype html>
 <html lang="zh-CN">
 <head>
-  <title>家庭记账本 — ACO 验收 demo</title>
+  <title>家庭记账本 — Flowntier 验收 demo</title>
   ...
 ```
 
@@ -178,16 +178,16 @@ From a clean checkout with `MINIMAX_API_KEY` set:
 
 ```bash
 # Terminal 1: server
-cd AgentCompanyOS
+cd Flowntier
 cargo build --release -p pipe-server
 mkdir -p acceptance/ledger-task
-./target/release/aco-runtime.exe \
+./target/release/flowntier-runtime.exe \
     --workspace "$(pwd)/acceptance/ledger-task" &
 
 # Terminal 2: send the backend task via named pipe
 # (PowerShell snippet from tools/, or any client speaking
-# JSON-RPC over \\.\pipe\aco_runtime — the pipe is available
-# the moment aco-runtime binds)
+# JSON-RPC over \\.\pipe\flowntier_runtime — the pipe is available
+# the moment flowntier-runtime binds)
 
 # Wait for the agent loop to finish writing files
 # (visible in \\.\pipe\aco_runtime_events stream)

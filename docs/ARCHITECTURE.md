@@ -1,6 +1,6 @@
 # Architecture
 
-> End-to-end architecture of Agent Company OS (v0.3+)
+> End-to-end architecture of Flowntier (v0.3+)
 
 **Version:** v0.3 RFC
 **Status:** Active
@@ -96,7 +96,7 @@ crates/
 │   └── prompt/
 ├── provider-presets/  # ⭐ v0.3 — built-in provider catalog (data only)
 ├── pipe-server/       # ⭐ v0.3 — Rust named-pipe server (was Python)
-├── config/            # providers.toml, aco.toml parsing
+├── config/            # providers.toml, flowntier.toml parsing
 ├── storage/           # SQLx repositories (workflows, usage, sessions)
 └── shared/            # cross-crate types (events, errors, IPC)
 ```
@@ -342,7 +342,7 @@ User           UI          agent-core       Provider       SQLite
          │                      │                      │
          ▼                      ▼                      ▼
    ┌────────────────────────────────────────────────────────────┐
-   │  ACO Core (always-trusted)                                 │
+   │  Flowntier Core (always-trusted)                                 │
    │  - Workflow state                                          │
    │  - SQLite                                                 │
    │  - File system                                            │

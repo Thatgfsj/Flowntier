@@ -1,6 +1,6 @@
 # Roadmap
 
-> Long-term vision, milestones, and versioning policy for Agent Company OS
+> Long-term vision, milestones, and versioning policy for Flowntier
 
 **Version:** v0.3 RFC
 **Status:** Active
@@ -11,12 +11,12 @@
 
 ## 1. Vision (one paragraph)
 
-ACO becomes the **operating system for an AI software company** — a
+Flowntier becomes the **operating system for an AI software company** — a
 visual workspace where specialized AI agents collaborate under a 主理
 to ship production software, while humans stay in control of intent and
 final approval. The IDE is the surface; the workflow is the product.
 
-Starting in **v0.3**, ACO is **all-Rust, embedded-agent**: no Python
+Starting in **v0.3**, Flowntier is **all-Rust, embedded-agent**: no Python
 sidecar, no external CLI to spawn. The agent loop, tool system, and
 LLM streaming all live inside the Tauri process. The UI gets a
 **Chat Zone** docked next to the existing Settings — progressive,
@@ -32,7 +32,7 @@ provider client.
 
 ## 2. Versioning Policy
 
-ACO follows **strict semver**:
+Flowntier follows **strict semver**:
 
 * **Major** (`v0.x` → `v1.0`): any breaking change to:
   * `agent-protocol/vX` schema
@@ -199,7 +199,7 @@ shim if backwards compatibility matters.
 
 ### v0.5 — Memory & Replay
 
-> **Title:** ACO remembers; you can rewind.
+> **Title:** Flowntier remembers; you can rewind.
 
 - [ ] Project memory (persistent facts across workflows)
 - [ ] Workflow replay (JSONL + model versions → bit-exact rerun)
@@ -211,7 +211,7 @@ shim if backwards compatibility matters.
 
 ### v0.6 — Personality
 
-> **Title:** ACO has a face.
+> **Title:** Flowntier has a face.
 
 - [ ] Live2D avatars for 主理 / 找茬 / 实施 / 审查
 - [ ] Streaming "thinking" bullets visible mid-response
@@ -231,7 +231,7 @@ shim if backwards compatibility matters.
 ## 5. Non-Goals (permanent)
 
 * ❌ A general-purpose LLM chat UI
-* ❌ A code editor (ACO is a *workspace*, not an editor — it borrows
+* ❌ A code editor (Flowntier is a *workspace*, not an editor — it borrows
   Monaco for *viewing* diffs only)
 * ❌ A version control system
 * ❌ A CI/CD platform
