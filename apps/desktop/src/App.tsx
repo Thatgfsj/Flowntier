@@ -82,6 +82,38 @@ function agentStatusToRole(s: AgentStatus): AgentStatus {
   return s;
 }
 
+// ── DriftBanner ────────────────────────────────────────────────
+// Renders a non-blocking warning at the top of the dashboard
+// when the sidecar's reported version is older than the shell's
+// expected min_compatible. Common cause: user upgraded the shell
+// but the sidecar binary in apps/desktop/src-tauri/binaries/
+// is stale (rare in installed builds, common in dev).
+interface DriftBannerProps {
+  sidecar: string;
+  minCompatible: string;
+  onDismiss: () => void;
+}
+
+function DriftBanner({ sidecar, minCompatible, onDismiss }: DriftBannerProps) {
+  return (
+    <div
+      role="alert"
+      className="flex items-center justify-between gap-4 border-b border-warning bg-warning/10 px-4 py-2 text-xs text-warning"
+    >
+      <span>
+        ⚠ Sidecar 运行时版本 (v{sidecar}) 低于 shell 期望 (v{minCompatible}). 某些功能可能不可用。请重新构建 sidecar。
+      </span>
+      <button
+        type="button"
+        onClick={onDismiss}
+        className="rounded-md border border-warning/40 px-2 py-0.5 text-xs text-warning hover:bg-warning/20"
+      >
+        关闭
+      </button>
+    </div>
+  );
+}
+
 export function App() {
   const [activePhase, setActivePhase] = useState(0);
   const [phaseStates, setPhaseStates] = useState<Record<Phase['name'], PhaseState>>({ ...PHASE_STATE });
@@ -163,6 +195,58 @@ export function App() {
         if (!cancelled) setUpdateBanner(banner);
       } catch (e) {
         console.warn('[flowntier] update check threw:', e);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // v0.4: sidecar version handshake. Calls rpc_version once on
+  // mount; if the sidecar's reported version is < min_compatible
+  // (read from its own response), we render a non-blocking
+  // DriftBanner above the dashboard.
+  //
+  // Non-fatal: if the call fails we just log and continue. The
+  // most common cause is the sidecar binary not yet attached to
+  // its named pipe; we don't want a startup race to flash a
+  // banner on every launch.
+  const [drift, setDrift] = useState<
+    | { detected: false }
+    | {
+        detected: true;
+        sidecar: string;
+        min_compatible: string;
+      }
+  >({ detected: false });
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await invoke<{
+          sidecar: string;
+          min_compatible: string;
+        }>('rpc_version');
+        if (cancelled) return;
+        // Simple semver comparison: split on '.', compare ints.
+        const parse = (s: string) => s.split('.').map((n) => parseInt(n, 10) || 0);
+        const a = parse(r.sidecar);
+        const b = parse(r.min_compatible);
+        const v = (arr: number[], i: number): number => arr[i] ?? 0;
+        // Strict less-than: sidecar < min_compatible.
+        const isDrift =
+          v(a, 0) < v(b, 0) ||
+          (v(a, 0) === v(b, 0) && v(a, 1) < v(b, 1)) ||
+          (v(a, 0) === v(b, 0) && v(a, 1) === v(b, 1) && v(a, 2) < v(b, 2));
+        if (isDrift) {
+          setDrift({
+            detected: true,
+            sidecar: r.sidecar,
+            min_compatible: r.min_compatible,
+          });
+        }
+      } catch (e) {
+        console.warn('[flowntier] rpc_version check threw:', e);
       }
     })();
     return () => {
@@ -337,6 +421,13 @@ export function App() {
 
   return (
     <div className="flex h-screen flex-col">
+      {drift.detected && (
+        <DriftBanner
+          sidecar={drift.sidecar}
+          minCompatible={drift.min_compatible}
+          onDismiss={() => setDrift({ detected: false })}
+        />
+      )}
       <TopBar
         projectName="Flowntier"
         subtitle={

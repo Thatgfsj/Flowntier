@@ -242,6 +242,18 @@ async fn health_check() -> Result<bool, String> {
     Ok(pipe_request("GET", "/health", None).await.is_ok())
 }
 
+/// Returns the sidecar runtime's version + a min_compatible
+/// field. The frontend compares sidecar against its own
+/// expected version; if sidecar < min_compatible, the app
+/// shows a non-blocking drift banner.
+///
+/// Used by the desktop shell on startup, after the runtime
+/// pipe becomes reachable.
+#[tauri::command]
+async fn rpc_version() -> Result<serde_json::Value, String> {
+    pipe_request("GET", "/api/rpc/version", None).await
+}
+
 #[tauri::command]
 async fn list_secrets() -> Result<serde_json::Value, String> {
     pipe_request("GET", "/api/settings/secrets", None).await
@@ -655,6 +667,7 @@ pub fn run() {
             log_frontend_error,
             kv_get, kv_set,
             load_sample_workflow, first_run_complete,
+            rpc_version,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
