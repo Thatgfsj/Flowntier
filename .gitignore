@@ -18,7 +18,9 @@ desktop.ini
 *.key
 *.cer
 *.pfx
-secrets/
+# Only ignore top-level /secrets/ (project-level credential
+# vault convention). Nested src/secrets/ modules must be tracked.
+/secrets/
 
 # ─── Rust ────────────────────────────────────────────
 /target/

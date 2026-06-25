@@ -60,6 +60,15 @@ impl Dispatcher {
     /// overwrites the previous handler, which is usually a bug
     /// in the caller — see `register_all` for the canonical
     /// endpoint list.
+    ///
+    /// Path patterns: a path containing `{name}` (one per segment)
+    /// is a placeholder. During dispatch, the placeholder matches
+    /// any non-empty segment of the incoming request path and the
+    /// extracted value is written into the request body under the
+    /// same key (e.g. `{name}` -> body["name"]). This lets
+    /// handlers be registered once for an entire collection of
+    /// concrete paths (PUT /api/settings/secrets/{name} matches
+    /// /api/settings/secrets/OPENAI_API_KEY, etc.).
     pub fn register<F>(&mut self, method: impl Into<String>, path: impl Into<String>, f: F)
     where
         F: Fn(Value) -> HandlerFuture + Send + Sync + 'static,
@@ -82,20 +91,80 @@ impl Dispatcher {
 
     /// Dispatch an RPC request. Looks up the handler by
     /// `(req.method, req.params.path)`.
+    ///
+    /// Lookup algorithm:
+    ///   1. Exact match — fastest path.
+    ///   2. Pattern match — scan registered paths with the
+    ///      same method, find the first where the placeholder
+    ///      pattern matches the incoming path. Extracted
+    ///      placeholders are injected into the request body
+    ///      under the same key.
     pub async fn dispatch(&self, req_id: u64, req: RpcRequest) -> RpcResponse {
-        let body = req.params.body.unwrap_or(Value::Null);
-        let key = (req.method.to_uppercase(), req.params.path);
-        let Some(handler) = self.handlers.get(&key) else {
-            return RpcResponse::err(
-                req_id,
-                codes::NOT_FOUND,
-                format!("no handler registered for {} {}", key.0, key.1),
-            );
-        };
-        match handler(body).await {
-            Ok((status, body)) => RpcResponse::status(req_id, status, body),
-            Err(e) => RpcResponse::err(req_id, codes::INTERNAL, e),
+        let method = req.method.to_uppercase();
+        let path = req.params.path;
+        let mut body = req.params.body.unwrap_or(Value::Null);
+
+        // 1. Exact match.
+        if let Some(handler) = self.handlers.get(&(method.clone(), path.clone())) {
+            return match handler(body).await {
+                Ok((status, b)) => RpcResponse::status(req_id, status, b),
+                Err(e) => RpcResponse::err(req_id, codes::INTERNAL, e),
+            };
         }
+
+        // 2. Pattern match.
+        let incoming_segments: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+        for ((registered_method, registered_path), handler) in &self.handlers {
+            if *registered_method != method {
+                continue;
+            }
+            let pattern_segments: Vec<&str> = registered_path
+                .split('/')
+                .filter(|s| !s.is_empty())
+                .collect();
+            if pattern_segments.len() != incoming_segments.len() {
+                continue;
+            }
+            let mut placeholder_values: Vec<(&str, String)> = Vec::new();
+            let mut matched = true;
+            for (p, i) in pattern_segments.iter().zip(incoming_segments.iter()) {
+                if let Some(name) = p.strip_prefix('{').and_then(|s| s.strip_suffix('}')) {
+                    if i.is_empty() {
+                        matched = false;
+                        break;
+                    }
+                    placeholder_values.push((name, (*i).to_string()));
+                } else if p != i {
+                    matched = false;
+                    break;
+                }
+            }
+            if matched {
+                // Inject placeholders into the body so handlers
+                // can access them via `body.get("name")` etc.
+                if let Value::Object(ref mut map) = body {
+                    for (name, value) in &placeholder_values {
+                        map.insert((*name).to_string(), Value::String(value.clone()));
+                    }
+                } else {
+                    let mut map = serde_json::Map::new();
+                    for (name, value) in &placeholder_values {
+                        map.insert((*name).to_string(), Value::String(value.clone()));
+                    }
+                    body = Value::Object(map);
+                }
+                return match handler(body).await {
+                    Ok((status, b)) => RpcResponse::status(req_id, status, b),
+                    Err(e) => RpcResponse::err(req_id, codes::INTERNAL, e),
+                };
+            }
+        }
+
+        RpcResponse::err(
+            req_id,
+            codes::NOT_FOUND,
+            format!("no handler registered for {method} {path}"),
+        )
     }
 }
 

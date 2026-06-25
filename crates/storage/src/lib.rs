@@ -275,6 +275,312 @@ fn workflow_status_from_str(s: &str) -> Option<WorkflowStatus> {
     }
 }
 
+// ── v0.4 secret / provider types ─────────────────────────────────
+// See migrations/0003_secrets_and_providers.sql.
+
+/// A stored secret. The plaintext lives in the OS keystore; this
+/// row only holds the AES-GCM ciphertext + a key handle pointing
+/// to the master encryption key in the keystore.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SecretRow {
+    pub name: String,
+    pub ciphertext: Vec<u8>,
+    pub nonce: Vec<u8>,
+    pub ad: Vec<u8>,
+    pub key_handle: String,
+    pub created_at: i64,
+    pub updated_at: i64,
+    pub last_used_at: Option<i64>,
+}
+
+/// Provider preset (one of the 9 built-in).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProviderRow {
+    pub id: String,
+    pub enabled: bool,
+    pub default_model: Option<String>,
+    pub base_url: Option<String>,
+    pub preset_json: String,
+    pub updated_at: i64,
+}
+
+/// User-defined provider (relay station / private gateway).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CustomProvider {
+    pub id: String,
+    pub name: String,
+    pub base_url: String,
+    /// "openai-compatible" | "anthropic-compatible"
+    pub kind: String,
+    pub default_model: Option<String>,
+    pub enabled: bool,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+/// Cached GET /api/providers/{id}/models response.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelCacheRow {
+    pub provider_id: String,
+    pub models_json: String,
+    pub fetched_at: i64,
+}
+
+impl Repository {
+    // ── Secret CRUD ────────────────────────────────────────────
+
+    /// Insert or replace a secret row.
+    pub async fn put_secret(&self, s: &SecretRow) -> Result<(), StorageError> {
+        sqlx::query(
+            "INSERT INTO secret
+                (name, ciphertext, nonce, ad, key_handle, created_at, updated_at, last_used_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(name) DO UPDATE SET
+                ciphertext=excluded.ciphertext,
+                nonce=excluded.nonce,
+                ad=excluded.ad,
+                key_handle=excluded.key_handle,
+                updated_at=excluded.updated_at",
+        )
+        .bind(&s.name)
+        .bind(&s.ciphertext)
+        .bind(&s.nonce)
+        .bind(&s.ad)
+        .bind(&s.key_handle)
+        .bind(s.created_at)
+        .bind(s.updated_at)
+        .bind(s.last_used_at)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Fetch a single secret row. Returns None if not found.
+    pub async fn get_secret(&self, name: &str) -> Result<Option<SecretRow>, StorageError> {
+        let r: Option<(String, Vec<u8>, Vec<u8>, Vec<u8>, String, i64, i64, Option<i64>)> =
+            sqlx::query_as(
+                "SELECT name, ciphertext, nonce, ad, key_handle, created_at, updated_at, last_used_at
+                 FROM secret WHERE name = ?",
+            )
+            .bind(name)
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(r.map(|(name, ciphertext, nonce, ad, key_handle, created_at, updated_at, last_used_at)| {
+            SecretRow { name, ciphertext, nonce, ad, key_handle, created_at, updated_at, last_used_at }
+        }))
+    }
+
+    /// List all secret names + metadata (NEVER returns ciphertext).
+    pub async fn list_secret_meta(&self) -> Result<Vec<SecretRow>, StorageError> {
+        let rows: Vec<(String, Vec<u8>, Vec<u8>, Vec<u8>, String, i64, i64, Option<i64>)> =
+            sqlx::query_as(
+                "SELECT name, ciphertext, nonce, ad, key_handle, created_at, updated_at, last_used_at
+                 FROM secret ORDER BY updated_at DESC",
+            )
+            .fetch_all(&self.pool)
+            .await?;
+        Ok(rows.into_iter()
+            .map(|(name, ciphertext, nonce, ad, key_handle, created_at, updated_at, last_used_at)| {
+                SecretRow { name, ciphertext, nonce, ad, key_handle, created_at, updated_at, last_used_at }
+            })
+            .collect())
+    }
+
+    /// Delete a secret row. The matching keystore entry is the
+    /// caller's responsibility (see secrets.rs::delete()).
+    pub async fn delete_secret(&self, name: &str) -> Result<bool, StorageError> {
+        let res = sqlx::query("DELETE FROM secret WHERE name = ?")
+            .bind(name)
+            .execute(&self.pool)
+            .await?;
+        Ok(res.rows_affected() > 0)
+    }
+
+    /// Update only the `last_used_at` column. Used by the secret
+    /// store as an audit trail when reveal() is called.
+    pub async fn touch_secret_last_used(
+        &self,
+        name: &str,
+    ) -> Result<bool, StorageError> {
+        let res = sqlx::query(
+            "UPDATE secret SET last_used_at = strftime('%s','now') WHERE name = ?",
+        )
+        .bind(name)
+        .execute(&self.pool)
+        .await?;
+        Ok(res.rows_affected() > 0)
+    }
+
+    // ── Provider CRUD ───────────────────────────────────────────
+
+    pub async fn get_provider(&self, id: &str) -> Result<Option<ProviderRow>, StorageError> {
+        let r: Option<(String, i64, Option<String>, Option<String>, String, i64)> =
+            sqlx::query_as(
+                "SELECT id, enabled, default_model, base_url, preset_json, updated_at
+                 FROM provider WHERE id = ?",
+            )
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(r.map(|(id, enabled, default_model, base_url, preset_json, updated_at)| ProviderRow {
+            id, enabled: enabled != 0, default_model, base_url, preset_json, updated_at,
+        }))
+    }
+
+    pub async fn list_providers(&self) -> Result<Vec<ProviderRow>, StorageError> {
+        let rows: Vec<(String, i64, Option<String>, Option<String>, String, i64)> =
+            sqlx::query_as(
+                "SELECT id, enabled, default_model, base_url, preset_json, updated_at
+                 FROM provider ORDER BY id",
+            )
+            .fetch_all(&self.pool)
+            .await?;
+        Ok(rows.into_iter()
+            .map(|(id, enabled, default_model, base_url, preset_json, updated_at)| ProviderRow {
+                id, enabled: enabled != 0, default_model, base_url, preset_json, updated_at,
+            })
+            .collect())
+    }
+
+    pub async fn upsert_provider(&self, p: &ProviderRow) -> Result<(), StorageError> {
+        sqlx::query(
+            "INSERT INTO provider (id, enabled, default_model, base_url, preset_json, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?)
+             ON CONFLICT(id) DO UPDATE SET
+                enabled=excluded.enabled,
+                default_model=excluded.default_model,
+                base_url=excluded.base_url,
+                preset_json=excluded.preset_json,
+                updated_at=excluded.updated_at",
+        )
+        .bind(&p.id)
+        .bind(p.enabled as i64)
+        .bind(&p.default_model)
+        .bind(&p.base_url)
+        .bind(&p.preset_json)
+        .bind(p.updated_at)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    // ── Custom provider CRUD ────────────────────────────────────
+
+    pub async fn list_custom_providers(&self) -> Result<Vec<CustomProvider>, StorageError> {
+        let rows: Vec<(String, String, String, String, Option<String>, i64, i64, i64)> =
+            sqlx::query_as(
+                "SELECT id, name, base_url, kind, default_model, enabled, created_at, updated_at
+                 FROM custom_provider ORDER BY created_at DESC",
+            )
+            .fetch_all(&self.pool)
+            .await?;
+        Ok(rows.into_iter()
+            .map(|(id, name, base_url, kind, default_model, enabled, created_at, updated_at)| {
+                CustomProvider {
+                    id, name, base_url, kind, default_model,
+                    enabled: enabled != 0, created_at, updated_at,
+                }
+            })
+            .collect())
+    }
+
+    pub async fn get_custom_provider(&self, id: &str) -> Result<Option<CustomProvider>, StorageError> {
+        let r: Option<(String, String, String, String, Option<String>, i64, i64, i64)> =
+            sqlx::query_as(
+                "SELECT id, name, base_url, kind, default_model, enabled, created_at, updated_at
+                 FROM custom_provider WHERE id = ?",
+            )
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(r.map(|(id, name, base_url, kind, default_model, enabled, created_at, updated_at)| {
+            CustomProvider {
+                id, name, base_url, kind, default_model,
+                enabled: enabled != 0, created_at, updated_at,
+            }
+        }))
+    }
+
+    pub async fn insert_custom_provider(&self, p: &CustomProvider) -> Result<(), StorageError> {
+        sqlx::query(
+            "INSERT INTO custom_provider
+                (id, name, base_url, kind, default_model, enabled, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&p.id)
+        .bind(&p.name)
+        .bind(&p.base_url)
+        .bind(&p.kind)
+        .bind(&p.default_model)
+        .bind(p.enabled as i64)
+        .bind(p.created_at)
+        .bind(p.updated_at)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn delete_custom_provider(&self, id: &str) -> Result<bool, StorageError> {
+        let res = sqlx::query("DELETE FROM custom_provider WHERE id = ?")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(res.rows_affected() > 0)
+    }
+
+    // ── Model cache ──────────────────────────────────────────────
+
+    pub async fn put_model_cache(&self, c: &ModelCacheRow) -> Result<(), StorageError> {
+        sqlx::query(
+            "INSERT INTO model_cache (provider_id, models_json, fetched_at)
+             VALUES (?, ?, ?)
+             ON CONFLICT(provider_id) DO UPDATE SET
+                models_json=excluded.models_json,
+                fetched_at=excluded.fetched_at",
+        )
+        .bind(&c.provider_id)
+        .bind(&c.models_json)
+        .bind(c.fetched_at)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn get_model_cache(&self, provider_id: &str) -> Result<Option<ModelCacheRow>, StorageError> {
+        let r: Option<(String, String, i64)> = sqlx::query_as(
+            "SELECT provider_id, models_json, fetched_at FROM model_cache WHERE provider_id = ?",
+        )
+        .bind(provider_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(r.map(|(provider_id, models_json, fetched_at)| ModelCacheRow {
+            provider_id, models_json, fetched_at,
+        }))
+    }
+
+    // ── Generic kv ──────────────────────────────────────────────
+
+    pub async fn kv_get(&self, k: &str) -> Result<Option<String>, StorageError> {
+        let r: Option<(String,)> = sqlx::query_as("SELECT v FROM kv WHERE k = ?")
+            .bind(k)
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(r.map(|(v,)| v))
+    }
+
+    pub async fn kv_set(&self, k: &str, v: &str) -> Result<(), StorageError> {
+        sqlx::query(
+            "INSERT INTO kv (k, v, mtime) VALUES (?, ?, strftime('%s','now'))
+             ON CONFLICT(k) DO UPDATE SET v=excluded.v, mtime=strftime('%s','now')",
+        )
+        .bind(k)
+        .bind(v)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

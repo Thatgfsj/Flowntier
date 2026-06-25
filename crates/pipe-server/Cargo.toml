@@ -27,10 +27,20 @@ tracing      = { workspace = true }
 futures      = "0.3"
 scopeguard   = "1"
 rand         = "0.8"
+parking_lot  = { workspace = true }
+keyring      = { workspace = true }
+aes-gcm      = { workspace = true }
+base64       = "0.22"
+chrono       = { workspace = true }
+reqwest      = { workspace = true }
+ulid         = { workspace = true }
 
 # Agent core: the pipe server dispatches tasks into the in-process
 # agent runtime.
 agent-core   = { path = "../agent-core" }
+
+# Storage: the v0.4 secret store and provider table.
+storage      = { path = "../storage" }
 
 [dev-dependencies]
 tokio        = { workspace = true, features = ["test-util"] }

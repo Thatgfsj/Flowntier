@@ -52,6 +52,11 @@ sqlx = { version = "0.8", default-features = false, features = [
 crossbeam-channel = "0.5"
 parking_lot       = "0.12"
 
+# HTTP client (used by /api/providers/{id}/models to fetch
+# the upstream /v1/models endpoint). We use rustls-tls so we
+# don't need OpenSSL on the build host.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+
 # Tauri (used by tauri-core; non-optional because Cargo workspace
 # deps cannot be optional — Rust 1.83+)
 tauri         = { version = "2" }
@@ -66,6 +71,23 @@ ulid     = { version = "1", features = ["serde"] }
 
 # FS notify
 notify = "6"
+
+# Secrets
+# keyring = "3" with three native backends:
+#   * apple-native  → Keychain on macOS (not used in v0.4, but
+#                     enabled so v0.5 macOS support compiles clean)
+#   * windows-native → Credential Manager (DPAPI-backed) on Windows
+#   * sync-secret-service → libsecret on Linux
+# On Linux without libsecret (headless containers, minimal
+# distros) the runtime falls back to a passphrase-protected file
+# under $XDG_DATA_HOME/flowntier/master.key. See
+# crates/pipe-server/src/secrets.rs::FallbackKeychain.
+keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
+
+# AES-GCM for wrapping individual secrets before writing
+# ciphertext + nonce to SQLite.
+aes-gcm = "0.10"
+rand = "0.8"
 
 # PTY
 portable-pty = "0.8"
