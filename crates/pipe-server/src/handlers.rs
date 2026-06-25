@@ -84,6 +84,30 @@ pub fn register_all(d: &mut Dispatcher, state: ServerState) {
         })
     });
 
+    // Version handshake (v0.4). Returns the sidecar's version +
+    // a min_compatible field the Tauri shell compares against the
+    // shell's expected version. If sidecar < min_compatible, the
+    // shell shows a drift banner.
+    //
+    // The shell learns about the sidecar through:
+    //   - this endpoint (read by the desktop shell on startup)
+    //   - the CARGO_PKG_VERSION env var (written by the desktop
+    //     shell's build script and read by the spawned sidecar
+    //     process). For v0.4 we only have the endpoint; the
+    //     cross-process var is a v0.5 nicety.
+    d.register("GET", "/api/rpc/version", |_body| {
+        Box::pin(async {
+            Ok((
+                200,
+                json!({
+                    "sidecar": env!("CARGO_PKG_VERSION"),
+                    "min_compatible": "0.4.0",
+                    "build": "rust",
+                }),
+            ))
+        })
+    });
+
     // List providers — v0.4 reads the 9 built-in presets from
     // `providers::PRESETS` and joins them with the `provider`
     // table for per-preset overrides (enabled, default_model,
