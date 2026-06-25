@@ -27,18 +27,59 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "icon": [
-      "icons/icon.ico"
-    ],
     "category": "DeveloperTool",
+    "publisher": "Thatgfsj",
+    "copyright": "Copyright © 2026 Thatgfsj",
+    "homepage": "https://github.com/Thatgfsj/Flowntier",
     "shortDescription": "Flowntier — AI software company on your desktop",
     "longDescription": "Flowntier — a visual AI software company powered by multi-agent workflow.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.ico"
+    ],
     "externalBin": [
       "binaries/flowntier_runtime"
     ],
     "resources": [
       "WebView2Loader.dll"
     ],
-    "publisher": "Thatgfsj"
+    "windows": {
+      "nsis": {
+        "installerIcon": "icons/icon.ico",
+        "installMode": "perMachine",
+        "languages": ["SimpChinese", "English"],
+        "displayLanguageSelector": true
+      },
+      "wix": {
+        "language": ["en-US"]
+      }
+    },
+    "linux": {
+      "deb": {
+        "depends": [
+          "libwebkit2gtk-4.1-0",
+          "libgtk-3-0",
+          "libayatana-appindicator3-1",
+          "libnss3",
+          "libxss1",
+          "libasound2"
+        ]
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "active": true,
+      "dialog": true,
+      "endpoints": [
+        "https://github.com/Thatgfsj/Flowntier/releases/latest/download/{{target}}-{{arch}}.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDk0ODM1MTQ5RUE2QTcwN0MKUldSOGNHcnFTVkdEbEJJYklQZDdabzFtMUNzbFNQQlpnaFV2WWtuY0RSaTVHLy9HWHhPTU9Gb2IK",
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

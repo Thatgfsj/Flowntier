@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
+import { check as checkUpdaterPlugin } from '@tauri-apps/plugin-updater';
+import { checkForUpdate, installUpdate, type UpdateBanner } from './lib/updater';
 import { PhaseTimeline, AgentCard, Card, type PhaseState, type AgentStatus } from '@flowntier/ui';
 import type { WfEvent } from '@flowntier/shared';
 import { TopBar } from './zones/TopBar.js';
@@ -96,6 +98,7 @@ export function App() {
   const [finalReport, setFinalReport] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [currentWfId, setCurrentWfId] = useState<string | null>(null);
+  const [updateBanner, setUpdateBanner] = useState<UpdateBanner>({ available: false });
   const [planNodes, setPlanNodes] = useState<PlanTaskNode[]>([]);
   const [planEdges, setPlanEdges] = useState<PlanEdge[]>([]);
   const [selectedTask, setSelectedTask] = useState<string | null>(null);
@@ -118,6 +121,24 @@ export function App() {
     // @ts-expect-error: window.__flowntierCurrentWfId is a debug hook
     window.__flowntierCurrentWfId = currentWfId;
   }, [currentWfId]);
+
+  // Check for updates once on app start. Non-blocking; result goes
+  // into the updateBanner state and is rendered by the TopBar.
+  // See apps/desktop/src/lib/updater.ts for the wrapper.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const banner = await checkForUpdate();
+        if (!cancelled) setUpdateBanner(banner);
+      } catch (e) {
+        console.warn('[flowntier] update check threw:', e);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Whenever a new workflow starts, poll /plan until it's ready
   useEffect(() => {
@@ -282,6 +303,23 @@ export function App() {
         onSettingsClick={() => setSettingsOpen(true)}
         onChatClick={() => setChatOpen((v) => !v)}
         chatOpen={chatOpen}
+        updateBanner={updateBanner}
+        onUpdateClick={() => {
+          // The user clicked the "update available" banner. Re-check
+          // (in case cache expired) then install. installUpdate()
+          // shows the confirm dialog itself.
+          void (async () => {
+            try {
+              const upd = await checkUpdaterPlugin();
+              if (upd) await installUpdate(upd);
+              // If install succeeds, downloadAndInstall() will
+              // trigger a relaunch; we don't need to update state.
+              setUpdateBanner({ available: false });
+            } catch (e) {
+              console.warn('[flowntier] install failed:', e);
+            }
+          })();
+        }}
       />
 
       <div className="flex flex-1 overflow-hidden">

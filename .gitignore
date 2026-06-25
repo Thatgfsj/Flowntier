@@ -110,3 +110,8 @@ out/
 # to this file; if you need to ignore it temporarily for a
 # test, use `git update-index --skip-worktree`.
 apps/desktop/src-tauri/binaries/
+
+# ─── Signing keys (NEVER commit; the private key goes in
+#     GitHub repo secrets as TAURI_SIGNING_PRIVATE_KEY) ─────
+/.keys/
+apps/desktop/.keys/
