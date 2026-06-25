@@ -1,4 +1,5 @@
 import type { FormEvent } from 'react';
+import { useTranslation } from 'react-i18next';
 
 export interface CommandDockProps {
   commandInput: string;
@@ -21,6 +22,7 @@ export function CommandDock({
   busy = false,
   resetLabel,
 }: CommandDockProps) {
+  const { t } = useTranslation();
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
     onCommandSubmit();
@@ -33,7 +35,7 @@ export function CommandDock({
     <form
       onSubmit={handleSubmit}
       className="flex shrink-0 items-center gap-2 border-t border-border bg-surface-2 px-4 py-3"
-      aria-label="命令输入栏"
+      aria-label={t('commandDock.placeholder')}
     >
       <span className="shrink-0 font-mono text-xs text-text-secondary">主理 ▸</span>
       <input
@@ -42,19 +44,19 @@ export function CommandDock({
         onChange={(e) => onCommandChange(e.target.value)}
         placeholder={
           isReset
-            ? '输入新指令以开始新工作流'
-            : '向主理下达指令…  例如：实现 POST /auth/login 接口'
+            ? t('commandDock.empty')
+            : t('commandDock.placeholder')
         }
         disabled={busy}
         className="flex-1 rounded-md border border-border bg-surface-1 px-3 py-2 text-sm placeholder:text-text-secondary focus:border-chief focus:outline-none focus:ring-2 focus:ring-chief/50 disabled:opacity-50"
-        aria-label="向主理输入指令"
+        aria-label={t('commandDock.placeholder')}
       />
       <button
         type="submit"
         disabled={!canSubmit}
         className="rounded-md bg-chief px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-chief/90 focus:outline-none focus:ring-2 focus:ring-chief/50 disabled:pointer-events-none disabled:opacity-50"
       >
-        {isReset ? resetLabel : '发送'}
+        {isReset ? resetLabel : t('commandDock.submit')}
       </button>
     </form>
   );
