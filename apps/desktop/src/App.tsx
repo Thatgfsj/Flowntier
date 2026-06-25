@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { check as checkUpdaterPlugin } from '@tauri-apps/plugin-updater';
 import { checkForUpdate, installUpdate, type UpdateBanner } from './lib/updater';
+import { kvGet, kvSet } from './lib/api.js';
 import { Welcome } from './components/Welcome';
 import { PhaseTimeline, AgentCard, Card, type PhaseState, type AgentStatus } from '@flowntier/ui';
 import type { WfEvent } from '@flowntier/shared';
@@ -96,20 +98,21 @@ interface DriftBannerProps {
 }
 
 function DriftBanner({ sidecar, minCompatible, onDismiss }: DriftBannerProps) {
+  const { t } = useTranslation();
   return (
     <div
       role="alert"
-      className="flex items-center justify-between gap-4 border-b border-warning bg-warning/10 px-4 py-2 text-xs text-warning"
+      className="flex items-center justify-between gap-4 border-b border-error bg-error/15 px-4 py-2 text-xs text-primary"
     >
       <span>
-        ⚠ Sidecar 运行时版本 (v{sidecar}) 低于 shell 期望 (v{minCompatible}). 某些功能可能不可用。请重新构建 sidecar。
+        {t('drift.message', { sidecar, expected: minCompatible })}
       </span>
       <button
         type="button"
         onClick={onDismiss}
-        className="rounded-md border border-warning/40 px-2 py-0.5 text-xs text-warning hover:bg-warning/20"
+        className="rounded-md border border-error/40 px-2 py-0.5 text-xs text-error hover:bg-error/25"
       >
-        关闭
+        {t('drift.dismiss')}
       </button>
     </div>
   );
@@ -239,13 +242,24 @@ export function App() {
           v(a, 0) < v(b, 0) ||
           (v(a, 0) === v(b, 0) && v(a, 1) < v(b, 1)) ||
           (v(a, 0) === v(b, 0) && v(a, 1) === v(b, 1) && v(a, 2) < v(b, 2));
-        if (isDrift) {
-          setDrift({
-            detected: true,
-            sidecar: r.sidecar,
-            min_compatible: r.min_compatible,
-          });
+        if (!isDrift) return;
+        // Persistent dismiss: re-show only if the user hasn't
+        // already dismissed this exact sidecar version. If the
+        // sidecar is upgraded in the future (or downgraded to a
+        // different version), the banner returns.
+        const dismissedFor = await kvGet<string>('drift_dismissed_for_version');
+        if (cancelled) return;
+        if (dismissedFor === r.sidecar) {
+          console.info(
+            '[flowntier] drift banner suppressed (user dismissed for this sidecar version)',
+          );
+          return;
         }
+        setDrift({
+          detected: true,
+          sidecar: r.sidecar,
+          min_compatible: r.min_compatible,
+        });
       } catch (e) {
         console.warn('[flowntier] rpc_version check threw:', e);
       }
@@ -426,7 +440,14 @@ export function App() {
         <DriftBanner
           sidecar={drift.sidecar}
           minCompatible={drift.min_compatible}
-          onDismiss={() => setDrift({ detected: false })}
+          onDismiss={() => {
+            // Persist the dismissal keyed by the sidecar version
+            // we just showed. If the user upgrades the sidecar
+            // and the new version is still older than expected,
+            // the banner re-appears.
+            void kvSet('drift_dismissed_for_version', drift.sidecar);
+            setDrift({ detected: false });
+          }}
         />
       )}
       <TopBar
