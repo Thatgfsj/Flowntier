@@ -209,35 +209,65 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
         })
     });
 
-    // Router: per-role default-model + fallback chain. The
-    // real implementation reads from config/router.toml. For
-    // v0.3 we return a minimal default that the UI can render.
+    // Router: per-role default-model + fallback chain. v0.4 fixes
+    // the v0.3 bug where every role pointed to
+    // 'anthropic:claude-sonnet-4' (a model id that doesn't exist
+    // in the presets list — Settings.tsx would have shown it
+    // as invalid). All roles now default to Claude Opus 4.8 with
+    // Sonnet 4.6 as the automatic fallback.
     d.register("GET", "/api/router/roles", |_body| {
         Box::pin(async {
             Ok((
                 200,
                 json!({
                     "roles": [
-                        { "role": "agent:chief",    "default_model": "anthropic:claude-sonnet-4", "fallback_chain": [] },
-                        { "role": "agent:worker",   "default_model": "anthropic:claude-sonnet-4", "fallback_chain": [] },
-                        { "role": "agent:planner",  "default_model": "anthropic:claude-sonnet-4", "fallback_chain": [] },
-                        { "role": "agent:critic:a", "default_model": "anthropic:claude-sonnet-4", "fallback_chain": [] },
-                        { "role": "agent:critic:b", "default_model": "anthropic:claude-sonnet-4", "fallback_chain": [] },
-                        { "role": "agent:reporter", "default_model": "anthropic:claude-sonnet-4", "fallback_chain": [] },
+                        { "role": "agent:chief",    "default_model": "anthropic:claude-opus-4-8",    "fallback_chain": ["anthropic:claude-sonnet-4-6"] },
+                        { "role": "agent:worker",   "default_model": "anthropic:claude-opus-4-8",    "fallback_chain": ["anthropic:claude-sonnet-4-6"] },
+                        { "role": "agent:planner",  "default_model": "anthropic:claude-opus-4-8",    "fallback_chain": ["anthropic:claude-sonnet-4-6"] },
+                        { "role": "agent:critic:a", "default_model": "anthropic:claude-opus-4-8",    "fallback_chain": ["anthropic:claude-sonnet-4-6"] },
+                        { "role": "agent:critic:b", "default_model": "anthropic:claude-opus-4-8",    "fallback_chain": ["anthropic:claude-sonnet-4-6"] },
+                        { "role": "agent:reporter", "default_model": "anthropic:claude-opus-4-8",    "fallback_chain": ["anthropic:claude-sonnet-4-6"] },
                     ],
                 }),
             ))
         })
     });
-    d.register("GET", "/api/router/models", |_body| {
-        Box::pin(async {
-            Ok((
-                200,
-                json!({
-                    "models": [],
-                    "note": "no provider models known yet; the v0.4 router will fill this in from /api/providers/*/models responses",
-                }),
-            ))
+
+    // /api/router/models — aggregate model_cache across all
+    // configured providers. The agent loop uses this when
+    // resolving "<role>:default" references.
+    let router_models_state = state.clone();
+    d.register("GET", "/api/router/models", move |_body| {
+        let s = router_models_state.clone();
+        Box::pin(async move {
+            // Lazy fetch: if any provider's cache is older than
+            // 1h, refresh it in the background. We don't block.
+            let _ = refresh_stale_caches(&s).await;
+            let providers = s.repo.list_providers().await
+                .unwrap_or_default();
+            let custom = s.repo.list_custom_providers().await
+                .unwrap_or_default();
+            let mut by_id = std::collections::HashMap::new();
+            for p in providers {
+                if let Ok(Some(c)) = s.repo.get_model_cache(&p.id).await {
+                    by_id.insert(p.id.clone(), c);
+                }
+            }
+            for c in custom {
+                if let Ok(Some(cache)) = s.repo.get_model_cache(&c.id).await {
+                    by_id.insert(c.id.clone(), cache);
+                }
+            }
+            let models: Vec<Value> = by_id.iter()
+                .filter_map(|(id, cache)| {
+                    serde_json::from_str::<Vec<Value>>(&cache.models_json).ok()
+                        .map(|m| json!({ "provider_id": id, "models": m }))
+                })
+                .collect();
+            Ok((200, json!({
+                "models": models,
+                "count": models.len(),
+            })))
         })
     });
 
@@ -721,6 +751,101 @@ async fn delete_custom_provider(
         "id": id,
         "deleted": removed,
     })))
+}
+
+/// Walk every provider's model_cache; if any entry is older than
+/// 1 hour, refresh it in the background. Non-blocking — returns
+/// the number of caches that were stale (and therefore refreshed).
+async fn refresh_stale_caches(state: &Arc<ServerState>) -> usize {
+    let providers = state.repo.list_providers().await.unwrap_or_default();
+    let custom = state.repo.list_custom_providers().await.unwrap_or_default();
+    let now = chrono::Utc::now().timestamp();
+    let mut stale = 0;
+
+    // For each provider with a non-live endpoint, populate the
+    // fallback list into the cache if it's empty. This handles
+    // the "first time the user opens Settings" case where no
+    // /v1/models has ever been fetched.
+    for preset in crate::providers::PRESETS {
+        if !preset.has_live_models_endpoint {
+            let cached = state.repo.get_model_cache(preset.id).await
+                .ok().flatten();
+            if cached.is_none() {
+                let models: Vec<Value> = crate::providers::ANTHROPIC_FALLBACK_MODELS.iter()
+                    .map(|(id, label)| json!({
+                        "id": id, "display_name": label, "source": "fallback",
+                    }))
+                    .collect();
+                let body = serde_json::to_string(&models).unwrap_or_default();
+                let _ = state.repo.put_model_cache(&storage::ModelCacheRow {
+                    provider_id: preset.id.to_string(),
+                    models_json: body,
+                    fetched_at: now,
+                }).await;
+                stale += 1;
+            }
+            continue;
+        }
+        let cached = state.repo.get_model_cache(preset.id).await
+            .ok().flatten();
+        let needs_refresh = match cached {
+            Some(c) => now - c.fetched_at > 3600,
+            None => true,
+        };
+        if needs_refresh {
+            // Lazy refresh: try to fetch via SecretStore. If no
+            // secret is configured, skip — the UI will surface
+            // 'no API key' on user-driven refresh.
+            let secret_name = preset.secret_name.to_string();
+            let api_key = match state.secrets.reveal(&secret_name).await {
+                Ok(k) => k,
+                Err(_) => continue,
+            };
+            let url = format!("{}/models", preset.base_url.trim_end_matches('/'));
+            if let Ok(client) = reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(10))
+                .build()
+            {
+                if let Ok(resp) = client.get(&url)
+                    .header("Authorization", format!("Bearer {api_key}"))
+                    .send().await
+                {
+                    if resp.status().is_success() {
+                        if let Ok(body) = resp.json::<Value>().await {
+                            let models: Vec<Value> = body.get("data")
+                                .and_then(|d| d.as_array())
+                                .map(|arr| arr.iter().filter_map(|m|
+                                    m.get("id").and_then(|v| v.as_str()).map(|id| json!({
+                                        "id": id, "display_name": id,
+                                        "source": "live",
+                                    }))
+                                ).collect())
+                                .unwrap_or_default();
+                            let body_str = serde_json::to_string(&models).unwrap_or_default();
+                            let _ = state.repo.put_model_cache(&storage::ModelCacheRow {
+                                provider_id: preset.id.to_string(),
+                                models_json: body_str,
+                                fetched_at: now,
+                            }).await;
+                            stale += 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Custom providers: just check staleness, don't refetch
+    // (the user adds them manually and may have a slow API).
+    for c in custom {
+        let cached = state.repo.get_model_cache(&c.id).await
+            .ok().flatten();
+        if cached.is_none() {
+            stale += 1;
+        }
+    }
+
+    stale
 }
 
 async fn run_task(body: Value, state: Arc<ServerState>) -> Result<(u16, Value), String> {
