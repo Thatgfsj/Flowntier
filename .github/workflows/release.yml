@@ -1,3 +1,34 @@
+# ──────────────────────────────────────────────────────────────────
+# release.yml — cut a Flowntier installer
+#
+# Triggers:
+#   1. push of a tag matching v*
+#   2. manual dispatch (for RC / dry-runs)
+#
+# Flow:
+#   1. build-runtime    — compile the Rust sidecar (flowntier-runtime)
+#                         for each target, upload as artifact.
+#   2. build-desktop    — for each OS, fetch the matching sidecar,
+#                         build the Tauri frontend + Rust shell, run
+#                         tauri-action which produces installers and
+#                         uploads them to a draft GitHub Release.
+#   3. publish-release  — promote the draft Release to public and
+#                         attach the Tauri updater's latest.json files
+#                         so the in-app updater works.
+#
+# Sign the update artifacts with TAURI_SIGNING_PRIVATE_KEY (ed25519
+# keypair held in repo secrets). The matching public key is compiled
+# into the shell via bundle.updater.pubkey in tauri.conf.json.
+#
+# Secrets required:
+#   - GITHUB_TOKEN                (auto-provided)
+#   - TAURI_SIGNING_PRIVATE_KEY   (contents of tauri-signing.key)
+#   - TAURI_SIGNING_PRIVATE_KEY_PASSWORD (password for the key file)
+#
+# No code signing in v0.4 — Windows SmartScreen will warn.
+# See docs/SECURITY.md §"Out of scope".
+# ──────────────────────────────────────────────────────────────────
+
 name: release
 
 on:
@@ -5,14 +36,34 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (e.g. v0.4.0-rc1)'
+        required: true
+        default: 'v0.4.0-rc1'
+
+permissions:
+  contents: write
+
+# Cancel in-progress runs for the same tag — never want two releases
+# racing for the same tag.
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
 
 env:
   CARGO_TERM_COLOR: always
+  CARGO_NET_GIT_FETCH_WITH_CLI: true
+  RUSTUP_MAX_RETRIES: '3'
+  RUST_BACKTRACE: '1'
 
 jobs:
-  # ── Build Python runtime sidecar ──────────────────────────────
+
+  # ──────────────────────────────────────────────────────────────
+  # 1. Build the Rust sidecar (flowntier-runtime) for every target.
+  # ──────────────────────────────────────────────────────────────
   build-runtime:
-    name: Build Python runtime (${{ matrix.os }})
+    name: sidecar (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -21,45 +72,58 @@ jobs:
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             ext: .exe
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            ext: ''
           - os: macos-latest
             target: aarch64-apple-darwin
             ext: ''
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            ext: ''
+
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
         with:
-          python-version: '3.12'
+          targets: ${{ matrix.target }}
 
-      - name: Install dependencies
-        run: |
-          pip install pyinstaller
-          pip install -e runtime
-          pip install -e apps/runtime
+      - name: Cache cargo registry + build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: 'crates/pipe-server -> target'
+          cache-on-failure: true
 
       - name: Build sidecar
         run: |
-          cd apps/runtime
-          pyinstaller aco_runtime.spec --noconfirm
+          cargo build --release \
+            --target ${{ matrix.target }} \
+            -p pipe-server \
+            --bin flowntier-runtime
 
-      - name: Rename binary
-        shell: bash
+      - name: Stage sidecar with Tauri expected name
+        # Tauri 2 expects sidecar files named
+        #   <basename>-<target-triple><ext>
+        # next to the externalBin entry in tauri.conf.json.
         run: |
-          cd apps/runtime/dist
-          mv aco_runtime${{ matrix.ext }} aco_runtime-${{ matrix.target }}${{ matrix.ext }}
+          mkdir -p apps/desktop/src-tauri/binaries
+          cp "target/${{ matrix.target }}/release/flowntier-runtime${{ matrix.ext }}" \
+             "apps/desktop/src-tauri/binaries/flowntier-runtime-${{ matrix.target }}${{ matrix.ext }}"
+          ls -la apps/desktop/src-tauri/binaries/
 
-      - name: Upload artifact
+      - name: Upload sidecar artifact
         uses: actions/upload-artifact@v4
         with:
-          name: runtime-${{ matrix.target }}
-          path: apps/runtime/dist/aco_runtime-${{ matrix.target }}${{ matrix.ext }}
+          name: sidecar-${{ matrix.target }}
+          path: apps/desktop/src-tauri/binaries/flowntier-runtime-${{ matrix.target }}${{ matrix.ext }}
+          if-no-files-found: error
+          retention-days: 7
 
-  # ── Build Tauri desktop app ───────────────────────────────────
+  # ──────────────────────────────────────────────────────────────
+  # 2. Build the Tauri desktop for every OS, using tauri-action.
+  #    Produces installers and a draft GitHub Release.
+  # ──────────────────────────────────────────────────────────────
   build-desktop:
-    name: Build desktop (${{ matrix.os }})
+    name: desktop (${{ matrix.os }})
     needs: build-runtime
     runs-on: ${{ matrix.os }}
     strategy:
@@ -68,100 +132,104 @@ jobs:
         include:
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
           - os: macos-latest
             target: aarch64-apple-darwin
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+
     steps:
       - uses: actions/checkout@v4
 
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 9
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: pnpm
-
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
 
-      - uses: Swatinem/rust-cache@v2
+      - name: Cache cargo registry + build
+        uses: Swatinem/rust-cache@v2
         with:
-          workspaces: apps/desktop/src-tauri -> target
+          workspaces: 'crates/ -> target'
+          cache-on-failure: true
 
-      - name: Install frontend dependencies
-        run: pnpm install --frozen-lockfile
+      # macOS deps (kept here because they are only needed for the
+      # Tauri build, not the sidecar build).
+      - name: Install Linux deps (Tauri 2 + webkit2gtk 4.1)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libssl-dev
 
-      - name: Download runtime artifact
+      - name: Setup pnpm + Node
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+
+      # Fetch the matching sidecar produced by build-runtime.
+      - name: Download matching sidecar
         uses: actions/download-artifact@v4
         with:
-          name: runtime-${{ matrix.target }}
-          path: apps/desktop/src-tauri/binaries
+          name: sidecar-${{ matrix.target }}
+          path: apps/desktop/src-tauri/binaries/
+          merge-multiple: false
 
-      - name: Rename runtime binary (Unix)
-        if: runner.os != 'Windows'
+      - name: Verify sidecar present
         run: |
-          cd apps/desktop/src-tauri/binaries
-          chmod +x aco_runtime-${{ matrix.target }}
-          cp aco_runtime-${{ matrix.target }} aco_runtime
+          ls -la apps/desktop/src-tauri/binaries/
+          test -n "$(ls apps/desktop/src-tauri/binaries/flowntier-runtime-* 2>/dev/null)" \
+            || (echo "::error::Sidecar missing"; exit 1)
 
-      - name: Rename runtime binary (Windows)
-        if: runner.os == 'Windows'
-        shell: bash
-        run: |
-          cd apps/desktop/src-tauri/binaries
-          cp aco_runtime-${{ matrix.target }}.exe aco_runtime.exe
-          cp aco_runtime-${{ matrix.target }}.exe aco_runtime-${{ matrix.target }}.exe
+      - name: Install JS deps
+        run: pnpm install --frozen-lockfile
 
-      - name: Build Tauri app
+      - name: Build Tauri app + bundle
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: 'Flowntier ${{ github.ref_name }}'
-          releaseBody: |
-            See the assets to download and install.
+          # Don't let tauri-action create its own release — the
+          # publish-release job below controls that.
           releaseDraft: true
           prerelease: false
+          tagName: ${{ github.ref_name }}
+          releaseName: 'Flowntier ${{ github.ref_name }}'
+          # Use the matrix target so each runner only builds for its
+          # own arch; the matrix.os × matrix.target join gives us
+          # windows+x64, macos+arm64, linux+x64.
+          args: --target ${{ matrix.target }}
 
-  # ── Create release ────────────────────────────────────────────
-  create-release:
-    name: Create Release
+  # ──────────────────────────────────────────────────────────────
+  # 3. Promote the draft Release to public.
+  #    Done after all matrix jobs have uploaded so the body is
+  #    generated with the full file list.
+  # ──────────────────────────────────────────────────────────────
+  publish-release:
+    name: publish release
     needs: build-desktop
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v4
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
+      - name: Promote draft to public
+        uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
-          name: 'Flowntier ${{ github.ref_name }}'
-          body: |
-            ## Installation
-
-            ### Windows
-            Download and run the `.exe` installer. No Python installation required.
-
-            ### macOS
-            Download and open the `.dmg` file.
-
-            ### Linux
-            Download and install the `.deb` or `.AppImage` file.
-
-            ## Runtime Requirements
-            - Windows 10/11 x64
-            - macOS 11+
-            - Ubuntu 20.04+ / Debian 10+
-          draft: true
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          draft: false
+          generate_release_notes: true
+          files: |
+            target/**/*.json
+            target/**/*.sig
