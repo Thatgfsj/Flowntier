@@ -116,6 +116,64 @@ pub fn register_all(d: &mut Dispatcher, state: ServerState) {
     // handlers_i_ching module because they belong to a
     // different domain (provider / router / secret store /
     // plugin registry) and have no shared logic to factor out.
+    // ── KV store (Phase 4 onboarding) ─────────────────────────
+    // GET /api/kv/{key}   — returns the JSON value or null
+    let kv_get_state = state.clone();
+    d.register("GET", "/api/kv/{key}", move |body| {
+        let s = kv_get_state.clone();
+        Box::pin(async move {
+            let key = body.get("key").and_then(|v| v.as_str())
+                .ok_or_else(|| "missing 'key'".to_string())?.to_string();
+            match s.repo.kv_get(&key).await {
+                Ok(Some(v)) => match serde_json::from_str::<Value>(&v) {
+                    Ok(parsed) => Ok((200, json!({ "k": key, "v": parsed }))),
+                    Err(_) => Ok((200, json!({ "k": key, "v": Value::String(v) }))),
+                },
+                Ok(None) => Ok((200, json!({ "k": key, "v": Value::Null }))),
+                Err(e) => Ok((500, json!({ "error": format!("kv_get: {e}") }))),
+            }
+        })
+    });
+
+    // POST /api/kv/{key}   — body { value: <json> }
+    let kv_set_state = state.clone();
+    d.register("POST", "/api/kv/{key}", move |body| {
+        let s = kv_set_state.clone();
+        Box::pin(async move {
+            let key = body.get("key").and_then(|v| v.as_str())
+                .ok_or_else(|| "missing 'key'".to_string())?.to_string();
+            let value = body.get("value").cloned().unwrap_or(Value::Null);
+            let value_str = serde_json::to_string(&value)
+                .map_err(|e| format!("serialize: {e}"))?;
+            if let Err(e) = s.repo.kv_set(&key, &value_str).await {
+                return Ok((500, json!({ "error": format!("kv_set: {e}") })));
+            }
+            Ok((200, json!({ "k": key, "v": value })))
+        })
+    });
+
+    // POST /api/kv/first_run/complete  — convenience that writes
+    // first_run=false in one call.
+    let kv_first_run_complete_state = state.clone();
+    d.register("POST", "/api/kv/first_run/complete", move |_body| {
+        let s = kv_first_run_complete_state.clone();
+        Box::pin(async move {
+            if let Err(e) = s.repo.kv_set("first_run", "false").await {
+                return Ok((500, json!({ "error": format!("kv_set: {e}") })));
+            }
+            Ok((200, json!({ "first_run": false })))
+        })
+    });
+
+    // ── Sample workflows (Phase 4 onboarding) ──────────────────
+    // GET /api/sample/{name}  — returns a serialized WorkflowRun
+    // envelope. The frontend can submit it via run_agent_task.
+    d.register("GET", "/api/sample/{name}", |body| {
+        let name = body.get("name").and_then(|v| v.as_str())
+            .unwrap_or("auth_login").to_string();
+        Box::pin(async move { Ok((200, sample_workflow(&name))) })
+    });
+
     register_placeholder_handlers(d, state.clone());
 }
 
@@ -846,6 +904,46 @@ async fn refresh_stale_caches(state: &Arc<ServerState>) -> usize {
     }
 
     stale
+}
+
+/// Return a hardcoded sample workflow envelope. The frontend
+/// posts this to run_agent_task to start a workflow.
+///
+/// Currently only one sample: 'auth_login' — a small Flask-style
+/// "implement POST /auth/login endpoint" task that exercises
+/// the full plan-then-execute flow.
+fn sample_workflow(name: &str) -> Value {
+    match name {
+        "auth_login" => json!({
+            "name": "auth_login",
+            "display_name": "示例任务 - 实现 POST /auth/login",
+            "description":
+                "通过一个完整的工作流示例展示 Flowntier 的工作方式: \
+                 首席 Agent 拆解任务, 规划 Agent 出方案, 工匠 Agent 写代码, \
+                 缺陷猎手 和 质检师审核, 最后汇报.",
+"user_request": concat!(
+                "实现 POST /auth/login 接口. 要求: ",
+                "1. 接收 JSON ", "{ username, password }", " ",
+                "2. 校验非空、长度 >= 3 ",
+                "3. 与内存中的用户表比对 ",
+                "4. 成功返回 ", "{ token: <random_hex_32>, expires_in: 3600 }", " ",
+                "5. 失败返回 401 ",
+                "6. 写至少 4 个测试用例 (valid, missing fields, wrong password, unknown user)"
+            ),
+            "expected_tasks": [
+                "分析需求 (chief)",
+                "设计方案 (planner)",
+                "实现代码 (worker)",
+                "测试 + 自检 (worker)",
+                "代码审查 (critic)",
+                "汇报 (reporter)",
+            ],
+        }),
+        _ => json!({
+            "error": format!("unknown sample: {name}"),
+            "known_samples": ["auth_login"],
+        }),
+    }
 }
 
 async fn run_task(body: Value, state: Arc<ServerState>) -> Result<(u16, Value), String> {
