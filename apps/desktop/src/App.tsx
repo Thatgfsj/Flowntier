@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { check as checkUpdaterPlugin } from '@tauri-apps/plugin-updater';
 import { checkForUpdate, installUpdate, type UpdateBanner } from './lib/updater';
+import { Welcome } from './components/Welcome';
 import { PhaseTimeline, AgentCard, Card, type PhaseState, type AgentStatus } from '@flowntier/ui';
 import type { WfEvent } from '@flowntier/shared';
 import { TopBar } from './zones/TopBar.js';
@@ -105,6 +106,35 @@ export function App() {
   const [showPlanGraph, setShowPlanGraph] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
   const busyRef = useRef(false);
+
+  // v0.4: first-run gate. Reads the kv table on mount; if
+  // first_run is true (default) we render <Welcome> instead
+  // of the main dashboard. Once the user clicks "进入工作台"
+  // Welcome calls first_run_complete which writes false and
+  // calls onComplete -> setFirstRun(false).
+  const [firstRun, setFirstRun] = useState<boolean | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const r = await invoke<{ k: string; v: unknown }>('kv_get', {
+          key: 'first_run',
+        });
+        if (cancelled) return;
+        const isFirst =
+          !r || r.v === null || r.v === 'true' || r.v === true;
+        setFirstRun(isFirst);
+      } catch (e) {
+        // If the call fails (e.g. backend not ready yet), default
+        // to the main dashboard rather than blocking the user.
+        console.warn('[App] kv_get(first_run) failed; defaulting to dashboard:', e);
+        setFirstRun(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Subscribe to the runtime's WfEvent stream. v0.2.5+ delivers events
   // over the `\\.\pipe\flowntier_runtime_events` named pipe → Rust → Tauri
@@ -288,6 +318,22 @@ export function App() {
     setCmd('');
     void startRealWorkflow(text);
   };
+
+  // First-run gate: show Welcome until the user clicks "进入工作台".
+  // firstRun === null means we're still loading the kv value;
+  // show a blank screen rather than a flash of the dashboard.
+  if (firstRun === null) {
+    return <div className="h-screen w-screen bg-surface-1" />;
+  }
+  if (firstRun) {
+    return (
+      <Welcome
+        onComplete={() => {
+          setFirstRun(false);
+        }}
+      />
+    );
+  }
 
   return (
     <div className="flex h-screen flex-col">
