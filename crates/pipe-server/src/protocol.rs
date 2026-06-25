@@ -10,8 +10,9 @@
 //! * **Events** — long-lived connection; server pushes one
 //!   JSON object per event: `{"kind":K,"agent_id":A,"...":...}`
 //!
-//! This mirrors `apps/runtime/src/aco_runtime/pipe_server.py`
-//! byte-for-byte so the Tauri Rust client does not need to change.
+//! This is the v0.3 Rust port of the v0.2 Python pipe server; the
+//! wire format is identical so existing clients don't need changes.
+//! See `history/docs/V03_DELETIONS.md`.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

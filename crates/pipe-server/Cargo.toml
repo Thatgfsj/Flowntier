@@ -4,7 +4,7 @@ version     = { workspace = true }
 edition     = { workspace = true }
 rust-version = { workspace = true }
 license     = { workspace = true }
-description = "JSON-RPC + event-push server over a local IPC channel for Flowntier. Replaces apps/runtime/src/aco_runtime/pipe_server.py. Windows named pipes + Unix domain sockets."
+description = "JSON-RPC + event-push server over a local IPC channel for Flowntier. Windows named pipes + Unix domain sockets. Replaces the v0.2 Python sidecar (see history/docs/V03_DELETIONS.md)."
 
 [lints.clippy]
 all      = { level = "deny", priority = -1 }

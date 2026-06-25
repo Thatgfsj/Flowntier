@@ -1,8 +1,8 @@
 //! Local IPC server for Flowntier (v0.3+).
 //!
-//! Replaces `apps/runtime/src/aco_runtime/pipe_server.py`
-//! with a pure-Rust implementation that runs in the same
-//! process as the Tauri shell (or as a standalone binary).
+//! Replaces the v0.2 Python pipe server with a pure-Rust
+//! implementation that runs in the same process as the Tauri shell
+//! (or as a standalone binary). See `history/docs/V03_DELETIONS.md`.
 //!
 //! Two channels:
 //! - **RPC**: JSON-RPC 2.0 over newline-delimited JSON,

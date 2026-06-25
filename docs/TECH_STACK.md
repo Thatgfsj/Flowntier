@@ -283,7 +283,7 @@ $ACO_DATA/
 |---------|---------|
 | **Tauri IPC** (typed) | Rust ⇄ React |
 | **Event Bus** (Rust internal) | Cross-crate pub/sub |
-| **Named pipes** (Windows) | `\\.\pipe\aco_runtime` + `\\.\pipe\aco_runtime_events` for external integrations |
+| **Named pipes** (Windows) | `\\.\pipe\flowntier_runtime` + `\\.\pipe\flowntier_runtime_events` for external integrations |
 | **HTTPS** | agent-core ⇄ provider APIs |
 
 The named pipes survive from v0.2 for backward compat with external

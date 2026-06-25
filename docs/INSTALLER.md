@@ -57,7 +57,7 @@ cargo build --release -p pipe-server
 # Stage the Rust sidecar binary into the bundle resources
 mkdir -p apps/desktop/src-tauri/binaries
 cp target/release/flowntier-runtime.exe \
-   apps/desktop/src-tauri/binaries/aco_runtime-x86_64-pc-windows-msvc.exe
+   apps/desktop/src-tauri/binaries/flowntier_runtime-x86_64-pc-windows-msvc.exe
 
 # Build the installer
 cd apps/desktop
@@ -108,7 +108,7 @@ The interesting fields:
     "icon": ["icons/icon.ico"],
     "publisher": "Thatgfsj",
     "category": "DeveloperTool",
-    "externalBin": ["binaries/aco_runtime"],
+    "externalBin": ["binaries/flowntier_runtime"],
     "resources": ["WebView2Loader.dll"]
   }
 }
@@ -117,7 +117,7 @@ The interesting fields:
 * `identifier` must NOT end in `.app` (Tauri's own warning).
   We use `ai.flowntier.desktop`.
 * `externalBin` lists sidecar binaries that ship next to the
-  app exe. Currently just `aco_runtime` (the JSON-RPC + event
+  app exe. Currently just `flowntier_runtime` (the JSON-RPC + event
   pipe server). The Tauri shell can either `Command::new`
   this binary on startup or be linked to it in-process
   (the v0.3 plan).

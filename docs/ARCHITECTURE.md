@@ -52,7 +52,7 @@
               │     workflows, usage       │     built-in providers     │
               │                            │     (OpenAI/Anthropic/...) │
               │   crates/pipe-server       │                            │
-              │     \\.\pipe\aco_runtime    │                            │
+              │     \\.\pipe\flowntier_runtime    │                            │
               │     JSON-RPC + events      │                            │
               │     (optional external API) │                            │
               │                            │                            │

@@ -271,7 +271,7 @@ export function App() {
   return (
     <div className="flex h-screen flex-col">
       <TopBar
-        projectName="Agent Company OS"
+        projectName="Flowntier"
         subtitle={
           completed
             ? '上次工作流已完成'
