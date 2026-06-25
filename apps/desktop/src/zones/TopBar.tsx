@@ -2,7 +2,9 @@
  * Z1 — top bar. Title + update banner + user menu.
  * The command input was moved to the bottom (CommandDock) in v0.2.
  */
+import { useTranslation } from 'react-i18next';
 import type { UpdateBanner } from '../lib/updater';
+import { SUPPORTED } from '../i18n/index.js';
 
 export interface TopBarProps {
   projectName: string;
@@ -29,13 +31,14 @@ export function TopBar({
   updateBanner,
   onUpdateClick,
 }: TopBarProps) {
+  const { t } = useTranslation();
   const showUpdate =
     updateBanner?.available === true && typeof updateBanner.version === 'string';
   return (
     <header className="flex h-14 shrink-0 items-center gap-4 border-b border-border bg-surface-2 px-4">
       <div className="flex items-baseline gap-2">
         <span className="font-semibold tracking-tight text-primary">{projectName}</span>
-        <span className="text-xs text-text-secondary">· 智能体公司操作系统</span>
+        <span className="text-xs text-text-secondary">{t('topbar.tagline')}</span>
       </div>
       {subtitle !== undefined && subtitle.length > 0 && (
         <span className="text-xs text-text-secondary">/ {subtitle}</span>
@@ -46,9 +49,9 @@ export function TopBar({
           type="button"
           onClick={onUpdateClick}
           className="rounded-md border border-accent bg-accent/10 px-3 py-1.5 text-xs text-accent transition-colors hover:bg-accent/20 focus:outline-none focus:ring-2 focus:ring-accent/50"
-          title="点击下载并安装最新版本（应用会自动重启）"
+          title={t('update.tooltip')}
         >
-          ⬆ 升级 v{updateBanner!.version}
+          {t('update.available', { version: updateBanner!.version })}
         </button>
       )}
       {onChatClick && (
@@ -62,7 +65,7 @@ export function TopBar({
               : 'border-border bg-surface-1 text-text-secondary hover:text-primary'
           }`}
         >
-          Chat
+          {t('topbar.chat')}
         </button>
       )}
       <button
@@ -70,7 +73,7 @@ export function TopBar({
         onClick={onSettingsClick}
         className="rounded-md border border-border bg-surface-1 px-3 py-1.5 text-xs text-text-secondary transition-colors hover:text-primary focus:outline-none focus:ring-2 focus:ring-chief/50"
       >
-        设置
+        {t('topbar.settings')}
       </button>
       <LanguageToggle />
     </header>
@@ -81,11 +84,8 @@ export function TopBar({
  * Tiny two-state language toggle. Cycles between zh-CN and en-US.
  * Persists to localStorage via i18n.on('languageChanged').
  */
-import { useTranslation } from 'react-i18next';
-import { SUPPORTED } from '../i18n/index.js';
-
 function LanguageToggle() {
-  const { i18n } = useTranslation();
+  const { i18n, t } = useTranslation();
   const current = i18n.language?.startsWith('en') ? 'en-US' : 'zh-CN';
   const next = current === 'zh-CN' ? 'en-US' : 'zh-CN';
   return (
@@ -94,11 +94,11 @@ function LanguageToggle() {
       onClick={() => {
         void i18n.changeLanguage(next);
       }}
-      title={`Switch to ${SUPPORTED.find((l) => l === next)}`}
+      title={t('lang.label') + ': ' + (SUPPORTED.find((l) => l === next) ?? '')}
       className="rounded-md border border-border bg-surface-1 px-2 py-1 text-xs text-text-secondary transition-colors hover:text-primary focus:outline-none focus:ring-2 focus:ring-chief/50"
       aria-label={`Language: ${current}`}
     >
-      🌐 {current === 'zh-CN' ? '中文' : 'EN'}
+      🌐 {current === 'zh-CN' ? t('lang.zh-CN') : t('lang.en-US')}
     </button>
   );
 }

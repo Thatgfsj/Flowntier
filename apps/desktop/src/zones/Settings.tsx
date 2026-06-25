@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Card } from '@flowntier/ui';
 import {
   saveSecret,
@@ -26,6 +27,7 @@ const QUICK_PROVIDERS = [
 ];
 
 function QuickAddAI({ onSaved }: { onSaved: () => void }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const [apiKey, setApiKey] = useState('');
@@ -83,7 +85,7 @@ function QuickAddAI({ onSaved }: { onSaved: () => void }) {
   return (
     <div className="rounded-lg border border-border bg-surface-1 p-4">
       <div className="mb-3 flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-primary">添加 AI 供应商</h3>
+        <h3 className="text-sm font-semibold text-primary">{t('settings.quickAdd.title')}</h3>
         <button type="button" onClick={() => { setOpen(false); setSelected(null); setApiKey(''); setError(null); setSuccess(false); }} className="text-xs text-text-secondary hover:text-primary">取消</button>
       </div>
 
@@ -156,6 +158,7 @@ export interface SettingsProps {
 }
 
 export function Settings({ open, onClose }: SettingsProps) {
+  const { t } = useTranslation();
   const [snapshot, setSnapshot] = useState<RuntimeSnapshot>(EMPTY);
   const [selected, setSelected] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -270,12 +273,12 @@ export function Settings({ open, onClose }: SettingsProps) {
   const sel = snapshot.providers.find((p) => p.id === selected);
 
   return (
-    <div className="fixed inset-0 z-50 flex bg-black/60 backdrop-blur-sm" role="dialog" aria-label="设置" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex bg-black/60 backdrop-blur-sm" role="dialog" aria-label={t('topbar.settings')} onClick={onClose}>
       <div className="ml-auto flex h-full w-[1100px] max-w-[95vw] flex-col border-l border-border bg-surface-1 shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <header className="flex h-14 shrink-0 items-center justify-between border-b border-border bg-surface-2 px-5">
           <div>
-            <h2 className="text-base font-semibold text-primary">设置</h2>
-            <p className="text-xs text-text-secondary">管理 LLM 供应商和角色模型</p>
+            <h2 className="text-base font-semibold text-primary">{t('topbar.settings')}</h2>
+            <p className="text-xs text-text-secondary">{t('settings.headerSubtitle')}</p>
           </div>
           <div className="flex items-center gap-3">
             {savedAt !== null && <span className="text-xs text-text-secondary">已保存 · {savedAt}</span>}
@@ -375,7 +378,7 @@ export function Settings({ open, onClose }: SettingsProps) {
                     </div>
                     {sel.models.length > 0 && (
                       <div className="mt-3">
-                        <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-text-secondary">可用模型</h4>
+                        <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-text-secondary">{t('settings.models.available')}</h4>
                         <ul className="grid grid-cols-2 gap-1 text-xs">
                           {sel.models.map((m) => (
                             <li key={m.id} className="rounded bg-surface-2 px-2 py-1 font-mono">
@@ -399,7 +402,7 @@ export function Settings({ open, onClose }: SettingsProps) {
                   </Card>
                 )}
 
-                <h3 className="mb-2 px-1 text-xs font-semibold uppercase tracking-wide text-text-secondary">角色 → 模型 分配</h3>
+                <h3 className="mb-2 px-1 text-xs font-semibold uppercase tracking-wide text-text-secondary">{t('settings.roles.title')}</h3>
                 <p className="mb-2 px-1 text-[10px] text-text-secondary">
                   每个角色可以独立选默认模型 + 配回退链。例如：CEO 用 kimi（擅长规划）、Worker 用 minimax（性价比高）。
                 </p>
@@ -921,6 +924,7 @@ const KIND_OPTIONS = [
 ] as const;
 
 function CustomProviderForm({ onSaved }: { onSaved: () => void }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [id, setId] = useState('');
   const [displayName, setDisplayName] = useState('');
@@ -1008,7 +1012,7 @@ function CustomProviderForm({ onSaved }: { onSaved: () => void }) {
   return (
     <div className="rounded-lg border border-border bg-surface-1 p-4">
       <div className="mb-3 flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-primary">添加自定义中转站</h3>
+        <h3 className="text-sm font-semibold text-primary">{t('settings.customProvider.title')}</h3>
         <button type="button" onClick={() => { setOpen(false); reset(); }} className="text-xs text-text-secondary hover:text-primary">取消</button>
       </div>
 

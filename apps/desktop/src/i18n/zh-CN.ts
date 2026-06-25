@@ -44,8 +44,55 @@ const zhCN = {
   'update.failedBody':
     '更新安装失败：{{error}}\n\n请从 GitHub Releases 手动下载安装包。',
 
+  // ── TopBar ─────────────────────────────────────────────
+  // v0.4.0-rc1 polish: migrated from hardcoded literals.
+  'topbar.tagline': '· 智能体公司操作系统',
+  'topbar.chat': 'Chat',
+  'topbar.settings': '设置',
+
+  // ── CommandDock ────────────────────────────────────────
+  // v0.4.0-rc1 polish.
+  'commandDock.placeholder': '向主理下达指令…  例如：实现 POST /auth/login 接口',
+  'commandDock.submit': '提交',
+  'commandDock.busy': '运行中…',
+  'commandDock.empty': '在命令栏输入指令来开始。',
+
+  // ── BottomConsole ──────────────────────────────────────
+  'bottomConsole.tabs.log': '运行日志',
+  'bottomConsole.tabs.events': '事件流',
+  'bottomConsole.empty.log': '没有日志。',
+  'bottomConsole.empty.events': '没有事件。',
+  'bottomConsole.levels.error': '错误',
+  'bottomConsole.levels.warn': '警告',
+  'bottomConsole.levels.info': '信息',
+  'bottomConsole.levels.debug': '调试',
+  'bottomConsole.levels.trace': '追踪',
+
   // ── Settings (some new bits) ───────────────────────────
   'settings.language': '语言',
+  'settings.sections.providers': 'AI 供应商',
+  'settings.sections.secrets': 'API 密钥',
+  'settings.sections.customProviders': '自定义路由站',
+  'settings.sections.about': '关于',
+  'settings.providers.addCustom': '添加自定义路由站',
+  'settings.providers.noKey': '未配置',
+  'settings.providers.configured': '已配置',
+  'settings.providers.enabled': '已启用',
+  'settings.providers.disabled': '已停用',
+  'settings.providers.discoverModels': '拉取最新模型',
+  'settings.secrets.addKey': '添加 API 密钥',
+  'settings.secrets.placeholder': '粘贴 API 密钥 (sk-...)',
+  'settings.secrets.never': '密钥不会离开本机。',
+  'settings.headerSubtitle': '管理 LLM 供应商和角色模型',
+  'settings.quickAdd.title': '添加 AI 供应商',
+  'settings.customProvider.title': '添加自定义中转站',
+  'settings.models.available': '可用模型',
+  'settings.roles.title': '角色 → 模型 分配',
+
+  // ── Drift banner (Phase 5) ───────────────────────────
+  'drift.message':
+    '⚠ Sidecar 运行时版本 (v{{sidecar}}) 低于 shell 期望 (v{{expected}}). 某些功能可能不可用。请重新构建 sidecar。',
+  'drift.dismiss': '关闭',
 };
 
 export type Translations = typeof zhCN;
