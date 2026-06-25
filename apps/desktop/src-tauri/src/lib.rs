@@ -544,6 +544,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let handle = app.handle().clone();
 
@@ -567,8 +568,34 @@ pub fn run() {
                         handle.manage(state);
                     }
                     Err(e) => {
+                        // Show a native error dialog so the user
+                        // gets a clear message instead of a silent
+                        // process exit. The dialog plugin handles
+                        // Windows MessageBox / macOS NSAlert /
+                        // Linux GTK dialog automatically.
                         tracing::error!("failed to build AppState: {e}");
                         eprintln!("[flowntier] failed to build AppState: {}", e);
+
+                        let log_path = storage::Repository::default_data_dir()
+                            .map(|d| d.join("logs").display().to_string())
+                            .unwrap_or_else(|| "(unavailable)".into());
+                        let body = format!(
+                            "Flowntier failed to start:\n\n{e}\n\nDiagnostic logs:\n{log_path}\n\n\
+                             Please open a bug report at:\n  https://github.com/Thatgfsj/Flowntier/issues\n\n\
+                             (Click OK to close.)"
+                        );
+
+                        // tauri-plugin-dialog's message() is async;
+                        // we block on it inside the async setup so
+                        // the user sees the dialog before exit.
+                        use tauri_plugin_dialog::DialogExt;
+                        let _ = handle
+                            .dialog()
+                            .message(body)
+                            .title("Flowntier — startup failed")
+                            .kind(tauri_plugin_dialog::MessageDialogKind::Error)
+                            .blocking_show();
+
                         std::process::exit(1);
                     }
                 }
