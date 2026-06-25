@@ -94,7 +94,7 @@ plugin UI panels.
   with external PowerShell named-pipe client.
 - [x] **Python runtime deleted** — `apps/runtime/`, `runtime/`,
   and `crates/claude-adapter/` removed; desktop builds and
-  runs without Python on PATH. See `docs/V03_DELETIONS.md`
+  runs without Python on PATH. See `history/docs/V03_DELETIONS.md`
   for the full record.
 - [x] **Chat Zone (progressive)** — new chat zone docked next to
   Settings. NOT a full IDE rewrite — same 5-zone layout, just

@@ -196,8 +196,7 @@ Flowntier/
 > **v0.3 → v0.4 migration:** the `runtime/` Python package,
 > `apps/runtime/` Python sidecar, and `crates/claude-adapter/`
 > are gone. There is no Python on the runtime path. See
-> [`docs/V03_DELETIONS.md`](./docs/V03_DELETIONS.md) (now
-> archived) for the removal record.
+> [`history/docs/V03_DELETIONS.md`](./history/docs/V03_DELETIONS.md) for the removal record.
 
 ---
 
