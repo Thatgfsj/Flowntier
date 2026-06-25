@@ -15,9 +15,123 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the old `ACO` / `Agent Company OS` brand leaks back in outside of
   `history/`.
 
-## [0.4.0] — 2026-06-24
+## [0.4.0] — 2026-06-25
 
-The first release aimed at real end users. Big-ticket items:
+The first release **aimed at real users**. v0.3 was a working v0.3; v0.4
+closes every gap that prevented shipping to non-developers.
+
+### Added (Phase 1)
+* **`.github/workflows/release.yml`** — full release pipeline: Rust
+  sidecar built in-job per target (`x86_64-pc-windows-msvc`,
+  `x86_64-unknown-linux-gnu`); `tauri-action@v0` matrix; draft
+  GitHub Release with NSIS + MSI + .deb + AppImage; updater
+  signature verified with ed25519.
+* **`.github/workflows/ci.yml`** — branding lint, cargo
+  test+clippy+fmt, pnpm typecheck+eslint+prettier, e2e-windows,
+  summary — replaces the broken v0.3 CI that referenced the deleted
+  Python runtime.
+* **`tauri-plugin-updater`** wired end-to-end: Rust plugin +
+  capability + frontend `lib/updater.ts` + TopBar banner.
+* **`apps/desktop/src-tauri/tauri.conf.json`** full bundle config
+  (NSIS + WiX + Linux deb deps + macOS bundle config — kept so
+  the chairman can re-enable macOS in v0.5 without code changes).
+* **Tauri 2 icon set** — regenerated from `icon-256.png` (the old
+  `icon-1024.png` was JPEG-disguised-as-PNG).
+
+### Added (Phase 2)
+* **`apps/desktop/src/components/ErrorBoundary.tsx`** — wraps the
+  React tree; renders a "出错了 vX.Y.Z · Build <sha>" screen
+  with "📋 复制日志 / 🔄 重启应用 / 🐛 上报问题" actions.
+* **`react-i18next` + `i18next` bootstrap** — `zh-CN` default +
+  `en-US` scaffold covering v0.4-introduced strings. `🌐 中文 / EN`
+  toggle in TopBar.
+* **`crates/tauri-core/src/logging.rs`** — daily rolling
+  `<data_dir>/logs/flowntier.log.YYYY-MM-DD` + `std::panic::set_hook`
+  writing panic info + `force_capture()` backtrace to
+  `panic-<ts>.log`. `log_frontend_error` Tauri command wires the
+  React side to the same file.
+* **`tauri-plugin-dialog`** — graceful startup error dialog
+  (native MessageBox / NSAlert / GTK MessageDialog) replacing
+  silent `std::process::exit(1)`.
+* **Strict CSP** in `tauri.conf.json`: `script-src 'self'` + Tauri
+  nonces, `connect-src` whitelisted to LLM provider base URLs +
+  IPC, `frame-src 'none'` / `object-src 'none'` / `form-action 'none'`.
+* **`docs/SECURITY.md`** expanded with [P2] markers documenting the
+  new threat model.
+
+### Added (Phase 3 — the biggest single change in v0.4)
+* **`crates/storage/migrations/0003_secrets_and_providers.sql`** —
+  `secret` (encrypted), `provider` (presets + overrides),
+  `custom_provider` (relay stations), `model_cache` (1h TTL),
+  `kv` (flags). Pre-populates the 9 built-in providers.
+* **`crates/pipe-server/src/secrets/`** — `SecretStore` backed by
+  `keyring` crate (DPAPI / Keychain / libsecret) + AES-256-GCM
+  with AAD binding + `FallbackKeychain` for headless Linux.
+* **`crates/pipe-server/src/providers.rs`** — 9 built-in presets
+  (OpenAI, Anthropic, Google, DeepSeek, Moonshot Kimi, Zhipu GLM,
+  Xiaomi MiMo, SiliconFlow) + `ANTHROPIC_FALLBACK_MODELS` for
+  Anthropic's missing `/v1/models` endpoint.
+* **5 real handlers**:
+  - `GET /api/settings/secrets` — metadata only, never ciphertext
+  - `PUT /api/settings/secrets/{name}` — encrypt + store
+  - `DELETE /api/settings/secrets/{name}`
+  - `GET /api/settings/secrets/{name}/reveal` — internal plaintext
+  - `POST /api/settings/secrets/seed` — v0.3 plaintext migration
+* **6 real handlers** for providers:
+  - `GET /api/providers` — joins presets + custom + `has_secret`
+  - `PATCH /api/providers/{id}` — toggle / override
+  - `GET /api/providers/{id}/models` — live /models fetch + cache
+  - `POST /api/providers/custom`
+  - `DELETE /api/providers/custom/{id}`
+* **Dispatcher path-pattern matching** — `{name}` / `{id}`
+  placeholders now extracted; v0.3 placeholder paths returned 404.
+* **Fixed `/api/router/roles`** — was returning
+  `anthropic:claude-sonnet-4` (a model id that doesn't exist).
+  Now returns `claude-opus-4-8` with `claude-sonnet-4-6` fallback.
+
+### Added (Phase 4)
+* **`apps/desktop/src/components/Welcome.tsx`** — 3-step first-run
+  flow (provider quick-add → sample workflow → enter workspace).
+* **Tauri commands**: `kv_get`, `kv_set`, `first_run_complete`,
+  `load_sample_workflow`.
+* **App.tsx first-run gate** — reads `kv.first_run` on mount;
+  renders Welcome or dashboard accordingly.
+
+### Added (Phase 5)
+* **`GET /api/rpc/version`** — returns sidecar version +
+  `min_compatible`. App.tsx compares; if sidecar < min_compatible,
+  renders a `DriftBanner` warning at the top of the dashboard.
+
+### Added (Phase 6)
+* **README + FAQ + CHANGELOG** polished for first user release.
+* **macOS deferred to v0.5** per chairman directive.
+
+### Removed
+* **`apps/runtime/` + `crates/claude-adapter/`** — Python FastAPI
+  sidecar + Claude Code CLI wrapper (Phase 0, commit `9527436`).
+* **All `ACO_*` env vars** — renamed to `FLOWNTIER_*` (Phase 0).
+* **`Agent Company OS` / `aco` / `@aco/*`** — full brand rename
+  (Phase 0). Historical references live in `history/`.
+
+### Verified
+- 97 tests pass, 0 fail (`cargo test --workspace`)
+- 8/8 e2e_pipe tests (5 new in v0.4)
+- pnpm typecheck clean
+- cargo build on Windows + Linux (per release.yml matrix)
+- Phase 0 PR #3 / Phase 1 PR #4 / Phase 3 PR #6 / Phase 4 PR #7 /
+  Phase 5 PR #8 all merged
+
+### Known limitations (planned for v0.5)
+* **No code signing** — SmartScreen shows "Unknown publisher"
+* **macOS / iOS builds** — deferred per chairman directive
+* **Full i18n coverage** — only zh-CN (default) + en-US (new strings
+  only); legacy TopBar / Settings / CommandDock text still
+  Chinese-only
+* **CenterPanel not wired** — the component was refactored to
+  support `hasActiveWorkflow=false` (empty-state card) but
+  App.tsx still renders the demo content inline
+* **Planned follow-ups**: macOS re-enable, code signing,
+  full-i18n, CenterPanel wiring, advanced provider tests
 
 ### Changed
 

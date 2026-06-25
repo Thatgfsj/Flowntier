@@ -2,9 +2,9 @@
 
 > Frequently asked questions about Flowntier
 
-**Version:** v0.1 RFC
-**Status:** Draft
-**Last updated:** 2026-06-18
+**Version:** v0.4
+**Status:** Polished for first user release
+**Last updated:** 2026-06-25
 
 ---
 
@@ -277,12 +277,110 @@ per the retention policy.
 
 ### "Flowntier won't start"
 
-Run `aco doctor` for a structured diagnostic. It checks:
-* Config file schema validity
-* Provider env vars
-* SQLite integrity
-* Plugin manifest validity
-* Disk space
+In v0.4 the Tauri shell shows a native error dialog when
+`AppState::build()` fails (data dir unwritable, SQLite
+migration error, etc.). The dialog includes:
+
+* The error message
+* The full path to the diagnostic log
+  (`%APPDATA%\flowntier\logs\` on Windows,
+  `~/.config/flowntier/logs/` on Linux)
+* A pre-filled GitHub issue URL
+
+If the dialog doesn't appear (e.g. the shell is so broken it
+can't draw), inspect the log file directly. Every Rust panic +
+every React error + every tracing event lands in the same
+`flowntier.log.YYYY-MM-DD` file.
+
+---
+
+## v0.4 user questions
+
+### "SmartScreen says 'Unknown publisher'"
+
+The v0.4 installer is **unsigned**. We deferred code signing
+to v0.5 (an EV cert costs $300–500/year and we'd need to
+verify the macOS notarization story at the same time). For
+now: click **More info → Run anyway**. The signature
+verification on auto-update artifacts *is* in place (ed25519),
+so updates from GitHub Releases are still verified — only the
+initial install is unsigned.
+
+### "Where are my API keys stored?"
+
+AES-256-GCM ciphertext in
+`%APPDATA%\flowntier\storage.sqlite` (Windows) or
+`~/.config/flowntier/storage.sqlite` (Linux). The encryption
+key lives in your OS keystore (DPAPI on Windows, Keychain on
+macOS, libsecret on Linux). The plaintext never touches disk.
+
+To verify: open the SQLite file with any tool, query the
+`secret` table, and confirm every row has a non-empty
+`ciphertext` blob but no `value` / `plaintext` column. (There
+isn't one — it's a compile-time guarantee from the type
+system.)
+
+### "How do I add my own relay station / private gateway?"
+
+Settings → Providers → "添加自定义". Fill in:
+
+* **Name** — human label
+* **Base URL** — must start with `https://` or `http://`
+* **Kind** — `openai-compatible` (most relay stations) or
+  `anthropic-compatible` (for Anthropic-protocol gateways)
+* **Default model** — the model id the agent loop uses when
+  no per-role override is set
+* **API key** — encrypted the same way as preset keys
+
+The provider is registered with a ULID id; you can refer to
+it in `flowctl` (v0.5) or from the Settings UI.
+
+### "How do I update the app?"
+
+Flowntier checks GitHub Releases on every launch. When a
+newer version is available, the TopBar shows a "⬆ 升级 vX.Y.Z"
+banner. Click it to download + install + restart (Windows
+NSIS in-place upgrade; Linux .deb in-place). Updates are
+signed with ed25519; signature mismatch blocks the install.
+
+### "How do I report a bug?"
+
+Three ways, in order of preference:
+
+1. **In-app**: trigger the error, click **🐛 上报问题** on
+   the ErrorBoundary screen. Opens a pre-filled GitHub issue.
+2. **Settings → 关于 → 上报问题**: same flow, no error needed.
+3. **Manual**: [github.com/Thatgfsj/Flowntier/issues/new](https://github.com/Thatgfsj/Flowntier/issues/new)
+   with `bug` label. Attach `%APPDATA%\flowntier\logs\flowntier.log.<date>` (Windows)
+   or `~/.config/flowntier/logs/flowntier.log.<date>` (Linux).
+
+The maintainer responds within 72 hours. Security issues:
+email `security@flowntier.dev` — do not file public issues.
+
+### "Why does the first launch show a wizard?"
+
+The Welcome screen (`first_run=true` in the kv table) appears
+once. It walks you through:
+1. Pick a provider (or skip and add one later)
+2. Try a sample workflow ("implement POST /auth/login")
+3. Enter the workspace
+
+Dismissing once sets `first_run=false`; never shown again.
+To re-trigger (e.g. for a demo), delete the key from the kv
+table:
+
+```sql
+DELETE FROM kv WHERE k = 'first_run';
+```
+
+### "What about macOS?"
+
+Deferred to v0.5 per chairman directive. The v0.4 release
+matrix is `windows-latest` + `ubuntu-latest` only. The macOS
+build path is wired in `release.yml` (commented out as a
+reference) and the `keyring` crate's `apple-native` feature is
+already enabled so the code compiles when macOS support
+re-enables.
 
 ---
 

@@ -2,11 +2,13 @@
 
 > **A Visual AI Software Company Powered by Multi-Agent Workflow**
 >
-> **Status:** v0.4 in development — single-process Rust runtime
-> (no Python sidecar). Acceptance run #3 reported **PASS** with
-> 28 backend tests + 6 Playwright scenarios on 2026-06-24.
+> **Status:** v0.4.0 ready for users — Windows + Linux installers
+> build end-to-end through GitHub Actions. The 7-PR delivery
+> chain (Phase 0–5 + release polish) shipped 33 commits across
+> the v0.3 → v0.4 transition.
 >
-> **Latest release:** v0.2.5 (Tauri installer build verified)
+> **Latest release:** v0.4.0-rc1 (draft, see the
+> [v0.4-delivery plan](#-release-status))
 >
 > **Author:** Thatgfsj
 > **License:** MIT
@@ -80,6 +82,80 @@ documentation: [`docs/INSTALLER.md`](./docs/INSTALLER.md).
 
 **No Python, no Node.js, no toolchain on the user's machine.**
 The installer bundles everything needed.
+
+---
+
+## 🆕 What's new in v0.4.0
+
+v0.4.0 is the first release **aimed at real users**. Everything
+in v0.3 that was a stub or TODO has been replaced with a working
+implementation, and the user-facing failures from v0.3 (silent
+crashes, settings that don't persist, no installer) are fixed.
+
+* **🛡 Persistent secrets.** API keys entered in Settings now
+  actually persist across quit+relaunch. Stored in AES-256-GCM
+  ciphertext with a 32-byte DEK in the OS keystore:
+  Credential Manager (DPAPI) on Windows, Keychain on macOS,
+  libsecret on Linux. Fallback to a passphrase-protected file
+  for headless Linux. See `docs/SECURITY.md §"Cryptographic
+  posture"`.
+* **🪟 Working installer.** GitHub Actions builds NSIS + MSI
+  installers for Windows and .deb + AppImage for Linux on every
+  `v*` tag. macOS deferred to v0.5 per chairman directive.
+  See `docs/INSTALLER.md`.
+* **🔄 Auto-update.** The app checks GitHub Releases on every
+  launch and prompts the user when a newer version is
+  available. Updates are signed with an ed25519 keypair; the
+  public key is compiled into the shell. Signature verification
+  is mandatory.
+* **🎯 9 built-in LLM providers.** OpenAI, Anthropic, Google
+  AI, DeepSeek, Moonshot Kimi, Zhipu GLM, Xiaomi MiMo, and
+  SiliconFlow — pre-configured with sensible defaults. Custom
+  providers (relay stations, private gateways) supported via
+  the Settings UI.
+* **🚨 Graceful error handling.** Three layers:
+    - React ErrorBoundary: any uncaught exception shows a
+      "复制日志 / 重启应用 / 上报问题" screen with a copyable
+      stack trace and pre-filled GitHub issue URL.
+    - Startup error dialog: if the runtime fails to initialize
+      (data dir unwritable, SQLite migration error), the Tauri
+      shell shows a native error dialog with the log path
+      instead of crashing silently.
+    - Persistent log file: every Rust log line + every React
+      error lands in `<data_dir>/logs/flowntier.log.YYYY-MM-DD`
+      so the user can attach it to a bug report.
+* **🛡 Strict Content Security Policy.** Scripts restricted
+  to `'self'` (with Tauri-injected nonces); connect-src limited
+  to the LLM provider base URLs + IPC; frames / objects / form
+  actions blocked. See `docs/SECURITY.md §"[P2] Content
+  Security Policy"`.
+* **🌍 i18n scaffolding.** `react-i18next` + language toggle
+  in the TopBar. v0.4 ships zh-CN (default) + en-US (covers
+  all new strings; legacy UI is still zh-CN only and tracked
+  for v0.5).
+* **👋 First-run Welcome.** 3-step wizard: pick a provider,
+  try the "implement POST /auth/login" sample, enter the
+  workspace. Dismissing once sets `first_run=false`; never
+  shown again.
+* **🔄 Sidecar version handshake.** `GET /api/rpc/version`
+  returns the sidecar's version + `min_compatible`. Shell
+  compares; on drift (e.g. user updated shell but not the
+  sidecar binary), a non-blocking warning appears in the
+  dashboard.
+
+### 📦 Release status
+
+The v0.4.0 release chain shipped as 6 PRs (Phase 0 → 5):
+  - [PR #3: Phase 0](https://github.com/Thatgfsj/Flowntier/pull/3) — brand rename, source-of-truth version, doc stubs
+  - [PR #4: Phase 1](https://github.com/Thatgfsj/Flowntier/pull/4) — release CI + Windows/Linux installers + auto-update
+  - [PR #6: Phase 3](https://github.com/Thatgfsj/Flowntier/pull/6) — persistent secrets + provider endpoints + router fix
+  - [PR #7: Phase 4](https://github.com/Thatgfsj/Flowntier/pull/7) — Welcome screen + first-run flow
+  - [PR #8: Phase 5](https://github.com/Thatgfsj/Flowntier/pull/8) — rpc.version handshake + drift banner
+  - Phase 6 (this branch) — README/FAQ polish + v0.4.0 tag
+
+The draft Release `v0.4.0-rc1` is published on every push to a
+`v*` tag; the maintainer promotes it to public after smoke-testing
+on a clean Windows VM and a clean Ubuntu 22.04 VM.
 
 ---
 
