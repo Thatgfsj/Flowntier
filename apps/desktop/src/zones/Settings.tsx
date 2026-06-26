@@ -23,7 +23,7 @@ const QUICK_PROVIDERS = [
   { id: 'kimi', name: 'Kimi (月之暗面)', envVar: 'MOONSHOT_API_KEY', placeholder: 'sk-...', description: 'Kimi K2', color: '#8b5cf6' },
   { id: 'zhipu', name: 'GLM (智谱)', envVar: 'ZHIPU_API_KEY', placeholder: '', description: 'GLM-4', color: '#059669' },
   { id: 'mimo', name: 'MIMO (小米)', envVar: 'MIMO_API_KEY', placeholder: 'sk-...', description: '小米 MIMO', color: '#ff6900' },
-  { id: 'siliconflow', name: 'SiliconFlow', envVar: 'SILICONFLOW_API_KEY', placeholder: 'sk-...', description: '硅基流动', color: '#0ea5e9' },
+  { id: 'siliconflow', name: 'SiliconFlow', envVar: 'SILICONFLOW_API_KEY', placeholder: 'sk-...', description: 'SiliconFlow (硅基流动)', color: '#0ea5e9' },
 ];
 
 function QuickAddAI({ onSaved }: { onSaved: () => void }) {
@@ -46,7 +46,7 @@ function QuickAddAI({ onSaved }: { onSaved: () => void }) {
       const result = await saveSecret(provider.envVar, apiKey.trim());
       console.log('[QuickAddAI] save result:', result);
       if (!result || !result.saved) {
-        setError('保存失败：返回结果无效');
+        setError(t('settings.quickAdd.errorInvalidKey'));
         return;
       }
       if (result.warning) {
@@ -86,7 +86,7 @@ function QuickAddAI({ onSaved }: { onSaved: () => void }) {
     <div className="rounded-lg border border-border bg-surface-1 p-4">
       <div className="mb-3 flex items-center justify-between">
         <h3 className="text-sm font-semibold text-primary">{t('settings.quickAdd.title')}</h3>
-        <button type="button" onClick={() => { setOpen(false); setSelected(null); setApiKey(''); setError(null); setSuccess(false); }} className="text-xs text-text-secondary hover:text-primary">取消</button>
+        <button type="button" onClick={() => { setOpen(false); setSelected(null); setApiKey(''); setError(null); setSuccess(false); }} className="text-xs text-text-secondary hover:text-primary">{t('settings.action.cancel')}</button>
       </div>
 
       <div className="mb-3 max-h-[300px] overflow-y-auto">
@@ -111,7 +111,7 @@ function QuickAddAI({ onSaved }: { onSaved: () => void }) {
       {provider && (
         <div className="space-y-2">
           <label className="block text-xs text-text-secondary">
-            {provider.name} API Key
+            {provider.name} {t('settings.custom.apiKeyLabel')}
             <span className="ml-1 text-[10px] text-text-secondary">→ {provider.envVar}</span>
           </label>
           <input
@@ -123,14 +123,14 @@ function QuickAddAI({ onSaved }: { onSaved: () => void }) {
             onKeyDown={(e) => { if (e.key === 'Enter' && apiKey.trim()) void handleSave(); }}
           />
           {error && <p className="text-xs text-status-failed">{error}</p>}
-          {success && <p className="text-xs text-status-done">✓ 已保存并激活</p>}
+          {success && <p className="text-xs text-status-done">{t('settings.quickAdd.saved')}</p>}
           <button
             type="button"
             onClick={handleSave}
             disabled={busy || !apiKey.trim()}
             className="w-full rounded bg-chief px-3 py-2 text-sm font-medium text-white hover:bg-chief/90 disabled:opacity-50"
           >
-            {busy ? '保存中...' : `保存 ${provider.name} API Key`}
+            {busy ? t('settings.action.save') : t('settings.secrets.addKey').replace('Add API key', `Save ${provider.name} API Key`)}
           </button>
         </div>
       )}
@@ -281,9 +281,9 @@ export function Settings({ open, onClose }: SettingsProps) {
             <p className="text-xs text-text-secondary">{t('settings.headerSubtitle')}</p>
           </div>
           <div className="flex items-center gap-3">
-            {savedAt !== null && <span className="text-xs text-text-secondary">已保存 · {savedAt}</span>}
-            {saving && <span className="text-xs text-text-secondary">保存中…</span>}
-            <button type="button" onClick={onClose} className="rounded-md border border-border bg-surface-1 px-3 py-1.5 text-xs text-text-secondary hover:text-primary">关闭</button>
+            {savedAt !== null && <span className="text-xs text-text-secondary">{t('settings.action.savedAt', {time: savedAt})}</span>}
+            {saving && <span className="text-xs text-text-secondary">{t('settings.action.save')}</span>}
+            <button type="button" onClick={onClose} className="rounded-md border border-border bg-surface-1 px-3 py-1.5 text-xs text-text-secondary hover:text-primary">{t('settings.action.close')}</button>
           </div>
         </header>
 
@@ -326,13 +326,13 @@ export function Settings({ open, onClose }: SettingsProps) {
                     const isCustom = p.notes.includes('Custom relay');
                     const handleDeleteCustom = async (e: React.MouseEvent) => {
                       e.stopPropagation();
-                      if (!confirm(`确认删除自定义中转站「${p.display_name}」？`)) return;
+                      if (!confirm(t('settings.confirm.deleteCustom.title', {name: p.display_name}))) return;
                       try {
                         await removeCustomProvider(p.id);
                         if (selected === p.id) setSelected(null);
                         refresh();
                       } catch (err) {
-                        alert(err instanceof Error ? err.message : '删除失败');
+                        alert(err instanceof Error ? err.message : t('settings.action.delete') + ' ' + t('settings.action.delete') + ' ' + t('settings.secrets.addKey'));
                       }
                     };
                     return (
@@ -341,17 +341,17 @@ export function Settings({ open, onClose }: SettingsProps) {
                         <div className="flex w-full items-center justify-between">
                           <div className="flex items-center gap-2">
                             <span className="font-medium text-sm">{p.display_name}</span>
-                            {p.is_local && <span className="rounded bg-surface-3 px-1.5 py-0.5 text-[10px] text-text-secondary">本地</span>}
-                            {isCustom && <span className="rounded bg-chief/20 px-1.5 py-0.5 text-[10px] text-chief">中转站</span>}
+                            {p.is_local && <span className="rounded bg-surface-3 px-1.5 py-0.5 text-[10px] text-text-secondary">{t('settings.models.local')}</span>}
+                            {isCustom && <span className="rounded bg-chief/20 px-1.5 py-0.5 text-[10px] text-chief">{t('settings.custom.kindLabel')}</span>}
                           </div>
                           <div className="flex items-center gap-1.5">
                             <Toggle on={p.enabled} onChange={(v) => void toggle(p.id, v)} disabled={!p.key_present && !p.is_local} />
                             {isCustom && (
-                              <button type="button" onClick={handleDeleteCustom} title="删除中转站" className="rounded p-0.5 text-[10px] text-red-400 hover:bg-red-400/10 hover:text-red-300">✕</button>
+                              <button type="button" onClick={handleDeleteCustom} title={String(t('settings.action.deleteCustom'))} className="rounded p-0.5 text-[10px] text-red-400 hover:bg-red-400/10 hover:text-red-300">✕</button>
                             )}
                           </div>
                         </div>
-                        <div className="text-[11px] text-text-secondary">{p.models.length} 个模型 · {p.api_key_env}</div>
+                        <div className="text-[11px] text-text-secondary">{t('settings.quickAdd.modelCount', {count: p.models.length, keyEnv: p.api_key_env})}</div>
                         <KeyBadge present={p.key_present} />
                       </button>
                     );
@@ -365,9 +365,9 @@ export function Settings({ open, onClose }: SettingsProps) {
                     <h3 className="mb-1 text-sm font-semibold">{sel.display_name}</h3>
                     <p className="mb-3 text-xs text-text-secondary">{sel.notes}</p>
                     <div className="grid grid-cols-2 gap-3 text-xs">
-                      <Field label="类型">{sel.kind}</Field>
-                      <Field label="API Base URL"><code className="font-mono">{sel.base_url}</code></Field>
-                      <Field label="API Key 环境变量"><code className="font-mono">{sel.api_key_env}</code></Field>
+                      <Field label={t('settings.custom.kindLabel')}>{sel.kind}</Field>
+                      <Field label={t('settings.custom.baseUrlLabel')}><code className="font-mono">{sel.base_url}</code></Field>
+                      <Field label={t('settings.custom.apiKeyLabel')}><code className="font-mono">{sel.api_key_env}</code></Field>
                       <Field label="Key 已配置">
                         {sel.key_present ? (
                           <span className="text-status-done">✓ 是</span>
@@ -404,7 +404,7 @@ export function Settings({ open, onClose }: SettingsProps) {
 
                 <h3 className="mb-2 px-1 text-xs font-semibold uppercase tracking-wide text-text-secondary">{t('settings.roles.title')}</h3>
                 <p className="mb-2 px-1 text-[10px] text-text-secondary">
-                  每个角色可以独立选默认模型 + 配回退链。例如：CEO 用 kimi（擅长规划）、Worker 用 minimax（性价比高）。
+                  
                 </p>
                 <div className="flex flex-col gap-2">
                   {snapshot.roles.map((r) => (
@@ -435,10 +435,11 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 function Toggle({ on, onChange, disabled }: { on: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
+  const { t } = useTranslation();
   return (
     <button type="button" onClick={(e) => { e.stopPropagation(); onChange(!on); }} disabled={disabled}
       className={`relative h-5 w-9 rounded-full transition-colors ${on ? 'bg-chief' : 'bg-surface-3'} ${disabled ? 'opacity-40 cursor-not-allowed' : ''}`}
-      aria-pressed={on} aria-label="启用">
+      aria-pressed={on} aria-label={t('settings.providers.enabled')}>
       <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all ${on ? 'left-4' : 'left-0.5'}`} />
     </button>
   );
@@ -456,35 +457,36 @@ function KeyBadge({ present }: { present: boolean }) {
 // offer multiple SDK-compatible endpoints; surface the snippets so the
 // user knows which env vars to set.
 function CompatHints({ providerId }: { providerId: string }) {
+  const { t } = useTranslation();
   if (providerId !== 'minimax') return null;
   return (
     <div className="mt-4 rounded-md border border-border bg-surface-2 p-3">
       <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-text-secondary">
-        兼容接口（任选其一）
+        {t('settings.compat.title')}
       </h4>
       <div className="space-y-3 text-[11px]">
         <div>
-          <div className="mb-1 font-medium">Anthropic SDK 兼容</div>
+          <div className="mb-1 font-medium"></div>
           <pre className="overflow-x-auto rounded bg-surface-3 p-2 font-mono leading-relaxed">
 {`export ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic
 export ANTHROPIC_API_KEY=\${YOUR_API_KEY}`}
           </pre>
         </div>
         <div>
-          <div className="mb-1 font-medium">OpenAI SDK 兼容</div>
+          <div className="mb-1 font-medium">{t('settings.custom.kind.openai')}</div>
           <pre className="overflow-x-auto rounded bg-surface-3 p-2 font-mono leading-relaxed">
 {`export OPENAI_BASE_URL=https://api.minimaxi.com/v1
 export OPENAI_API_KEY=\${YOUR_API_KEY}`}
           </pre>
         </div>
         <div>
-          <div className="mb-1 font-medium">AI SDK 兼容</div>
+          <div className="mb-1 font-medium">{t('settings.custom.kindLabel')}</div>
           <pre className="overflow-x-auto rounded bg-surface-3 p-2 font-mono leading-relaxed">
 {`export MINIMAX_API_KEY=\${YOUR_API_KEY}`}
           </pre>
         </div>
         <div className="text-text-secondary">
-          把以上命令放进系统环境变量（或者在下面添加 <code className="font-mono">MINIMAX_API_KEY</code> 后由 runtime 自动注入 os.environ），然后重启 runtime。
+          {t('settings.compat.restartHint')}
         </div>
       </div>
     </div>
@@ -525,6 +527,7 @@ function RoleAssignmentCard({
   onDefaultChange,
   onFallbackChange,
 }: RoleAssignmentCardProps) {
+  const { t } = useTranslation();
   const inChain = new Set(role.fallback_chain);
 
   // Filter out the default and the existing chain entries from the
@@ -561,7 +564,7 @@ function RoleAssignmentCard({
           <div className="font-mono text-[10px] text-text-secondary">{role.role}</div>
         </div>
         <div className="flex-1">
-          <div className="mb-1 text-[10px] uppercase tracking-wide text-text-secondary">默认模型</div>
+          <div className="mb-1 text-[10px] uppercase tracking-wide text-text-secondary">{t('settings.models.default')}</div>
           <select
             value={role.default_model}
             onChange={(e) => onDefaultChange(e.target.value)}
@@ -569,7 +572,7 @@ function RoleAssignmentCard({
             className="w-full rounded-md border border-border bg-surface-1 px-2 py-1.5 text-xs focus:border-chief focus:outline-none disabled:opacity-50"
           >
             {availableModels.length === 0 ? (
-              <option value={role.default_model}>(无可用模型 — 先在上方"添加 AI 供应商"里填 key)</option>
+              <option value={role.default_model}>{t('settings.models.emptyOption')}</option>
             ) : (
               availableModels.map((m) => {
                 const ref = `${m.provider}:${m.model}`;
@@ -587,7 +590,7 @@ function RoleAssignmentCard({
       <div className="mt-3 border-t border-border pt-3">
         <div className="mb-1 flex items-center justify-between">
           <div className="text-[10px] uppercase tracking-wide text-text-secondary">
-            回退链（{role.fallback_chain.length}）
+            {t('settings.models.fallbackChain', {count: role.fallback_chain.length})}
           </div>
           {addable.length > 0 && (
             <select
@@ -615,7 +618,7 @@ function RoleAssignmentCard({
         </div>
 
         {role.fallback_chain.length === 0 ? (
-          <div className="text-[11px] text-text-secondary">（暂无回退；主模型失败时该角色会直接报错）</div>
+          <div className="text-[11px] text-text-secondary">{t('settings.models.emptyFallback')}</div>
         ) : (
           <ol className="space-y-1">
             {role.fallback_chain.map((ref, idx) => {
@@ -637,7 +640,7 @@ function RoleAssignmentCard({
                     onClick={() => move(idx, -1)}
                     disabled={idx === 0 || saving}
                     className="rounded px-1.5 py-0.5 text-[10px] text-text-secondary hover:bg-surface-2 hover:text-primary disabled:opacity-30"
-                    aria-label="上移"
+                    aria-label={t('settings.action.moveUp')}
                   >
                     ↑
                   </button>
@@ -646,7 +649,7 @@ function RoleAssignmentCard({
                     onClick={() => move(idx, 1)}
                     disabled={idx === role.fallback_chain.length - 1 || saving}
                     className="rounded px-1.5 py-0.5 text-[10px] text-text-secondary hover:bg-surface-2 hover:text-primary disabled:opacity-30"
-                    aria-label="下移"
+                    aria-label={t('settings.action.moveDown')}
                   >
                     ↓
                   </button>
@@ -655,7 +658,7 @@ function RoleAssignmentCard({
                     onClick={() => removeAt(idx)}
                     disabled={saving}
                     className="rounded px-1.5 py-0.5 text-[10px] text-text-secondary hover:bg-status-failed/20 hover:text-status-failed disabled:opacity-30"
-                    aria-label="删除"
+                    aria-label={t('settings.action.delete')}
                   >
                     ×
                   </button>
@@ -700,6 +703,7 @@ function ProviderModelManager({
   onRemove,
   onClear,
 }: ProviderModelManagerProps) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -715,7 +719,7 @@ function ProviderModelManager({
     try {
       const res = await fetchProviderModels(providerId);
       if (!res.ok) {
-        setError(res.error ?? '拉取失败');
+        setError(res.error ?? t('settings.models.pullError'));
       } else {
         setFetched(res.models);
       }
@@ -757,13 +761,13 @@ function ProviderModelManager({
           disabled={busy}
           className="rounded-md border border-chief/40 bg-chief/10 px-2 py-0.5 text-[11px] text-chief hover:bg-chief/20 disabled:opacity-50"
         >
-          {busy ? '拉取中…' : '🔄 拉取最新模型'}
+          {busy ? t('settings.action.save') : '🔄 ' + t('settings.providers.discoverModels')}
         </button>
       </div>
 
       {customModels.length === 0 ? (
         <div className="text-[11px] text-text-secondary">
-          暂无自选模型。点击"拉取最新模型"从 {providerDisplay} 官方 API 拉取可用列表，勾选要加入的即可。
+          {t('settings.models.emptyCustomModels', {provider: providerDisplay})}
         </div>
       ) : (
         <ul className="grid grid-cols-2 gap-1 text-xs">
@@ -777,7 +781,7 @@ function ProviderModelManager({
                 type="button"
                 onClick={() => onRemove(m.id)}
                 className="text-[10px] text-text-secondary hover:text-status-failed"
-                aria-label="移除"
+                aria-label={t('settings.action.remove')}
               >
                 ×
               </button>
@@ -792,7 +796,7 @@ function ProviderModelManager({
           onClick={onClear}
           className="mt-2 text-[10px] text-text-secondary hover:text-status-failed"
         >
-          清除全部自选模型
+          {t('settings.models.clearAll')}
         </button>
       )}
 
@@ -814,7 +818,7 @@ function ProviderModelManager({
                 onClick={() => setOpen(false)}
                 disabled={busy}
                 className="text-text-secondary hover:text-primary disabled:opacity-30"
-                aria-label="关闭"
+                aria-label={t('settings.action.close')}
               >
                 ×
               </button>
@@ -823,18 +827,18 @@ function ProviderModelManager({
             <div className="flex-1 overflow-y-auto p-4">
               {busy ? (
                 <div className="flex items-center justify-center py-8 text-sm text-text-secondary">
-                  正在调用 {providerDisplay} API...
+                  {t('settings.models.callingApi', {provider: providerDisplay})}
                 </div>
               ) : error ? (
                 <div className="rounded border border-status-failed/40 bg-status-failed/10 p-3 text-xs text-status-failed">
                   {error}
                 </div>
               ) : fetched.length === 0 ? (
-                <div className="py-4 text-sm text-text-secondary">该 provider 暂无可拉取的模型。</div>
+                <div className="py-4 text-sm text-text-secondary">{t('settings.models.noModels')}</div>
               ) : (
                 <>
                   <div className="mb-2 text-[11px] text-text-secondary">
-                    共 {fetched.length} 个模型。勾选要加入的，已添加的会标记 ✓。
+                    {t('settings.models.foundCount', {count: fetched.length})}
                   </div>
                   <div className="mb-3 flex items-center gap-2">
                     <button
@@ -915,16 +919,16 @@ function ProviderModelManager({
   );
 }
 
-// ── Custom Provider (中转站) ───────────────────────────────────────
+// ── Custom Provider (relay station) ─────────────────────────────
 
-const KIND_OPTIONS = [
-  { value: 'anthropic', label: 'Anthropic 协议' },
-  { value: 'openai', label: 'OpenAI 协议' },
-  { value: 'openai_compat', label: 'OpenAI 兼容 (AI SDK)' },
-] as const;
 
 function CustomProviderForm({ onSaved }: { onSaved: () => void }) {
   const { t } = useTranslation();
+  const KIND_OPTIONS = [
+    { value: 'anthropic', label: t('settings.custom.kind.anthropic') },
+    { value: 'openai', label: t('settings.custom.kind.openai') },
+    { value: 'openai_compat', label: 'OpenAI 兼容 (AI SDK)' },
+  ] as const;
   const [open, setOpen] = useState(false);
   const [id, setId] = useState('');
   const [displayName, setDisplayName] = useState('');
@@ -958,12 +962,12 @@ function CustomProviderForm({ onSaved }: { onSaved: () => void }) {
     // Validate
     const idTrim = id.trim().toLowerCase();
     if (!/^[a-z0-9_]+$/.test(idTrim)) { setError('ID 只能包含小写字母、数字和下划线'); return; }
-    if (!displayName.trim()) { setError('请填写显示名称'); return; }
+    if (!displayName.trim()) { setError(t('settings.quickAdd.errorMissingName')); return; }
     if (!baseUrl.trim() || !(baseUrl.startsWith('http://') || baseUrl.startsWith('https://'))) {
       setError('Base URL 必须以 http:// 或 https:// 开头'); return;
     }
     if (!apiKey.trim()) { setError('请填写 API Key'); return; }
-    if (models.length === 0) { setError('请至少添加一个模型'); return; }
+    if (models.length === 0) { setError(t('settings.quickAdd.errorMissingKey').replace('Please enter an API key', 'Please add at least one model')); return; }
 
     setBusy(true); setError(null);
     try {
@@ -1013,25 +1017,25 @@ function CustomProviderForm({ onSaved }: { onSaved: () => void }) {
     <div className="rounded-lg border border-border bg-surface-1 p-4">
       <div className="mb-3 flex items-center justify-between">
         <h3 className="text-sm font-semibold text-primary">{t('settings.customProvider.title')}</h3>
-        <button type="button" onClick={() => { setOpen(false); reset(); }} className="text-xs text-text-secondary hover:text-primary">取消</button>
+        <button type="button" onClick={() => { setOpen(false); reset(); }} className="text-xs text-text-secondary hover:text-primary">{t('settings.action.cancel')}</button>
       </div>
 
       <div className="flex flex-col gap-2.5 text-xs">
         {/* ID */}
         <label className="flex flex-col gap-1">
           <span className="text-text-secondary">ID <span className="text-[10px]">(英文+数字+下划线)</span></span>
-          <input value={id} onChange={(e) => setId(e.target.value)} placeholder="my_relay" className="rounded border border-border bg-surface-2 px-2 py-1.5 text-primary outline-none focus:border-chief" />
+          <input value={id} onChange={(e) => setId(e.target.value)} placeholder={t('settings.custom.idPlaceholder')} className="rounded border border-border bg-surface-2 px-2 py-1.5 text-primary outline-none focus:border-chief" />
         </label>
 
         {/* Display Name */}
         <label className="flex flex-col gap-1">
-          <span className="text-text-secondary">显示名称</span>
-          <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder="我的中转站" className="rounded border border-border bg-surface-2 px-2 py-1.5 text-primary outline-none focus:border-chief" />
+          <span className="text-text-secondary">{t('settings.custom.nameLabel')}</span>
+          <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder={t('settings.custom.namePlaceholder')} className="rounded border border-border bg-surface-2 px-2 py-1.5 text-primary outline-none focus:border-chief" />
         </label>
 
         {/* Protocol */}
         <label className="flex flex-col gap-1">
-          <span className="text-text-secondary">协议</span>
+          <span className="text-text-secondary">{t('settings.custom.kindLabel')}</span>
           <select value={kind} onChange={(e) => setKind(e.target.value as typeof kind)} className="rounded border border-border bg-surface-2 px-2 py-1.5 text-primary outline-none focus:border-chief">
             {KIND_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
@@ -1040,18 +1044,18 @@ function CustomProviderForm({ onSaved }: { onSaved: () => void }) {
         {/* Base URL */}
         <label className="flex flex-col gap-1">
           <span className="text-text-secondary">Base URL</span>
-          <input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://your-relay.com/v1" className="rounded border border-border bg-surface-2 px-2 py-1.5 text-primary outline-none focus:border-chief" />
+          <input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder={t('settings.custom.baseUrlPlaceholder')} className="rounded border border-border bg-surface-2 px-2 py-1.5 text-primary outline-none focus:border-chief" />
         </label>
 
         {/* API Key */}
         <label className="flex flex-col gap-1">
           <span className="text-text-secondary">API Key</span>
-          <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="sk-..." className="rounded border border-border bg-surface-2 px-2 py-1.5 text-primary outline-none focus:border-chief" />
+          <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder={t('settings.custom.apiKeyPlaceholder')} className="rounded border border-border bg-surface-2 px-2 py-1.5 text-primary outline-none focus:border-chief" />
         </label>
 
         {/* Models */}
         <div className="flex flex-col gap-1">
-          <span className="text-text-secondary">模型列表</span>
+          <span className="text-text-secondary">{t('settings.models.list')}</span>
           {models.length > 0 && (
             <ul className="flex flex-col gap-1">
               {models.map((m) => (
@@ -1065,8 +1069,8 @@ function CustomProviderForm({ onSaved }: { onSaved: () => void }) {
             </ul>
           )}
           <div className="flex gap-1.5">
-            <input value={newModelId} onChange={(e) => setNewModelId(e.target.value)} placeholder="model-id" className="flex-1 rounded border border-border bg-surface-2 px-2 py-1 text-primary outline-none focus:border-chief" onKeyDown={(e) => e.key === 'Enter' && addModelRow()} />
-            <input value={newModelName} onChange={(e) => setNewModelName(e.target.value)} placeholder="显示名(可选)" className="flex-1 rounded border border-border bg-surface-2 px-2 py-1 text-primary outline-none focus:border-chief" onKeyDown={(e) => e.key === 'Enter' && addModelRow()} />
+            <input value={newModelId} onChange={(e) => setNewModelId(e.target.value)} placeholder={t('settings.models.newModelId')} className="flex-1 rounded border border-border bg-surface-2 px-2 py-1 text-primary outline-none focus:border-chief" onKeyDown={(e) => e.key === 'Enter' && addModelRow()} />
+            <input value={newModelName} onChange={(e) => setNewModelName(e.target.value)} placeholder={t('settings.models.newModelName')} className="flex-1 rounded border border-border bg-surface-2 px-2 py-1 text-primary outline-none focus:border-chief" onKeyDown={(e) => e.key === 'Enter' && addModelRow()} />
             <button type="button" onClick={addModelRow} className="shrink-0 rounded bg-surface-3 px-2 py-1 text-text-secondary hover:text-primary">+</button>
           </div>
         </div>
@@ -1082,7 +1086,7 @@ function CustomProviderForm({ onSaved }: { onSaved: () => void }) {
           disabled={busy}
           className="rounded-md bg-chief px-4 py-1.5 text-xs font-medium text-white hover:bg-chief/90 disabled:opacity-30"
         >
-          {busy ? '保存中…' : '添加中转站'}
+          {busy ? t('settings.action.save') : t('settings.customProvider.title')}
         </button>
       </div>
     </div>

@@ -91,6 +91,83 @@ const enUS: Translations = {
   'settings.models.available': 'Available models',
   'settings.roles.title': 'Role -> model assignment',
 
+  // ── Buttons / actions ──────────────────────────
+  'settings.action.cancel': 'Cancel',
+  'settings.action.close': 'Close',
+  'settings.action.save': 'Saving...',
+  'settings.action.savedAt': 'Saved · {{time}}',
+  'settings.action.delete': 'Delete',
+  'settings.action.deleteCustom': 'Delete relay station',
+  'settings.action.remove': 'Remove',
+  'settings.action.moveUp': 'Move up',
+  'settings.action.moveDown': 'Move down',
+  'settings.action.addFallback': '+ Add fallback',
+  'settings.action.confirmYes': '✓ Yes',
+  'settings.action.confirmNo': '✗ No (set <{{targetModel}}> as primary)',
+
+  // ── Confirmation dialogs ───────────────────────
+  'settings.confirm.removeModel.title': 'Delete model {{name}}?',
+  'settings.confirm.removeModel.body':
+    'This model will be removed from {{provider}}\u2019s fallback chain. Continue?',
+  'settings.confirm.deleteCustom.title': 'Delete relay station {{name}}?',
+  'settings.confirm.deleteCustom.body':
+    'This relay station and its API key will be deleted. Continue?',
+
+  // ── Quick add AI (presets) ──────────────────────
+  'settings.quickAdd.openai.compatible': 'OpenAI SDK compatible',
+  'settings.quickAdd.anthropic.compatible': 'Anthropic SDK compatible',
+  'settings.quickAdd.kind.openai': 'OpenAI SDK compatible',
+  'settings.quickAdd.kind.anthropic': 'Anthropic SDK compatible',
+  'settings.quickAdd.saved': '✓ Saved and active',
+  'settings.quickAdd.added': '✓ Added successfully',
+  'settings.quickAdd.addedShort': '✓ added',
+  'settings.quickAdd.keyPlaceholder': 'sk-...',
+  'settings.quickAdd.modelCount': '{{count}} models · {{keyEnv}}',
+  'settings.quickAdd.errorMissingName': 'Please enter a display name',
+  'settings.quickAdd.errorMissingKey': 'Please enter an API key',
+  'settings.quickAdd.errorInvalidKey': 'API key has an invalid format (letters, digits, underscore only)',
+
+  // ── Custom provider form ────────────────────────
+  'settings.custom.nameLabel': 'Display name',
+  'settings.custom.namePlaceholder': 'My relay station',
+  'settings.custom.idLabel': 'ID (used in URL)',
+  'settings.custom.idPlaceholder': 'my_relay',
+  'settings.custom.baseUrlLabel': 'Base URL',
+  'settings.custom.baseUrlPlaceholder': 'https://your-relay.com/v1',
+  'settings.custom.apiKeyLabel': 'API key',
+  'settings.custom.apiKeyPlaceholder': 'sk-...',
+  'settings.custom.kindLabel': 'Protocol',
+  'settings.custom.kind.openai': 'OpenAI SDK compatible',
+  'settings.custom.kind.anthropic': 'Anthropic SDK compatible',
+
+  // ── Models tab ─────────────────────────────────
+  'settings.models.default': 'Default model',
+  'settings.models.local': 'local',
+  'settings.models.list': 'Model list',
+  'settings.models.noModels': 'This provider has no models to fetch.',
+  'settings.models.emptyFallback':
+    '(No fallback yet; if the primary model fails, the role will return an error.)',
+  'settings.models.newModelId': 'model-id',
+  'settings.models.newModelName': 'Display name (optional)',
+
+  // ── CompatHints (per-provider 兼容接口 hint) ─────────
+  'settings.compat.title': 'Compatible interfaces (pick one)',
+  'settings.compat.restartHint': 'Set these environment variables (or add <MINIMAX_API_KEY> in the panel below and the runtime will inject os.environ), then restart the runtime.',
+
+  // ── Model manager dialog ─────────────────────
+  'settings.models.fallbackChain': 'Fallback chain ({{count}})',
+  'settings.models.pullError': 'Pull failed',
+  'settings.models.callingApi': 'Calling {{provider}} API...',
+  'settings.models.foundCount': 'Found {{count}} models. Tick to add; already-added models are marked with a checkmark.',
+  'settings.models.emptyOption': '(No models available — first add an AI provider above)',
+  'settings.models.emptyCustomModels': 'No custom models yet. Click "Discover models" to pull the available list from the {{provider}} official API, then tick the ones you want to add.',
+  'settings.models.clearAll': 'Clear all custom models',
+  'settings.roles.chief': 'Chief',
+  'settings.roles.worker': 'Worker',
+  'settings.roles.reporter': 'Reporter',
+  'settings.quickAdd.errorSaveFailed': 'Save failed',
+  'settings.quickAdd.errorNoModels': 'Please add at least one model',
+  'settings.providers.siliconflow.desc': 'SiliconFlow',
   // ── Drift banner (Phase 5) ───────────────────────────
   'drift.message':
     '⚠ Sidecar runtime version (v{{sidecar}}) is older than the shell expects (v{{expected}}). Some features may be unavailable. Please rebuild the sidecar.',

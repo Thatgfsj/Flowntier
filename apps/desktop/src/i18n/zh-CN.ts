@@ -89,6 +89,83 @@ const zhCN = {
   'settings.models.available': '可用模型',
   'settings.roles.title': '角色 → 模型 分配',
 
+  // ── Buttons / actions ──────────────────────────
+  'settings.action.cancel': '取消',
+  'settings.action.close': '关闭',
+  'settings.action.save': '保存中…',
+  'settings.action.savedAt': '已保存 · {{time}}',
+  'settings.action.delete': '删除',
+  'settings.action.deleteCustom': '删除中转站',
+  'settings.action.remove': '移除',
+  'settings.action.moveUp': '上移',
+  'settings.action.moveDown': '下移',
+  'settings.action.addFallback': '+ 添加回退',
+  'settings.action.confirmYes': '✓ 是',
+  'settings.action.confirmNo': '✗ 否（设置 <{{targetModel}}> 为主模型）',
+
+  // ── Confirmation dialogs ───────────────────────
+  'settings.confirm.removeModel.title': '删除模型 {{name}}?',
+  'settings.confirm.removeModel.body':
+    '这个模型会从 {{provider}} 的回退链里移除。确定吗?',
+  'settings.confirm.deleteCustom.title': '删除中转站 {{name}}?',
+  'settings.confirm.deleteCustom.body':
+    '该中转站和它的 API key 会被删除。确定吗?',
+
+  // ── Quick add AI (presets) ──────────────────────
+  'settings.quickAdd.openai.compatible': 'OpenAI SDK 兼容',
+  'settings.quickAdd.anthropic.compatible': 'Anthropic SDK 兼容',
+  'settings.quickAdd.kind.openai': 'AI SDK 兼容',
+  'settings.quickAdd.kind.anthropic': 'Anthropic SDK 兼容',
+  'settings.quickAdd.saved': '✓ 已保存并激活',
+  'settings.quickAdd.added': '✓ 添加成功',
+  'settings.quickAdd.addedShort': '✓已添加',
+  'settings.quickAdd.keyPlaceholder': 'sk-...',
+  'settings.quickAdd.modelCount': '{{count}} 个模型 · {{keyEnv}}',
+  'settings.quickAdd.errorMissingName': '请填写显示名称',
+  'settings.quickAdd.errorMissingKey': '请填写 API 密钥',
+  'settings.quickAdd.errorInvalidKey': 'API 密钥格式无效（英文+数字+下划线）',
+
+  // ── Custom provider form ────────────────────────
+  'settings.custom.nameLabel': '显示名称',
+  'settings.custom.namePlaceholder': '我的中转站',
+  'settings.custom.idLabel': 'ID (URL 用)',
+  'settings.custom.idPlaceholder': 'my_relay',
+  'settings.custom.baseUrlLabel': 'Base URL',
+  'settings.custom.baseUrlPlaceholder': 'https://your-relay.com/v1',
+  'settings.custom.apiKeyLabel': 'API 密钥',
+  'settings.custom.apiKeyPlaceholder': 'sk-...',
+  'settings.custom.kindLabel': '协议',
+  'settings.custom.kind.openai': 'OpenAI SDK 兼容',
+  'settings.custom.kind.anthropic': 'Anthropic SDK 兼容',
+
+  // ── Models tab ─────────────────────────────────
+  'settings.models.default': '默认模型',
+  'settings.models.local': '本地',
+  'settings.models.list': '模型列表',
+  'settings.models.noModels': '该 provider 暂无可拉取的模型。',
+  'settings.models.emptyFallback':
+    '（暂无回退；主模型失败时该角色会直接报错）',
+  'settings.models.newModelId': 'model-id',
+  'settings.models.newModelName': '显示名(可选)',
+
+  // ── CompatHints (per-provider 兼容接口 hint) ─────────
+  'settings.compat.title': '兼容接口（任选其一）',
+  'settings.compat.restartHint': '把以上命令放进系统环境变量（或者在下方添加 <MINIMAX_API_KEY> 后由 runtime 自动注入 os.environ），然后重启 runtime。',
+
+  // ── Model manager dialog ─────────────────────
+  'settings.models.fallbackChain': '回退链（{{count}}）',
+  'settings.models.pullError': '拉取失败',
+  'settings.models.callingApi': '正在调用 {{provider}} API...',
+  'settings.models.foundCount': '共 {{count}} 个模型。勾选要加入的，已添加的会标记 ✓。',
+  'settings.models.emptyOption': '(无可用模型 — 先在上方「添加 AI 供应商」里填 key)',
+  'settings.models.emptyCustomModels': '暂无自选模型。点击「拉取最新模型」从 {{provider}} 官方 API 拉取可用列表，勾选要加入的即可。',
+  'settings.models.clearAll': '清除全部自选模型',
+  'settings.roles.chief': '主理',
+  'settings.roles.worker': '实施',
+  'settings.roles.reporter': '汇报',
+  'settings.quickAdd.errorSaveFailed': '保存失败',
+  'settings.quickAdd.errorNoModels': '请至少添加一个模型',
+  'settings.providers.siliconflow.desc': 'SiliconFlow (硅基流动)',
   // ── Drift banner (Phase 5) ───────────────────────────
   'drift.message':
     '⚠ Sidecar 运行时版本 (v{{sidecar}}) 低于 shell 期望 (v{{expected}}). 某些功能可能不可用。请重新构建 sidecar。',
