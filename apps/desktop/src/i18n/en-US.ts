@@ -177,6 +177,15 @@ const enUS: Translations = {
   'settings.about.clearDataConfirmYes': '✓ Yes, clear everything',
   'settings.about.clearDataConfirmNo': '✗ No',
   'settings.about.clearDataError': 'Clear failed: {{error}}',
+  // ── Error fallbacks (Polish 12) ──────────────────
+  'settings.error.saveFailed': 'Save failed',
+  'settings.error.alreadyExists': 'Model {{id}} already exists',
+  'settings.error.invalidId': 'ID may only contain lowercase letters, digits, and underscore',
+  'settings.error.missingApiKey': 'Please enter an API key',
+  'settings.error.invalidBaseUrl': 'Base URL must start with http:// or https://',
+  'settings.error.deleteCustomFailed': 'Failed to delete relay station',
+  'settings.error.deleteRole': 'Failed to delete role',
+  'settings.error.tErr': 'Error: {{error}}',
   // ── Drift banner (Phase 5) ───────────────────────────
   'drift.message':
     '⚠ Sidecar runtime version (v{{sidecar}}) is older than the shell expects (v{{expected}}). Some features may be unavailable. Please rebuild the sidecar.',

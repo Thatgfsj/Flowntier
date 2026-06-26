@@ -13,6 +13,7 @@ import {
 } from '../lib/api.js';
 import { useCustomModels } from '../hooks/useCustomModels.js';
 import { appVersion, buildSha } from '../lib/version.js';
+import { tErr } from '../lib/errs.js';
 
 // ── Quick Add AI ─────────────────────────────────────────────────
 
@@ -65,7 +66,7 @@ function QuickAddAI({ onSaved }: { onSaved: () => void }) {
       }, 1500);
     } catch (e) {
       console.error('[QuickAddAI] save failed:', e);
-      setError(e instanceof Error ? e.message : '保存失败');
+      setError(tErr(t, e, 'settings.error.saveFailed'));
     } finally {
       setBusy(false);
     }
@@ -349,7 +350,7 @@ export function Settings({ open, onClose }: SettingsProps) {
                         if (selected === p.id) setSelected(null);
                         refresh();
                       } catch (err) {
-                        alert(err instanceof Error ? err.message : t('settings.action.delete') + ' ' + t('settings.action.delete') + ' ' + t('settings.secrets.addKey'));
+                        alert(err instanceof Error ? err.message : t('settings.error.deleteCustomFailed'));
                       }
                     };
                     return (
@@ -1013,12 +1014,12 @@ function CustomProviderForm({ onSaved }: { onSaved: () => void }) {
   const handleSubmit = async () => {
     // Validate
     const idTrim = id.trim().toLowerCase();
-    if (!/^[a-z0-9_]+$/.test(idTrim)) { setError('ID 只能包含小写字母、数字和下划线'); return; }
+    if (!/^[a-z0-9_]+$/.test(idTrim)) { setError(t('settings.error.invalidId')); return; }
     if (!displayName.trim()) { setError(t('settings.quickAdd.errorMissingName')); return; }
     if (!baseUrl.trim() || !(baseUrl.startsWith('http://') || baseUrl.startsWith('https://'))) {
-      setError('Base URL 必须以 http:// 或 https:// 开头'); return;
+      setError(t('settings.error.invalidBaseUrl')); return;
     }
-    if (!apiKey.trim()) { setError('请填写 API Key'); return; }
+    if (!apiKey.trim()) { setError(t('settings.error.missingApiKey')); return; }
     if (models.length === 0) { setError(t('settings.quickAdd.errorMissingKey').replace('Please enter an API key', 'Please add at least one model')); return; }
 
     setBusy(true); setError(null);
@@ -1027,7 +1028,7 @@ function CustomProviderForm({ onSaved }: { onSaved: () => void }) {
       const envVarName = `CUSTOM_${idTrim.toUpperCase()}_API_KEY`;
       const saveResult = await saveSecret(envVarName, apiKey.trim());
       if (!saveResult || !saveResult.saved) {
-        setError('保存 API Key 失败');
+        setError(t('settings.error.saveFailed'));
         setBusy(false);
         return;
       }
@@ -1046,7 +1047,7 @@ function CustomProviderForm({ onSaved }: { onSaved: () => void }) {
       onSaved();
       setTimeout(() => { setOpen(false); reset(); }, 1200);
     } catch (e) {
-      setError(e instanceof Error ? e.message : '保存失败');
+      setError(e instanceof Error ? e.message : t('settings.error.saveFailed'));
     } finally {
       setBusy(false);
     }
