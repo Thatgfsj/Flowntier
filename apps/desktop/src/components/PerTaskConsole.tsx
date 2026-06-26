@@ -6,6 +6,8 @@
  */
 
 import { useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import type { WfEvent, LogLevel } from '@flowntier/shared';
 
 export interface PerTaskConsoleProps {
@@ -34,16 +36,20 @@ function shortTime(iso: string): string {
   return iso.slice(11, 19);
 }
 
-function agentToLabel(agentId: string): string {
-  if (agentId === 'agent:chief') return '主理';
-  if (agentId === 'agent:critic:a') return '审核A';
-  if (agentId === 'agent:critic:b') return '审核B';
-  if (agentId.startsWith('agent:worker:')) return '实施';
-  if (agentId === 'agent:system') return '系统';
+// Module-scope helper — receives `t` so it can resolve localized
+// agent short-labels without a hook (matches the getRoleLabel
+// pattern in Settings.tsx).
+function agentToLabel(t: TFunction, agentId: string): string {
+  if (agentId === 'agent:chief') return t('perTask.agent.chief');
+  if (agentId === 'agent:critic:a') return t('perTask.agent.criticA');
+  if (agentId === 'agent:critic:b') return t('perTask.agent.criticB');
+  if (agentId.startsWith('agent:worker:')) return t('perTask.agent.worker');
+  if (agentId === 'agent:system') return t('perTask.agent.system');
   return agentId;
 }
 
 export function PerTaskConsole({ taskId, events, className }: PerTaskConsoleProps) {
+  const { t } = useTranslation();
   const [filter, setFilter] = useState<LogLevel | 'all'>('all');
 
   // Filter events for this task
@@ -69,7 +75,7 @@ export function PerTaskConsole({ taskId, events, className }: PerTaskConsoleProp
   if (taskEvents.length === 0) {
     return (
       <div className={`text-xs text-text-secondary ${className ?? ''}`}>
-        暂无此任务的日志
+        {t('perTask.empty')}
       </div>
     );
   }
@@ -78,7 +84,7 @@ export function PerTaskConsole({ taskId, events, className }: PerTaskConsoleProp
     <div className={className}>
       {/* Level filter */}
       <div className="mb-2 flex items-center gap-1">
-        <span className="text-[10px] text-text-secondary">过滤:</span>
+        <span className="text-[10px] text-text-secondary">{t('perTask.filter')}</span>
         {(['all', 'error', 'warn', 'info', 'debug'] as const).map((level) => (
           <button
             key={level}
@@ -89,7 +95,7 @@ export function PerTaskConsole({ taskId, events, className }: PerTaskConsoleProp
                 : 'bg-surface-3 text-text-secondary hover:bg-surface-2'
             }`}
           >
-            {level === 'all' ? '全部' : LEVEL_LABELS[level]}
+            {level === 'all' ? t('perTask.filterAll') : LEVEL_LABELS[level]}
           </button>
         ))}
       </div>
@@ -103,9 +109,9 @@ export function PerTaskConsole({ taskId, events, className }: PerTaskConsoleProp
                 <span className="shrink-0 text-text-secondary">
                   {e.ts ? shortTime(e.ts) : '--:--:--'}
                 </span>
-                <span className="shrink-0 text-status-active">任务</span>
+                <span className="shrink-0 text-status-active">{t('perTask.task')}</span>
                 <span className="text-primary">
-                  状态变更: {e.task_status}
+                  {t('perTask.statusChange', { status: e.task_status })}
                   {e.task_summary ? ` — ${e.task_summary}` : ''}
                 </span>
               </div>
@@ -122,7 +128,7 @@ export function PerTaskConsole({ taskId, events, className }: PerTaskConsoleProp
                   {LEVEL_LABELS[e.level]}
                 </span>
                 <span className="shrink-0 text-text-secondary">
-                  {agentToLabel(e.agent_id)}
+                  {agentToLabel(t, e.agent_id)}
                 </span>
                 <span className="min-w-0 flex-1 truncate text-primary">
                   {e.message}
@@ -137,7 +143,7 @@ export function PerTaskConsole({ taskId, events, className }: PerTaskConsoleProp
 
       {/* Stats */}
       <div className="mt-2 text-[10px] text-text-secondary">
-        共 {taskEvents.length} 条记录
+        {t('perTask.totalCount', { count: taskEvents.length })}
       </div>
     </div>
   );

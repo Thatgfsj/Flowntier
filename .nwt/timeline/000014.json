@@ -1,0 +1,22 @@
+{
+  "id": "000014",
+  "timestamp": "2026-06-27T11:00:00Z",
+  "task": "Polish 14-prime: complete i18n migration for Welcome / CenterPanel / PerTaskConsole",
+  "summary": "Polish 14-prime: complete i18n migration for Welcome / CenterPanel / PerTaskConsole",
+  "reason": "Chairman: '继续继续' (Polish 14-prime). Polish 14 added 25+ i18n keys but only landed the data; the actual t() call migration in the three components was deferred because module-scope helpers like Card/Footer/agentToLabel needed refactoring. This PR completes the migration: 32 new i18n keys added (welcome.* +17, centerPanel.* +6, perTask.* +9), 1 key renamed (welcome.step2.selectedCount → welcome.providerQuickAdd.selected, since it's only used by Step 1's ProviderQuickAdd), 1 orphan placeholder fixed (welcome.error.copyPasteHint had developer-instruction text in zh-CN, now proper Chinese). Three .tsx files migrated: Welcome.tsx (Welcome/Step1/Step2/Step3/ProviderQuickAdd/Footer all call useTranslation themselves, matching Settings.tsx pattern; Card/ProgressDot/Connector receive already-translated strings via props), CenterPanel.tsx (chief name reuses perTask.agent.chief so role labels stay consistent), PerTaskConsole.tsx (agentToLabel takes TFunction parameter — module-scope lookup pattern from Settings.tsx). No PR opened per chairman's standing order ('这是我的仓库，不需要pr'). pnpm typecheck clean.",
+  "files": [
+    "apps/desktop/src/components/Welcome.tsx",
+    "apps/desktop/src/zones/CenterPanel.tsx",
+    "apps/desktop/src/components/PerTaskConsole.tsx",
+    "apps/desktop/src/i18n/zh-CN.ts",
+    "apps/desktop/src/i18n/en-US.ts"
+  ],
+  "tags": [
+    "polish-14-prime",
+    "i18n",
+    "frontend",
+    "welcome",
+    "centerPanel",
+    "perTask"
+  ]
+}

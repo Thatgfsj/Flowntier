@@ -21,6 +21,7 @@
  * app is open for real" button).
  */
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
 
 interface WelcomeProps {
@@ -36,6 +37,7 @@ interface SampleWorkflow {
 }
 
 export function Welcome({ onComplete }: WelcomeProps) {
+  const { t } = useTranslation();
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [providers, setProviders] = useState<
     { id: string; display_name: string; has_secret: boolean }[]
@@ -119,11 +121,11 @@ export function Welcome({ onComplete }: WelcomeProps) {
           finishing the in-between steps. Useful for power users who
           already know what they're doing. */}
       <div className="mb-8 flex w-full max-w-2xl items-center gap-2">
-        <ProgressDot active={step >= 1} label="添加供应商" />
+        <ProgressDot active={step >= 1} label={t('welcome.progress.providers')} />
         <Connector />
-        <ProgressDot active={step >= 2} label="示例任务" />
+        <ProgressDot active={step >= 2} label={t('welcome.progress.sample')} />
         <Connector />
-        <ProgressDot active={step >= 3} label="开始使用" />
+        <ProgressDot active={step >= 3} label={t('welcome.progress.enter')} />
         <div className="flex-1" />
         {step < 3 && (
           <button
@@ -131,7 +133,7 @@ export function Welcome({ onComplete }: WelcomeProps) {
             onClick={() => setStep(3)}
             className="text-xs text-text-secondary underline hover:text-text-primary"
           >
-            跳过所有步骤 →
+            {t('welcome.skipAll')}
           </button>
         )}
       </div>
@@ -168,22 +170,23 @@ function Step1(props: {
   onSkip: () => void;
   onSaved: () => void;
 }) {
+  const { t } = useTranslation();
   const noneSaved = props.providers.length > 0 && !props.providers.some((p) => p.has_secret);
   return (
-    <Card title="第 1 步 — 添加一个 AI 供应商" subtitle="首次使用需要至少一个 API Key。可以现在添加，也可以稍后到设置中添加。">
+    <Card title={t('welcome.step1.title')} subtitle={t('welcome.step1.subtitle')}>
       {props.providers.length === 0 ? (
-        <p className="text-sm text-text-secondary">加载供应商列表…</p>
+        <p className="text-sm text-text-secondary">{t('welcome.step1.providersEmpty')}</p>
       ) : noneSaved ? (
         <ProviderQuickAdd onSaved={props.onSaved} />
       ) : (
         <p className="text-sm text-text-secondary">
-          ✓ 检测到至少一个供应商已配置。继续。
+          {t('welcome.step1.anyConfigured')}
         </p>
       )}
       <Footer
         onBack={undefined}
         onNext={props.onSkip}
-        nextLabel="跳过此步"
+        nextLabel={t('welcome.step1.skipLabel')}
         skipDisabled={props.providers.length === 0}
       />
     </Card>
@@ -193,6 +196,7 @@ function Step1(props: {
 // Minimal inline provider picker. For brevity, only the 4 most
 // common presets; full list in Settings.tsx.
 function ProviderQuickAdd(props: { onSaved: () => void }) {
+  const { t } = useTranslation();
   const presets: Array<{ id: string; display_name: string; secret_name: string; base_url: string }> = [
     { id: 'openai', display_name: 'OpenAI', secret_name: 'OPENAI_API_KEY', base_url: 'https://api.openai.com/v1' },
     { id: 'anthropic', display_name: 'Anthropic', secret_name: 'ANTHROPIC_API_KEY', base_url: 'https://api.anthropic.com' },
@@ -239,7 +243,7 @@ function ProviderQuickAdd(props: { onSaved: () => void }) {
   return (
     <div className="space-y-3">
       <div className="flex items-baseline gap-2 text-sm">
-        <span className="text-text-secondary">已选:</span>
+        <span className="text-text-secondary">{t('welcome.providerQuickAdd.selected')}</span>
         <span className="font-medium text-text-primary">{picked.display_name}</span>
         <button
           type="button"
@@ -249,14 +253,14 @@ function ProviderQuickAdd(props: { onSaved: () => void }) {
           }}
           className="text-xs text-text-secondary underline hover:text-text-primary"
         >
-          换一个
+          {t('welcome.providerQuickAdd.change')}
         </button>
       </div>
       <input
         type="password"
         value={key}
         onChange={(e) => setKey(e.target.value)}
-        placeholder={`${picked.secret_name}（粘到此处）`}
+        placeholder={t('welcome.providerQuickAdd.pasteHere', { secretName: picked.secret_name })}
         className="w-full rounded-md border border-border bg-surface-2 px-3 py-2 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-accent/50"
         autoFocus
       />
@@ -268,7 +272,7 @@ function ProviderQuickAdd(props: { onSaved: () => void }) {
           disabled={busy || !key.trim()}
           className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
         >
-          {busy ? '保存中…' : '保存并继续'}
+          {busy ? t('welcome.providerQuickAdd.saving') : t('welcome.providerQuickAdd.saveAndContinue')}
         </button>
       </div>
     </div>
@@ -286,10 +290,11 @@ function Step2(props: {
   onSkip: () => void;
   onBack: () => void;
 }) {
+  const { t } = useTranslation();
   return (
-    <Card title="第 2 步 — 试试示例任务" subtitle="下面是一个真实的工作流示例，会走完 首席 → 规划 → 工匠 → 审查 → 汇报 五个角色。">
+    <Card title={t('welcome.step2.title')} subtitle={t('welcome.step2.subtitle')}>
       {!props.sample ? (
-        <p className="text-sm text-text-secondary">加载示例任务…</p>
+        <p className="text-sm text-text-secondary">{t('welcome.step2.loadingSample')}</p>
       ) : (
         <>
           <div className="rounded-md border border-border bg-surface-2 p-3 text-sm">
@@ -299,7 +304,7 @@ function Step2(props: {
             </p>
             <details className="mt-3">
               <summary className="cursor-pointer text-xs text-text-secondary hover:text-text-primary">
-                查看任务内容
+                {t('welcome.step2.viewTaskContent')}
               </summary>
               <pre className="mt-2 whitespace-pre-wrap text-xs text-text-secondary">
                 {props.sample.user_request}
@@ -308,12 +313,12 @@ function Step2(props: {
           </div>
           {props.submitOk && (
             <p className="mt-3 rounded-md border border-success bg-success/10 px-3 py-2 text-xs text-success">
-              ✓ 已提交，工作流 id: {props.submitOk}
+              {t('welcome.step2.submitted', { id: props.submitOk })}
             </p>
           )}
           {props.submitErr && (
             <p className="mt-3 rounded-md border border-error bg-error/10 px-3 py-2 text-xs text-error">
-              提交失败: {props.submitErr}
+              {t('welcome.step2.submitFailed', { error: props.submitErr })}
             </p>
           )}
         </>
@@ -321,10 +326,10 @@ function Step2(props: {
       <Footer
         onBack={props.onBack}
         onNext={props.onSubmit}
-        nextLabel={props.submitting ? '提交中…' : '提交示例任务'}
+        nextLabel={props.submitting ? t('welcome.step2.submitting') : t('welcome.step2.submitLabel')}
         nextDisabled={props.submitting || !!props.submitOk}
         onSkip={props.onSkip}
-        skipLabel="跳过，先到工作台"
+        skipLabel={t('welcome.step2.skipLabel')}
       />
     </Card>
   );
@@ -333,17 +338,18 @@ function Step2(props: {
 // ── Step 3 ──────────────────────────────────────────────────────────────
 
 function Step3(props: { onEnter: () => void; onBack: () => void }) {
+  const { t } = useTranslation();
   return (
-    <Card title="第 3 步 — 进入工作台" subtitle="准备好了。可以随时到设置中添加更多供应商或自定义路由站。">
+    <Card title={t('welcome.step3.title')} subtitle={t('welcome.step3.subtitle')}>
       <ul className="space-y-2 text-sm text-text-primary">
-        <li>• 在底部命令栏键入指令，比如「给项目加单元测试」</li>
-        <li>• 设置 → 供应商 管理 API Key 和自定义路由站</li>
-        <li>• 设置 → 关于 查看版本号 + 日志路径 + 上报问题</li>
+        <li>{t('welcome.step3.hint1')}</li>
+        <li>{t('welcome.step3.hint2')}</li>
+        <li>{t('welcome.step3.hint3')}</li>
       </ul>
       <Footer
         onBack={props.onBack}
         onNext={props.onEnter}
-        nextLabel="进入工作台 →"
+        nextLabel={t('welcome.step3.confirmLabel')}
       />
     </Card>
   );
@@ -391,6 +397,7 @@ function Footer(props: {
   skipLabel?: string;
   skipDisabled?: boolean;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="mt-6 flex items-center justify-between">
       {props.onBack ? (
@@ -399,7 +406,7 @@ function Footer(props: {
           onClick={props.onBack}
           className="text-sm text-text-secondary hover:text-text-primary"
         >
-          ← 上一步
+          {t('welcome.footer.back')}
         </button>
       ) : (
         <span />
@@ -412,7 +419,7 @@ function Footer(props: {
             disabled={props.skipDisabled}
             className="text-sm text-text-secondary hover:text-text-primary disabled:opacity-50"
           >
-            {props.skipLabel ?? '跳过'}
+            {props.skipLabel ?? t('welcome.footer.skip')}
           </button>
         )}
         <button

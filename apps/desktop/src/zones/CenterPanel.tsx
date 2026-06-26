@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Card, ReasoningBubble, ReviewVerdict } from '@flowntier/ui';
 
 export interface CenterPanelProps {
@@ -27,20 +28,21 @@ export interface CenterPanelProps {
  *                              shortcut.
  */
 export function CenterPanel({ chiefCard, hasActiveWorkflow, onTrySample }: CenterPanelProps) {
+  const { t } = useTranslation();
   if (!hasActiveWorkflow) {
     return (
       <div className="flex flex-col gap-3">
         <Card>
           <div className="flex flex-col items-start gap-3 py-6 text-center">
             <div className="self-center text-3xl">▶</div>
-            <h3 className="text-base font-semibold text-text-primary">还没有工作流</h3>
+            <h3 className="text-base font-semibold text-text-primary">{t('centerPanel.emptyTitle')}</h3>
             <p className="text-sm text-text-secondary">
-              在下方命令栏键入一个任务，比如:
+              {t('centerPanel.emptyHint')}
             </p>
             <ul className="self-start space-y-1 text-left text-sm text-text-secondary">
-              <li>• <span className="font-mono text-xs">给项目加单元测试</span></li>
-              <li>• <span className="font-mono text-xs">实现 POST /auth/login 接口</span></li>
-              <li>• <span className="font-mono text-xs">重构 src/components/Sidebar.tsx</span></li>
+              <li>• <span className="font-mono text-xs">{t('centerPanel.exampleAddTests')}</span></li>
+              <li>• <span className="font-mono text-xs">{t('centerPanel.exampleAuth')}</span></li>
+              <li>• <span className="font-mono text-xs">{t('centerPanel.exampleRefactor')}</span></li>
             </ul>
             {onTrySample && (
               <button
@@ -48,7 +50,7 @@ export function CenterPanel({ chiefCard, hasActiveWorkflow, onTrySample }: Cente
                 onClick={onTrySample}
                 className="mt-2 self-center rounded-md bg-accent px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90"
               >
-                或试试示例任务 →
+                {t('centerPanel.orTrySample')}
               </button>
             )}
           </div>
@@ -62,20 +64,20 @@ export function CenterPanel({ chiefCard, hasActiveWorkflow, onTrySample }: Cente
       {chiefCard}
 
       <ReasoningBubble
-        agentName="主理"
+        agentName={t('perTask.agent.chief')}
         roleColorClass="border-t-chief"
-        step="规划中 — 草拟 API 设计"
-        body="正在草拟 4 个任务的计划：后端 /login 接口、前端 LoginForm、数据库 users 表、单元测试。预计输入 9k tokens，输出 4k。"
-        ago="2 秒前"
+        step={t('centerPanel.activeStep')}
+        body={t('centerPanel.activeBody')}
+        ago={t('centerPanel.agoSeconds', { seconds: 2 })}
       />
 
       <Card>
-        <h3 className="mb-2 text-sm font-semibold">审核员 B — 架构审查</h3>
+        <h3 className="mb-2 text-sm font-semibold">{t('centerPanel.reviewHeading')}</h3>
         <ReviewVerdict
           verdict="PASS"
           confidence={0.87}
           issues={[]}
-          summary="模块边界清晰，鉴权模块与路由处理器解耦，结构良好。"
+          summary={t('centerPanel.reviewSummary')}
         />
       </Card>
     </div>
