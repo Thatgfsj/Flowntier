@@ -199,7 +199,7 @@ const zhCN = {
   'settings.models.modelExists': '模型 {{id}} 已存在',
   'settings.error.customAdd': '添加自定义中转站',
   'settings.error.alreadyAdded': '已添加',
-  // ── Polish 14 + 14-prime: Welcome + CenterPanel + PerTaskConsole ─
+// ── Polish 14 + 14-prime: Welcome + CenterPanel + PerTaskConsole ─
   'welcome.progress.providers': '添加供应商',
   'welcome.progress.sample': '示例任务',
   'welcome.progress.enter': '开始使用',
@@ -271,6 +271,21 @@ const zhCN = {
   'settings.about.searchBugScanned': '已扫描 {{count}} 个文件，命中 {{matches}} 个匹配行。',
   'settings.about.openLogsFolder': '打开日志文件夹',
   'settings.about.openLogsFolderHint': '在系统文件管理器中查看完整日志。',
+
+  // ── Polish 16: WorkdirSetup (NWT embedding Step B) ──
+  'workdir.title': '设置工作目录',
+  'workdir.subtitleFirst': '在 AI 开始工作前，请选一个本地目录作为项目根目录。每个新项目会作为子目录自动创建。',
+  'workdir.subtitleSettings': '更换工作目录。新建的项目会作为子目录自动创建在这里。',
+  'workdir.placeholder': '/Users/me/projects',
+  'workdir.browse': '浏览',
+  'workdir.hint': '提示：可以是空目录。子目录会按任务自动创建。',
+  'workdir.skip': '稍后设置',
+  'workdir.confirmFirst': '确认并开始',
+  'workdir.confirmSettings': '保存',
+  'workdir.errorEmpty': '请输入路径或点击浏览',
+  'workdir.errorPick': '选择目录失败：{{error}}',
+  'workdir.pickTitle': '选择工作目录',
+
   // ── Drift banner (Phase 5) ───────────────────────────
   'drift.message':
     '⚠ Sidecar 运行时版本 (v{{sidecar}}) 低于 shell 期望 (v{{expected}}). 某些功能可能不可用。请重新构建 sidecar。',

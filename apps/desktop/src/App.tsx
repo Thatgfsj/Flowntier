@@ -3,7 +3,9 @@ import { useTranslation } from 'react-i18next';
 import { check as checkUpdaterPlugin } from '@tauri-apps/plugin-updater';
 import { checkForUpdate, installUpdate, type UpdateBanner } from './lib/updater';
 import { kvGet, kvSet } from './lib/api.js';
+import { initWorkspace as nwtInit } from './tools/nwt.js';
 import { Welcome } from './components/Welcome';
+import { WorkdirSetup } from './components/WorkdirSetup';
 import { PhaseTimeline, AgentCard, Card, type PhaseState, type AgentStatus } from '@flowntier/ui';
 import type { WfEvent } from '@flowntier/shared';
 import { TopBar } from './zones/TopBar.js';
@@ -180,6 +182,31 @@ export function App() {
         // to the main dashboard rather than blocking the user.
         console.warn('[App] kv_get(first_run) failed; defaulting to dashboard:', e);
         setFirstRun(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // v0.4-NWT: workspace workdir. Read on mount; if null, show
+  // the WorkdirSetup full-screen dialog before the main dashboard.
+  // The dialog is mandatory on first launch (the AI can't create
+  // project sub-directories without a workdir to put them in).
+  const [workdir, setWorkdir] = useState<string | null>(null);
+  const [workdirReady, setWorkdirReady] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const r = await invoke<string | null>('get_workdir');
+        if (cancelled) return;
+        setWorkdir(r);
+      } catch (e) {
+        console.warn('[App] get_workdir failed; defaulting to dashboard:', e);
+        setWorkdir('');  // empty string = "skipped"
+      } finally {
+        if (!cancelled) setWorkdirReady(true);
       }
     })();
     return () => {
@@ -390,6 +417,15 @@ export function App() {
     // Events arrive via the useEventStream() hook above (Tauri
     // `wf:event` events forwarded from the events named pipe).
     try {
+      // NWT Step F: also call the Rust-side set_nwt_root on
+      // every workflow start so the agent loop (which uses
+      // global state, not React state) has the right path.
+      if (workdir && workdir.length > 0) {
+        try { await kvSet('nwt_root', workdir); } catch (e) {
+          console.warn('[App] kv_set(nwt_root) failed:', e);
+        }
+      }
+
       // Use Tauri invoke to start workflow
       const data = await invoke<{ id: string }>('start_workflow_cmd', { text });
       setCurrentWfId(data.id);
@@ -440,9 +476,43 @@ export function App() {
     void startRealWorkflow(text);
   };
 
-  // First-run gate: show Welcome until the user clicks "进入工作台".
-  // firstRun === null means we're still loading the kv value;
-  // show a blank screen rather than a flash of the dashboard.
+  // Step 0: workdir not yet checked.
+  if (!workdirReady) {
+    return <div className="h-screen w-screen bg-surface-1" />;
+  }
+  // Step 1: workdir not set. Show the WorkdirSetup dialog (mandatory
+  // on first launch). User can either pick a directory or skip
+  // for now (advanced users); if skipped, workdir is "" and the
+  // dialog re-shows on next launch.
+  if (workdir === null) {
+    return (
+      <WorkdirSetup
+        initialPath=""
+        mode="first-launch"
+        onConfirm={async (p) => {
+          try {
+            await invoke('set_workdir', { path: p });
+            setWorkdir(p);
+            // NWT embedding Step F: the nwt_log tool needs the
+            // workspace root. Persist it both client-side (TS
+            // initWorkspace) and Rust-side (set_nwt_root called
+            // by the React effect below). The two implementations
+            // write the same data format.
+            try { nwtInit(p); } catch (e) {
+              console.warn('[App] nwt init (TS) failed:', e);
+            }
+          } catch (e) {
+            console.error('[App] set_workdir failed:', e);
+          }
+        }}
+        onSkip={() => setWorkdir('')}
+      />
+    );
+  }
+  // Step 2: first-run gate. Show Welcome until the user clicks
+  // "进入工作台". firstRun === null means we're still loading
+  // the kv value; show a blank screen rather than a flash of
+  // the dashboard.
   if (firstRun === null) {
     return <div className="h-screen w-screen bg-surface-1" />;
   }

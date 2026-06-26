@@ -99,7 +99,8 @@ pub fn system_prompt<S: Serialize>(role: Role, tool_list: S) -> String {
         Role::Worker => WORKER,
         Role::Reporter => REPORTER,
     };
-    template.replace("{tool_list}", &tool_list_json)
+    let with_tools = template.replace("{tool_list}", &tool_list_json);
+    format!("{with_tools}{NWT_INSTRUCTION}")
 }
 
 // ──────────────────────────────────────────────────────────────────────
@@ -363,6 +364,23 @@ const REPORTER: &str = r#"你是 Flowntier 的「汇报」(agent:reporter)。
 - 每条 bullet 控制在 20 字以内
 - 如果有失败的部分，**必须如实写出来**"#;
 
+
+const NWT_INSTRUCTION: &str = r#"# 项目记忆 (neuroweave-timeline)
+- 你有一个工具 `nwt_log` 可以把事件记到项目根目录的 `.nwt/timeline/`
+  里,跟上游 nwt CLI 共用同一种数据格式 (id 是 6 位零填充的数).
+- 每次完成一次有意义的步骤 (文件改动 / 重构 / 配置修改 / 一次
+  成功的 build / 解决了一个 bug),用 `nwt_log` 写一条记录:
+    - task: 短命令式标题 (例如 Fix login bug)
+    - summary: 1-2 句话说清楚做了什么
+    - reason: **为什么** 做这件事 (上下文 / 动机)
+    - files: (可选) 改动的文件路径,项目根目录的相对路径
+    - tags: (可选) 自由标签 (例如 ["bugfix", "refactor"])
+- 哪些**不**值得记: 单行拼写错误、空格调整、不影响行为的 import
+  排序 — 不要为这些调用 nwt_log,否则日志会被噪音淹没.
+- 这一段不是用户提醒; 看到这一段本身就意味着你应该自动判断
+  要不要调用 nwt_log. 不需要再问用户
+"#;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -469,4 +487,22 @@ mod tests {
             );
         }
     }
+    #[test]
+    fn every_prompt_has_nwt_section() {
+        for role in [
+            Role::Chief,
+            Role::BugHunter,
+            Role::Reviewer,
+            Role::Planner,
+            Role::Worker,
+            Role::Reporter,
+        ] {
+            let p = system_prompt(role, "[]");
+            assert!(
+                p.contains("neuroweave-timeline"),
+                "{role:?}: NWT instruction not in prompt"
+            );
+        }
+    }
+
 }
