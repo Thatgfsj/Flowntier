@@ -36,6 +36,10 @@ interface ErrorBoundaryProps {
 interface ErrorBoundaryState {
   error: Error | null;
   componentStack: string | null;
+  /** Stable 8-char hex code derived from FNV-1a hash of the
+   *  error message + first line of stack. Used as a unique
+   *  identifier the user can paste into a bug report. */
+  errorCode: string | null;
   /** Rolling buffer of console.error / console.warn captured
    *  between mount and the current error. Capped at 50 entries. */
   capturedLogs: string[];
@@ -43,10 +47,24 @@ interface ErrorBoundaryState {
 
 const MAX_CAPTURED_LOGS = 50;
 
+
+// ── FNV-1a 32-bit hash (no dep, just inline) ───────────────────
+function fnv1a(s: string): string {
+  let h = 0x811c9dc5 >>> 0;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return ('00000000' + h.toString(16)).slice(-8);
+}
+
+
+
 export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
   override state: ErrorBoundaryState = {
     error: null,
     componentStack: null,
+    errorCode: null,
     capturedLogs: [],
   };
 
@@ -93,7 +111,10 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
       // that's fine, we already have it in capturedLogs.
       console.warn('[ErrorBoundary] log_frontend_error failed:', e);
     });
-    this.setState({ componentStack: info.componentStack ?? null });
+    this.setState({
+      componentStack: info.componentStack ?? null,
+      errorCode: 'FE-' + fnv1a((error.message ?? '') + '|' + (error.stack?.split('\n')[0] ?? '')),
+    });
   }
 
   private appendLog(level: 'error' | 'warn', args: unknown[]): void {
@@ -143,9 +164,9 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     const err = this.state.error;
     const params = new URLSearchParams({
       labels: 'bug',
-      title: `v${this.props.appVersion}: ${(err?.message ?? 'crash').slice(0, 80)}`,
+      title: `[${this.state.errorCode ?? 'FE-????'}] v${this.props.appVersion}: ${(err?.message ?? 'crash').slice(0, 60)}`,
       body: [
-        '**What happened**',
+        '**Error code**: `' + (this.state.errorCode ?? 'FE-????') + '`',
         '',
         '_(describe what you were doing)_',
         '',
@@ -202,6 +223,14 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
                 <span className="ml-2 text-sm font-normal text-text-secondary">
                   · Build {buildSha}
                 </span>
+              )}
+              {this.state.errorCode && (
+                <code
+                  aria-label="Error code (paste this into bug reports)"
+                  className="ml-2 select-all whitespace-nowrap rounded border border-error/40 bg-error/10 px-2 py-0.5 font-mono text-sm font-normal text-error"
+                >
+                  {this.state.errorCode}
+                </code>
               )}
             </h1>
             <p className="mt-2 text-sm text-text-secondary">
