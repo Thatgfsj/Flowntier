@@ -41,3 +41,6 @@ uv.lock         text eol=lf
 docs/linguist-generated=true
 *.min.js        linguist-generated=true
 *.min.css       linguist-generated=true
+
+# nwt memory storage — force LF (Python on Windows writes CRLF)
+/.nwt/**        text eol=lf

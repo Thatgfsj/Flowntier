@@ -1,0 +1,22 @@
+{
+  "id": "000004",
+  "timestamp": "2026-06-25T17:20:09Z",
+  "task": "Persistent secrets (OS keystore + AES-GCM) + real provider endpoints + router fix",
+  "summary": "Persistent secrets (OS keystore + AES-GCM) + real provider endpoints + router fix",
+  "reason": "v0.3 stored no API keys; Settings showed empty provider list. v0.4: DPAPI/Keychain/libsecret (keyring 3.x) + AES-256-GCM with AAD binding, fallback master.key file for headless Linux. 9 built-in presets, custom relay stations, /api/providers/{id}/models live fetch + 1h cache, dispatcher path-pattern matching for {name}/{id} placeholders.",
+  "files": [
+    "crates/pipe-server/src/secrets/{mod",
+    "fallback}.rs",
+    "crates/pipe-server/src/providers.rs",
+    "crates/pipe-server/src/handlers.rs",
+    "crates/pipe-server/src/dispatcher.rs",
+    "crates/storage/migrations/0003_secrets_and_providers.sql",
+    "crates/storage/src/lib.rs"
+  ],
+  "tags": [
+    "phase-3",
+    "secrets",
+    "providers",
+    "cryptography"
+  ]
+}

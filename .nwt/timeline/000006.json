@@ -1,0 +1,17 @@
+{
+  "id": "000006",
+  "timestamp": "2026-06-25T17:20:10Z",
+  "task": "Sidecar version handshake + drift banner",
+  "summary": "Sidecar version handshake + drift banner",
+  "reason": "v0.3 had no way to detect shell/sidecar version drift. v0.4: GET /api/rpc/version returns sidecar + min_compatible; if sidecar < min_compatible, App.tsx shows a DriftBanner above TopBar with persistent dismiss keyed by sidecar version (kv.drift_dismissed_for_version).",
+  "files": [
+    "crates/pipe-server/src/handlers.rs",
+    "apps/desktop/src-tauri/src/lib.rs",
+    "apps/desktop/src/App.tsx"
+  ],
+  "tags": [
+    "phase-5",
+    "versioning",
+    "diagnostics"
+  ]
+}

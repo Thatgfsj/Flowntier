@@ -1,0 +1,20 @@
+{
+  "id": "000008",
+  "timestamp": "2026-06-26T01:25:05Z",
+  "task": "v0.4-rc1 tail cleanup: 3 stale TODOs + 8 unused imports",
+  "summary": "v0.4-rc1 tail cleanup: 3 stale TODOs + 8 unused imports",
+  "reason": "Chairman '2. 自己看看, 处理掉之前剩下的尾巴'. 1) handlers.rs:406 no-op stub note bumped to v0.5. 2) SECURITY.md:27 placeholder email clarified (address reserved, fall back to GitHub issue). 3) 0002 SQL comment 'see docs/RENAME_FLOWNTIER.md (TODO)' replaced with the actual rollback SQL inline. 4) fallback.rs: gate AES + NONCE_LEN imports inside cfg(test) mod; Aead/KeyInit trait imports added for encrypt/decrypt; path() marked #[allow(dead_code)] with docstring. 5) handlers.rs: list_models destructure trimmed to (base_url, has_live); refresh_stale_caches dropped unused providers load with explanation. Total: 8 unused-import warnings eliminated.",
+  "files": [
+    "crates/pipe-server/src/handlers.rs",
+    "crates/pipe-server/src/secrets/{mod",
+    "fallback}.rs",
+    "crates/storage/migrations/0002_rename_aco_to_flowntier.sql",
+    "docs/SECURITY.md"
+  ],
+  "tags": [
+    "polish",
+    "tail-cleanup",
+    "post-rc1",
+    "chairman-directive"
+  ]
+}

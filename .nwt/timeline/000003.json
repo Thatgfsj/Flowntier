@@ -1,0 +1,24 @@
+{
+  "id": "000003",
+  "timestamp": "2026-06-25T17:20:09Z",
+  "task": "Frontend safety net: ErrorBoundary + i18n + persistent log + CSP",
+  "summary": "Frontend safety net: ErrorBoundary + i18n + persistent log + CSP",
+  "reason": "v0.3 silent crash on uncaught error, no log file, CSP=allow-all. v0.4 wraps React in ErrorBoundary with copy/restart/report, daily-rolling log file via tracing-appender, strict CSP via Tauri 2 schema.",
+  "files": [
+    "apps/desktop/src/components/ErrorBoundary.tsx",
+    "apps/desktop/src/lib/updater.ts",
+    "apps/desktop/src/i18n/{index",
+    "zh-CN",
+    "en-US}.ts",
+    "apps/desktop/src/main.tsx",
+    "crates/tauri-core/src/logging.rs",
+    "apps/desktop/src-tauri/src/lib.rs",
+    "apps/desktop/src-tauri/tauri.conf.json"
+  ],
+  "tags": [
+    "phase-2",
+    "frontend",
+    "resilience",
+    "i18n"
+  ]
+}

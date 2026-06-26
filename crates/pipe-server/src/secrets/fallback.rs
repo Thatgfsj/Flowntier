@@ -20,14 +20,12 @@
 
 use std::path::{Path, PathBuf};
 
-use aes_gcm::aead::{Aead, KeyInit};
-use aes_gcm::{Aes256Gcm, Key, Nonce};
 use anyhow::{Context, Result};
 use base64::engine::general_purpose::STANDARD as B64;
 use base64::Engine;
 use rand::RngCore;
 
-use super::{DEK_LEN, NONCE_LEN};
+use super::DEK_LEN;
 
 const MASTER_KEY_FILENAME: &str = "master.key";
 
@@ -82,6 +80,12 @@ impl FallbackKeychain {
     }
 
     /// Path to the master-key file (used by tests + diagnostics).
+    /// Path to the master-key file. Used by tests + diagnostics.
+    /// `#[allow(dead_code)]` because the production code path
+    /// reads through the keyring (or this fallback) and never
+    /// asks for the file path; only the `secrets/` test suite
+    /// needs to inspect it.
+    #[allow(dead_code)]
     pub fn path(&self) -> &Path {
         &self.path
     }
@@ -105,7 +109,14 @@ fn restrict_permissions(_path: &Path) {
 
 #[cfg(test)]
 mod tests {
+    use aes_gcm::aead::{Aead, KeyInit, Payload};
+    use aes_gcm::{Aes256Gcm, Key, Nonce};
+
     use super::*;
+    // DEK_LEN / NONCE_LEN live in the parent secrets module
+    // (mod.rs); `super::*` only re-exports fallback.rs's own
+    // items, so we import them from the parent path explicitly.
+    use crate::secrets::{DEK_LEN, NONCE_LEN};
 
     #[test]
     fn open_or_create_idempotent() {
@@ -135,7 +146,7 @@ mod tests {
         let ct = cipher
             .encrypt(
                 nonce,
-                aes_gcm::aead::Payload {
+                Payload {
                     msg: plaintext,
                     aad: b"TEST_AAD",
                 },
@@ -144,7 +155,7 @@ mod tests {
         let pt = cipher
             .decrypt(
                 nonce,
-                aes_gcm::aead::Payload {
+                Payload {
                     msg: &ct,
                     aad: b"TEST_AAD",
                 },

@@ -1,0 +1,17 @@
+{
+  "id": "000005",
+  "timestamp": "2026-06-25T17:20:09Z",
+  "task": "Welcome screen + first-run flow + empty-state CenterPanel",
+  "summary": "Welcome screen + first-run flow + empty-state CenterPanel",
+  "reason": "v0.3 first launch was a blank dashboard. v0.4: 3-step Welcome (provider quick-add, sample workflow, enter workspace), reads kv.first_run on mount, renders empty-state card with 'try sample' button when no workflow is active.",
+  "files": [
+    "apps/desktop/src/components/Welcome.tsx",
+    "apps/desktop/src/zones/CenterPanel.tsx",
+    "apps/desktop/src/App.tsx"
+  ],
+  "tags": [
+    "phase-4",
+    "onboarding",
+    "ux"
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "id": "000001",
+  "timestamp": "2026-06-25T17:19:33Z",
+  "task": "Brand rename: aco -> Flowntier",
+  "summary": "Brand rename: aco -> Flowntier",
+  "reason": "aco (Agent Company OS) too hard to say; v0.3 picked Flowntier = Flow + Frontier. Chairman 2026-06-25",
+  "files": [
+    "README.md",
+    "CONTRIBUTING.md",
+    "docs/FAQ.md",
+    "CHANGELOG.md",
+    ".gitignore",
+    "crates/*/Cargo.toml",
+    "apps/desktop/src-tauri/Cargo.toml",
+    "apps/desktop/src-tauri/tauri.conf.json"
+  ],
+  "tags": [
+    "rebrand",
+    "phase-0"
+  ]
+}

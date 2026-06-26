@@ -403,7 +403,7 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
                 200,
                 json!({
                     "ok": true,
-                    "note": "router role update accepted (no-op stub); v0.4 will persist the role -> model mapping.",
+                    "note": "router role update accepted (no-op stub); v0.5 will persist the role -> model mapping via a new role_model_override table.",
                 }),
             ))
         })
@@ -658,10 +658,12 @@ async fn list_models(
         }
     }
 
-    // Resolve provider (preset or custom).
-    let (kind, base_url, has_live, default_model) = if let Some(preset) = crate::providers::get(&id) {
-        (preset.kind.to_string(), preset.base_url.to_string(),
-         preset.has_live_models_endpoint, preset.default_model.to_string())
+    // Resolve provider (preset or custom). Only base_url and
+    // has_live are used downstream; kind + default_model are
+    // extracted for clarity but ignored (they're available via
+    // the provider row if a future caller needs them).
+    let (base_url, has_live) = if let Some(preset) = crate::providers::get(&id) {
+        (preset.base_url.to_string(), preset.has_live_models_endpoint)
     } else {
         // Look up custom_provider.
         let custom = match state.repo.get_custom_provider(&id).await
@@ -669,9 +671,7 @@ async fn list_models(
             Some(c) => c,
             None => return Ok((404, json!({ "error": format!("unknown provider: {id}") }))),
         };
-        (custom.kind.clone(), custom.base_url.clone(),
-         custom.kind == "openai-compatible",
-         custom.default_model.unwrap_or_default())
+        (custom.base_url.clone(), custom.kind == "openai-compatible")
     };
 
     // Anthropic has no /v1/models endpoint — return the hard-coded
@@ -839,7 +839,10 @@ async fn delete_custom_provider(
 /// 1 hour, refresh it in the background. Non-blocking — returns
 /// the number of caches that were stale (and therefore refreshed).
 async fn refresh_stale_caches(state: &Arc<ServerState>) -> usize {
-    let providers = state.repo.list_providers().await.unwrap_or_default();
+    // We iterate the in-memory PRESETS list directly rather than
+    // the `provider` DB table; the override flag (enabled=false)
+    // only affects whether the UI shows the row, not whether the
+    // cache should be populated.
     let custom = state.repo.list_custom_providers().await.unwrap_or_default();
     let now = chrono::Utc::now().timestamp();
     let mut stale = 0;

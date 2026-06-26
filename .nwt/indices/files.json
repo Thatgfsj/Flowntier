@@ -1,0 +1,135 @@
+{
+  "README.md": [
+    "000001"
+  ],
+  "CONTRIBUTING.md": [
+    "000001"
+  ],
+  "docs/FAQ.md": [
+    "000001"
+  ],
+  "CHANGELOG.md": [
+    "000001"
+  ],
+  ".gitignore": [
+    "000001"
+  ],
+  "crates/*/Cargo.toml": [
+    "000001"
+  ],
+  "apps/desktop/src-tauri/Cargo.toml": [
+    "000001"
+  ],
+  "apps/desktop/src-tauri/tauri.conf.json": [
+    "000001",
+    "000002",
+    "000003"
+  ],
+  ".github/workflows/release.yml": [
+    "000002"
+  ],
+  ".github/workflows/ci.yml": [
+    "000002"
+  ],
+  "apps/desktop/src-tauri/icons/": [
+    "000002"
+  ],
+  "apps/desktop/src/lib/updater.ts": [
+    "000002",
+    "000003"
+  ],
+  "apps/desktop/src-tauri/src/lib.rs": [
+    "000002",
+    "000003",
+    "000006"
+  ],
+  "apps/desktop/src/components/ErrorBoundary.tsx": [
+    "000003"
+  ],
+  "apps/desktop/src/i18n/{index": [
+    "000003"
+  ],
+  "zh-CN": [
+    "000003"
+  ],
+  "en-US}.ts": [
+    "000003",
+    "000007"
+  ],
+  "apps/desktop/src/main.tsx": [
+    "000003"
+  ],
+  "crates/tauri-core/src/logging.rs": [
+    "000003"
+  ],
+  "crates/pipe-server/src/secrets/{mod": [
+    "000004",
+    "000008"
+  ],
+  "fallback}.rs": [
+    "000004",
+    "000008"
+  ],
+  "crates/pipe-server/src/providers.rs": [
+    "000004"
+  ],
+  "crates/pipe-server/src/handlers.rs": [
+    "000004",
+    "000006",
+    "000008"
+  ],
+  "crates/pipe-server/src/dispatcher.rs": [
+    "000004"
+  ],
+  "crates/storage/migrations/0003_secrets_and_providers.sql": [
+    "000004"
+  ],
+  "crates/storage/src/lib.rs": [
+    "000004"
+  ],
+  "apps/desktop/src/components/Welcome.tsx": [
+    "000005",
+    "000007"
+  ],
+  "apps/desktop/src/zones/CenterPanel.tsx": [
+    "000005"
+  ],
+  "apps/desktop/src/App.tsx": [
+    "000005",
+    "000006",
+    "000007"
+  ],
+  "apps/desktop/src/i18n/{zh-CN": [
+    "000007"
+  ],
+  "apps/desktop/src/lib/api.ts": [
+    "000007"
+  ],
+  "apps/desktop/src/zones/{TopBar": [
+    "000007"
+  ],
+  "CommandDock": [
+    "000007"
+  ],
+  "BottomConsole": [
+    "000007"
+  ],
+  "Settings": [
+    "000007"
+  ],
+  "CenterPanel}.tsx": [
+    "000007"
+  ],
+  "crates/storage/migrations/0002_rename_aco_to_flowntier.sql": [
+    "000008"
+  ],
+  "docs/SECURITY.md": [
+    "000008"
+  ],
+  ".nwt/metadata.json": [
+    "000009"
+  ],
+  ".nwt/timeline/": [
+    "000009"
+  ]
+}

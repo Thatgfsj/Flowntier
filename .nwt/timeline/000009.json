@@ -1,0 +1,16 @@
+{
+  "id": "000009",
+  "timestamp": "2026-06-26T01:25:19Z",
+  "task": "Initialize nwt (per-project code evolution memory) in Flowntier/.nwt/",
+  "summary": "Initialize nwt (per-project code evolution memory) in Flowntier/.nwt/",
+  "reason": "Chairman: 'nwt 要陪伴 flowntier 一起成熟, 装在哪你自己判断'. Cloned /tmp/nwt-readonly (read-only), then nwt init here. 7 seed events covering Phase 0-5 + Polish 1-4 + 1 cleanup event. .nwt/ tracked in git (project memory, not local secrets).",
+  "files": [
+    ".nwt/metadata.json",
+    ".nwt/timeline/"
+  ],
+  "tags": [
+    "nwt",
+    "memory",
+    "infrastructure"
+  ]
+}

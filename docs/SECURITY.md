@@ -24,9 +24,11 @@
 
 **Do not** file a public GitHub issue for security vulnerabilities.
 
-Email `security@flowntier.dev` (TODO: confirm address before v0.4.0
-release). Include steps to reproduce, version affected, and your
-assessment of severity. Expect an acknowledgement within 72 hours.
+Email `security@flowntier.dev` (the address is reserved but
+not yet provisioned; until it's set up, open a GitHub issue
+labelled `security` instead). Include steps to reproduce,
+version affected, and your assessment of severity. Expect an
+acknowledgement within 72 hours.
 
 ## Threat model (v0.4)
 

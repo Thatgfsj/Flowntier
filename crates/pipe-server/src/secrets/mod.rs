@@ -52,9 +52,10 @@ const KEYRING_SERVICE: &str = "ai.flowntier.desktop";
 const KEYRING_ACCOUNT_DEK: &str = "data-encryption-key-v1";
 
 /// 32 bytes for AES-256.
-const DEK_LEN: usize = 32;
+/// 32 bytes for AES-256.
+pub const DEK_LEN: usize = 32;
 /// 12 bytes is the AES-GCM standard nonce size.
-const NONCE_LEN: usize = 12;
+pub const NONCE_LEN: usize = 12;
 
 /// What the API layer sees. `Metadata` is safe to return to the
 /// UI; `Plaintext` is returned only to internal callers (agent

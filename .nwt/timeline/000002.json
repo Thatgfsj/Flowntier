@@ -1,0 +1,20 @@
+{
+  "id": "000002",
+  "timestamp": "2026-06-25T17:19:45Z",
+  "task": "Release CI + Windows/Linux installers + auto-update",
+  "summary": "Release CI + Windows/Linux installers + auto-update",
+  "reason": "v0.3 had a Python sidecar in release.yml that broke. v0.4 builds Rust sidecar in-job, signs update artifacts with ed25519. Chairman declined macOS in v0.4 (license cost).",
+  "files": [
+    ".github/workflows/release.yml",
+    ".github/workflows/ci.yml",
+    "apps/desktop/src-tauri/tauri.conf.json",
+    "apps/desktop/src-tauri/icons/",
+    "apps/desktop/src/lib/updater.ts",
+    "apps/desktop/src-tauri/src/lib.rs"
+  ],
+  "tags": [
+    "phase-1",
+    "ci",
+    "release"
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "id": "000007",
+  "timestamp": "2026-06-25T17:20:10Z",
+  "task": "Polish 1-4: i18n migrate legacy panels + CenterPanel wiring + Welcome skip-all + DriftBanner i18n+persist",
+  "summary": "Polish 1-4: i18n migrate legacy panels + CenterPanel wiring + Welcome skip-all + DriftBanner i18n+persist",
+  "reason": "Post-rc1 polish: 23 i18n keys migrated from hardcoded Chinese, CenterPanel component now actually used in App.tsx (was dead code), Welcome has a top-right 'skip all' link + skipDisabled prop, DriftBanner uses t() + persistent dismiss kv. 4 squash-merged PRs #10-#13.",
+  "files": [
+    "apps/desktop/src/i18n/{zh-CN",
+    "en-US}.ts",
+    "apps/desktop/src/lib/api.ts",
+    "apps/desktop/src/zones/{TopBar",
+    "CommandDock",
+    "BottomConsole",
+    "Settings",
+    "CenterPanel}.tsx",
+    "apps/desktop/src/components/Welcome.tsx",
+    "apps/desktop/src/App.tsx"
+  ],
+  "tags": [
+    "polish",
+    "post-rc1",
+    "i18n",
+    "ux"
+  ]
+}
