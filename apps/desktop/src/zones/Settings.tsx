@@ -122,8 +122,8 @@ function QuickAddAI({ onSaved }: { onSaved: () => void }) {
             className="w-full rounded border border-border bg-surface-2 px-3 py-2 font-mono text-sm placeholder:text-text-secondary focus:border-chief focus:outline-none focus:ring-2 focus:ring-chief/50"
             onKeyDown={(e) => { if (e.key === 'Enter' && apiKey.trim()) void handleSave(); }}
           />
-          {error && <p className="text-xs text-status-failed">{error}</p>}
-          {success && <p className="text-xs text-status-done">{t('settings.quickAdd.saved')}</p>}
+          {error && <p role="alert" aria-live="polite" className="text-xs text-status-failed">{error}</p>}
+          {success && <p role="status" aria-live="polite" className="text-xs text-status-done">{t('settings.quickAdd.saved')}</p>}
           <button
             type="button"
             onClick={handleSave}
@@ -273,7 +273,7 @@ export function Settings({ open, onClose }: SettingsProps) {
   const sel = snapshot.providers.find((p) => p.id === selected);
 
   return (
-    <div className="fixed inset-0 z-50 flex bg-black/60 backdrop-blur-sm" role="dialog" aria-label={t('topbar.settings')} onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex bg-black/60 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label={t('topbar.settings')} onClick={onClose}>
       <div className="ml-auto flex h-full w-[1100px] max-w-[95vw] flex-col border-l border-border bg-surface-1 shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <header className="flex h-14 shrink-0 items-center justify-between border-b border-border bg-surface-2 px-5">
           <div>
@@ -438,7 +438,7 @@ function Toggle({ on, onChange, disabled }: { on: boolean; onChange: (v: boolean
   const { t } = useTranslation();
   return (
     <button type="button" onClick={(e) => { e.stopPropagation(); onChange(!on); }} disabled={disabled}
-      className={`relative h-5 w-9 rounded-full transition-colors ${on ? 'bg-chief' : 'bg-surface-3'} ${disabled ? 'opacity-40 cursor-not-allowed' : ''}`}
+      className={`relative h-5 w-9 rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-chief/50 ${on ? 'bg-chief' : 'bg-surface-3'} ${disabled ? 'opacity-40 cursor-not-allowed' : ''}`}
       aria-pressed={on} aria-label={t('settings.providers.enabled')}>
       <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all ${on ? 'left-4' : 'left-0.5'}`} />
     </button>
@@ -830,7 +830,7 @@ function ProviderModelManager({
                   {t('settings.models.callingApi', {provider: providerDisplay})}
                 </div>
               ) : error ? (
-                <div className="rounded border border-status-failed/40 bg-status-failed/10 p-3 text-xs text-status-failed">
+                <div role="alert" aria-live="polite" className="rounded border border-status-failed/40 bg-status-failed/10 p-3 text-xs text-status-failed">
                   {error}
                 </div>
               ) : fetched.length === 0 ? (
@@ -1076,8 +1076,8 @@ function CustomProviderForm({ onSaved }: { onSaved: () => void }) {
         </div>
       </div>
 
-      {error && <p className="mt-2 text-[11px] text-red-400">{error}</p>}
-      {success && <p className="mt-2 text-[11px] text-status-done">✓ 添加成功</p>}
+      {error && <p role="alert" aria-live="polite" className="mt-2 text-[11px] text-red-400">{error}</p>}
+      {success && <p role="status" aria-live="polite" className="mt-2 text-[11px] text-status-done">✓ 添加成功</p>}
 
       <div className="mt-3 flex justify-end">
         <button

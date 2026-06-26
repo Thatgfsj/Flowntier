@@ -494,7 +494,7 @@ export function App() {
           />
         </aside>
 
-        <main className="flex-1 overflow-y-auto p-3">
+        <main role="main" aria-label="工作区" className="flex-1 overflow-y-auto p-3">
           <div className="mb-3 rounded-lg border border-border bg-surface-1 p-2">
             <PhaseTimeline
               steps={PHASES.map((p) => ({
