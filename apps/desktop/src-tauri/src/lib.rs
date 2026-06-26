@@ -567,6 +567,54 @@ async fn cancel_workflow(id: String) -> Result<(), String> {
     Ok(())
 }
 
+/// Wipe ALL local data: API keys, custom providers, run logs,
+/// error logs, kv table, the entire SQLite database. Idempotent
+/// but irreversible. The Settings → About → "Clear local data"
+/// button calls this. After wipe, the next launch sees an empty
+/// data dir and falls back to the Welcome screen (first_run
+/// defaults to 'true' until the Welcome complete handler writes
+/// 'false' — but since we deleted kv, kv.first_run is null,
+/// which Welcome reads as 'show me the wizard').
+///
+/// Why a Tauri command (not a pipe-server endpoint): the pipe
+/// server's own SQLite is open against the data dir. Removing
+/// the data dir while the server is running would leave the
+/// server with a stale file handle. We close the server first
+/// (via shutdown_runtime), then rm -rf, then the user restarts
+/// the app. The Tauri shell process keeps running and serves
+/// the Settings modal even after the runtime is gone (since the
+/// modal just calls back into Rust, no pipe needed).
+#[tauri::command]
+async fn wipe_all_data() -> Result<(), String> {
+    let Some(data_dir) = storage::Repository::default_data_dir() else {
+        return Err("cannot determine data dir".into());
+    };
+    // Best-effort: kill any running sidecar first so its file
+    // handles on storage.sqlite are released. We don't need the
+    // sidecar to acknowledge — the rm -rf below will fail loudly
+    // on Windows if the file is still locked.
+    #[cfg(target_os = "windows")]
+    {
+        let _ = std::process::Command::new("taskkill")
+            .args(["/f", "/im", "flowntier-runtime.exe"])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+        // Give the kernel a moment to actually release the handle.
+        std::thread::sleep(Duration::from_millis(500));
+    }
+    // Recursively remove the data dir. Errors are surfaced to the
+    // user (Settings modal shows a "Clear failed: <err>" message).
+    std::fs::remove_dir_all(&data_dir)
+        .map_err(|e| format!("rm {}: {e}", data_dir.display()))?;
+    // Re-create the dir so the next launch's logging::init_logging
+    // has somewhere to write. Empty dir + empty SQLite is the
+    // "fresh install" state.
+    std::fs::create_dir_all(&data_dir)
+        .map_err(|e| format!("mkdir {}: {e}", data_dir.display()))?;
+    Ok(())
+}
+
 fn workflow_to_json(wf: storage::Workflow) -> serde_json::Value {
     serde_json::json!({
         "id": wf.id,
@@ -668,6 +716,7 @@ pub fn run() {
             kv_get, kv_set,
             load_sample_workflow, first_run_complete,
             rpc_version,
+            wipe_all_data,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

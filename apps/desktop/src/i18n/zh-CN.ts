@@ -166,6 +166,15 @@ const zhCN = {
   'settings.quickAdd.errorSaveFailed': '保存失败',
   'settings.quickAdd.errorNoModels': '请至少添加一个模型',
   'settings.providers.siliconflow.desc': 'SiliconFlow (硅基流动)',
+  'settings.about.title': '关于 Flowntier',
+  'settings.about.version': '版本：v{{version}}{{build}}',
+  'settings.about.clearedNotice': '已清除本地数据。下次启动会回到首次运行向导。',
+  'settings.about.clearData': '清除本地数据',
+  'settings.about.clearDataConfirmTitle': '清除所有本地数据？',
+  'settings.about.clearDataConfirmBody': '此操作会删除 %APPDATA%\flowntier\ 下的所有文件：API 密钥、自定义供应商、运行日志、错误日志。无法撤销。',
+  'settings.about.clearDataConfirmYes': '✓ 是，清除所有数据',
+  'settings.about.clearDataConfirmNo': '✗ 否',
+  'settings.about.clearDataError': '清除失败：{{error}}',
   // ── Drift banner (Phase 5) ───────────────────────────
   'drift.message':
     '⚠ Sidecar 运行时版本 (v{{sidecar}}) 低于 shell 期望 (v{{expected}}). 某些功能可能不可用。请重新构建 sidecar。',

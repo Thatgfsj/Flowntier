@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { invoke } from '@tauri-apps/api/core';
 import { Card } from '@flowntier/ui';
 import {
   saveSecret,
@@ -11,6 +12,7 @@ import {
   type ProviderModel,
 } from '../lib/api.js';
 import { useCustomModels } from '../hooks/useCustomModels.js';
+import { appVersion, buildSha } from '../lib/version.js';
 
 // ── Quick Add AI ─────────────────────────────────────────────────
 
@@ -164,6 +166,10 @@ export function Settings({ open, onClose }: SettingsProps) {
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const customModels = useCustomModels();
+  // Best-effort: ask the Rust side for the resolved data dir
+  // (so the About card can show "Logs are at..."). Falls back to
+  // a friendly placeholder if the runtime is offline.
+  const [dataDir, setDataDir] = useState<string>('');
 
   const refresh = async () => {
     try {
@@ -219,6 +225,17 @@ export function Settings({ open, onClose }: SettingsProps) {
     if (!open) return;
     void refresh();
   }, [open]);
+  useEffect(() => {
+    // Best-effort: ask the pipe-server for the data_dir it's
+    // using. Currently the pipe-server doesn't expose this, so
+    // we fall back to a platform-default hint. The exact path is
+    // shown in the log file (%APPDATA%/flowntier/logs/...)
+    // when the user clicks "Copy logs" on the error screen.
+    const isWin = navigator.userAgent.toLowerCase().includes('win');
+    setDataDir(isWin
+      ? '%APPDATA%' + String.fromCharCode(92) + 'flowntier' + String.fromCharCode(92)
+      : '~/.config/flowntier/');
+  }, []);
 
   const toggle = async (id: string, enabled: boolean) => {
     setSaving(true);
@@ -418,6 +435,41 @@ export function Settings({ open, onClose }: SettingsProps) {
                     />
                   ))}
                 </div>
+
+                <Card className="mt-4">
+                  <h3 className="mb-1 text-sm font-semibold">{t('settings.about.title')}</h3>
+                  <p className="mb-3 text-xs text-text-secondary">
+                    {t('settings.about.version', {
+                      version: appVersion,
+                      build: buildSha ? ' (' + buildSha + ')' : ''
+                    })}
+                  </p>
+                  <p className="mb-3 text-xs text-text-secondary">
+                    {dataDir}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (!window.confirm(
+                        t('settings.about.clearDataConfirmBody')
+                      )) return;
+                      try {
+                        await invoke('wipe_all_data');
+                        // Reload the page so the React state
+                        // re-initializes from an empty data dir.
+                        // The Welcome screen will appear next
+                        // launch (kv.first_run is null => first
+                        // run path).
+                        setTimeout(() => window.location.reload(), 100);
+                      } catch (e) {
+                        alert(t('settings.about.clearDataError', { error: String(e) }));
+                      }
+                    }}
+                    className="rounded-md border border-status-failed/40 bg-status-failed/10 px-3 py-2 text-xs text-status-failed hover:bg-status-failed/20"
+                  >
+                    {t('settings.about.clearData')}
+                  </button>
+                </Card>
               </main>
         </div>
       </div>

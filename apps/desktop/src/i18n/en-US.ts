@@ -168,6 +168,15 @@ const enUS: Translations = {
   'settings.quickAdd.errorSaveFailed': 'Save failed',
   'settings.quickAdd.errorNoModels': 'Please add at least one model',
   'settings.providers.siliconflow.desc': 'SiliconFlow',
+  'settings.about.title': 'About Flowntier',
+  'settings.about.version': 'Version: v{{version}}{{build}}',
+  'settings.about.clearedNotice': 'Local data cleared. Next launch will return to the first-run wizard.',
+  'settings.about.clearData': 'Clear local data',
+  'settings.about.clearDataConfirmTitle': 'Clear all local data?',
+  'settings.about.clearDataConfirmBody': 'This deletes everything in %APPDATA%\flowntier\: API keys, custom providers, run logs, error logs. Cannot be undone.',
+  'settings.about.clearDataConfirmYes': '✓ Yes, clear everything',
+  'settings.about.clearDataConfirmNo': '✗ No',
+  'settings.about.clearDataError': 'Clear failed: {{error}}',
   // ── Drift banner (Phase 5) ───────────────────────────
   'drift.message':
     '⚠ Sidecar runtime version (v{{sidecar}}) is older than the shell expects (v{{expected}}). Some features may be unavailable. Please rebuild the sidecar.',
