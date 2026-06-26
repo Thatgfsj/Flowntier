@@ -201,6 +201,18 @@ const enUS: Translations = {
   'settings.models.modelExists': 'Model {{id}} already exists',
   'settings.error.customAdd': 'Add custom relay station',
   'settings.error.alreadyAdded': 'Already added',
+  'workdir.title': 'Set work directory',
+  'workdir.subtitleFirst': 'Pick a local directory as the project root before the AI starts working. Each new project will be auto-created as a sub-directory here.',
+  'workdir.subtitleSettings': 'Change the work directory. New projects will be auto-created as sub-directories here.',
+  'workdir.placeholder': '/Users/me/projects',
+  'workdir.browse': 'Browse',
+  'workdir.hint': 'Tip: can be an empty directory. Sub-directories are auto-created per task.',
+  'workdir.skip': 'Set later',
+  'workdir.confirmFirst': 'Confirm and start',
+  'workdir.confirmSettings': 'Save',
+  'workdir.errorEmpty': 'Please type a path or click Browse',
+  'workdir.errorPick': 'Failed to pick directory: {{error}}',
+  'workdir.pickTitle': 'Pick work directory',
   // ── Drift banner (Phase 5) ───────────────────────────
   'drift.message':
     '⚠ Sidecar runtime version (v{{sidecar}}) is older than the shell expects (v{{expected}}). Some features may be unavailable. Please rebuild the sidecar.',
