@@ -615,6 +615,43 @@ async fn wipe_all_data() -> Result<(), String> {
     Ok(())
 }
 
+
+/// Persist the workspace workdir path. Called from the
+/// WorkdirSetup dialog on first launch (and from Settings >
+/// About > Change workdir). Stores the path in
+/// <data_dir>/workdir.json so it survives quit+relaunch.
+#[tauri::command]
+async fn set_workdir(path: String) -> Result<(), String> {
+    let Some(data_dir) = storage::Repository::default_data_dir() else {
+        return Err("cannot determine data dir".into());
+    };
+    let _ = std::fs::create_dir_all(&data_dir);
+    let p = data_dir.join("workdir.json");
+    let payload = serde_json::json!({ "workdir": path });
+    std::fs::write(&p, serde_json::to_vec_pretty(&payload).map_err(|e| e.to_string())?)
+        .map_err(|e| format!("write {}: {e}", p.display()))?;
+    tracing::info!(path = %path, "Workdir set");
+    Ok(())
+}
+
+/// Read the workspace workdir. Returns null if not yet set
+/// (i.e. first launch before the user has picked a workdir).
+#[tauri::command]
+async fn get_workdir() -> Result<Option<String>, String> {
+    let Some(data_dir) = storage::Repository::default_data_dir() else {
+        return Ok(None);
+    };
+    let p = data_dir.join("workdir.json");
+    if !p.exists() {
+        return Ok(None);
+    }
+    let raw = std::fs::read_to_string(&p)
+        .map_err(|e| format!("read {}: {e}", p.display()))?;
+    let v: serde_json::Value = serde_json::from_str(&raw)
+        .map_err(|e| format!("parse {}: {e}", p.display()))?;
+    Ok(v.get("workdir").and_then(|v| v.as_str()).map(|s| s.to_string()))
+}
+
 fn workflow_to_json(wf: storage::Workflow) -> serde_json::Value {
     serde_json::json!({
         "id": wf.id,
@@ -717,6 +754,7 @@ pub fn run() {
             load_sample_workflow, first_run_complete,
             rpc_version,
             wipe_all_data,
+            get_workdir, set_workdir,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
