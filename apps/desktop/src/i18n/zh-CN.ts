@@ -175,6 +175,15 @@ const zhCN = {
   'settings.about.clearDataConfirmYes': '✓ 是，清除所有数据',
   'settings.about.clearDataConfirmNo': '✗ 否',
   'settings.about.clearDataError': '清除失败：{{error}}',
+  // ── Error fallbacks (Polish 12) ──────────────────
+  'settings.error.saveFailed': '保存失败',
+  'settings.error.alreadyExists': '模型 {{id}} 已存在',
+  'settings.error.invalidId': 'ID 只能包含小写字母、数字和下划线',
+  'settings.error.missingApiKey': '请填写 API Key',
+  'settings.error.invalidBaseUrl': 'Base URL 必须以 http:// 或 https:// 开头',
+  'settings.error.deleteCustomFailed': '删除中转站失败',
+  'settings.error.deleteRole': '删除角色失败',
+  'settings.error.tErr': '错误：{{error}}',
   // ── Drift banner (Phase 5) ───────────────────────────
   'drift.message':
     '⚠ Sidecar 运行时版本 (v{{sidecar}}) 低于 shell 期望 (v{{expected}}). 某些功能可能不可用。请重新构建 sidecar。',
