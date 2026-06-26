@@ -13,6 +13,7 @@ import {
 } from '../lib/api.js';
 import { useCustomModels } from '../hooks/useCustomModels.js';
 import { appVersion, buildSha } from '../lib/version.js';
+import { SearchBugPanel } from '../components/SearchBugPanel.js';
 import { tErr } from '../lib/errs.js';
 
 // ── Quick Add AI ─────────────────────────────────────────────────
@@ -481,6 +482,7 @@ export function Settings({ open, onClose }: SettingsProps) {
                     {t('settings.about.clearData')}
                   </button>
                 </Card>
+                <SearchBugPanel />
               </main>
         </div>
       </div>

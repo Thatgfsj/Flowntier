@@ -230,6 +230,17 @@ const enUS: Translations = {
   // PerTaskConsole
   'perTask.filter': 'Filter:',
   'perTask.task': 'task',
+  // ── Polish 15: search_log UI ───────────────────────
+  'settings.about.searchBug': 'Search my bug',
+  'settings.about.searchBugHint': 'Paste the error code from the error screen (e.g. FE-3a7b9c2d); the app searches the local logs for matching lines.',
+  'settings.about.searchBugPlaceholder': 'FE-xxxxxxxx',
+  'settings.about.searchBugButton': 'Search',
+  'settings.about.searchBugSearching': 'Searching...',
+  'settings.about.searchBugEmpty': 'No matches. The log may have been cleared, or the code is wrong.',
+  'settings.about.searchBugError': 'Search failed: {{error}}',
+  'settings.about.searchBugScanned': 'Scanned {{count}} files, {{matches}} matches.',
+  'settings.about.openLogsFolder': 'Open logs folder',
+  'settings.about.openLogsFolderHint': 'View full logs in the system file manager.',
   // ── Drift banner (Phase 5) ───────────────────────────
   'drift.message':
     '⚠ Sidecar runtime version (v{{sidecar}}) is older than the shell expects (v{{expected}}). Some features may be unavailable. Please rebuild the sidecar.',

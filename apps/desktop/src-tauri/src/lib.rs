@@ -567,6 +567,101 @@ async fn cancel_workflow(id: String) -> Result<(), String> {
     Ok(())
 }
 
+/// Search the daily-rolling log file for lines containing the
+/// given error code (e.g. "FE-3a7b9c2d"). Settings → About →
+/// "Search my bug" panel calls this; the user pastes the code
+/// shown on the ErrorBoundary screen and we surface every log
+/// line that references it.
+///
+/// Returns a JSON envelope:
+///   { "matches": string[], "scanned": number, "truncated": bool }
+///
+/// `matches` is capped at 200 lines (oldest first within each
+/// file, files newest-first across the log dir) so a runaway
+/// code doesn't melt the modal. `truncated` is set if we hit
+/// that cap.
+///
+/// `since` is an ISO-8601 date string (e.g. "2026-06-26") used
+/// to skip older log files. The frontend currently passes null
+/// because the daily rolling files are small enough that
+/// scanning all of them is fine for v0.4. We accept the
+/// parameter so we don't need to bump the schema later.
+///
+/// Panic files (`panic-*.log`) are deliberately excluded —
+/// they have a different format (free-form backtrace dump) and
+/// false-positive heavily on user-provided error codes.
+#[tauri::command]
+fn search_log(code: String, since: Option<String>) -> Result<serde_json::Value, String> {
+    let needle = code.trim();
+    if needle.is_empty() {
+        return Err("code is empty".into());
+    }
+    let Some(data_dir) = storage::Repository::default_data_dir() else {
+        return Err("cannot determine data dir".into());
+    };
+    let log_dir = tauri_core::logging::log_dir(&data_dir);
+    let entries = match std::fs::read_dir(&log_dir) {
+        Ok(e) => e,
+        Err(e) => return Err(format!("read_dir {}: {e}", log_dir.display())),
+    };
+    // Collect (path, modified) so we can scan newest-first. A
+    // user who just hit the error wants to see today's lines
+    // before yesterday's.
+    let mut files: Vec<(std::path::PathBuf, std::time::SystemTime)> = entries
+        .filter_map(|e| e.ok())
+        .filter_map(|e| {
+            let p = e.path();
+            let name = p.file_name()?.to_str()?;
+            if !name.starts_with("flowntier.log") {
+                return None;
+            }
+            if name.starts_with("panic-") {
+                return None;
+            }
+            let meta = e.metadata().ok()?;
+            let mtime = meta.modified().ok()?;
+            Some((p, mtime))
+        })
+        .collect();
+    files.sort_by(|a, b| b.1.cmp(&a.1));
+
+    // `since` is reserved for the v0.5 frontend (when the panel
+    // grows a date picker). For v0.4 the panel always passes
+    // null because daily rolling files are small enough that
+    // scanning all of them is cheap. We accept the param so we
+    // don't have to bump the IPC schema later. Malformed input
+    // is treated as "no filter" so a bad value can't brick the
+    // modal.
+    let _since_ignored = since;
+
+    const MAX_MATCHES: usize = 200;
+    let mut matches: Vec<String> = Vec::new();
+    let mut scanned: usize = 0;
+    let mut truncated = false;
+
+    'outer: for (path, _mtime) in files {
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        for line in text.lines() {
+            scanned += 1;
+            if line.contains(needle) {
+                matches.push(line.to_string());
+                if matches.len() >= MAX_MATCHES {
+                    truncated = true;
+                    break 'outer;
+                }
+            }
+        }
+    }
+
+    Ok(serde_json::json!({
+        "matches": matches,
+        "scanned": scanned,
+        "truncated": truncated,
+    }))
+}
+
 /// Wipe ALL local data: API keys, custom providers, run logs,
 /// error logs, kv table, the entire SQLite database. Idempotent
 /// but irreversible. The Settings → About → "Clear local data"
@@ -717,6 +812,7 @@ pub fn run() {
             load_sample_workflow, first_run_complete,
             rpc_version,
             wipe_all_data,
+            search_log,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

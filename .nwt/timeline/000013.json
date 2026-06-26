@@ -1,0 +1,22 @@
+{
+  "id": "000013",
+  "timestamp": "2026-06-27T10:00:00Z",
+  "task": "Polish 15: error code lookup via Settings > About > 'Search my bug' panel",
+  "summary": "Polish 15: error code lookup via Settings > About > 'Search my bug' panel",
+  "reason": "Chairman: '继续继续' (Polish 15). When the ErrorBoundary catches an error and shows a code (e.g. 'FE-3a7b9c2d'), users need a way to find that code in the logs without leaving the app. Added a new Tauri command `search_log(code, since)` in lib.rs that reads the daily rolling log files in <data_dir>/logs/, filters lines containing the code, and returns {matches, scanned, truncated}. Capped at 200 matches to keep the modal responsive. Panic files are excluded because their format is free-form backtrace. The frontend mounts a new SearchBugPanel component in the Settings > About card with a text input, Enter-to-search, and a pre-formatted result list. 9 new i18n keys were added in both zh-CN and en-US.",
+  "files": [
+    "apps/desktop/src-tauri/src/lib.rs",
+    "apps/desktop/src/components/SearchBugPanel.tsx",
+    "apps/desktop/src/zones/Settings.tsx",
+    "apps/desktop/src/i18n/zh-CN.ts",
+    "apps/desktop/src/i18n/en-US.ts"
+  ],
+  "tags": [
+    "polish-15",
+    "rust",
+    "tauri-command",
+    "i18n",
+    "settings",
+    "error-tracking"
+  ]
+}
