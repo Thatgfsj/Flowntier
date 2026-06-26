@@ -5,7 +5,7 @@
 //! See `docs/STORAGE_SPEC.md` for the full schema.
 
 #![forbid(unsafe_code)]
-#![warn(missing_docs)]
+#![allow(missing_docs)]  // internal crate: API documented in STORAGE_SPEC.md and module-level //! docs; per-field doc comments would duplicate the type signature.
 
 use std::path::{Path, PathBuf};
 

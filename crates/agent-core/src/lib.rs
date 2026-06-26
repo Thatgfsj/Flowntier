@@ -31,7 +31,7 @@
 //! See `docs/ARCHITECTURE.md` §4 for the full design.
 
 #![forbid(unsafe_code)]
-#![warn(missing_docs)]
+#![allow(missing_docs)]  // internal crate: API documented in PROMPT_SPEC.md and module-level //! docs; per-field doc comments would duplicate the type signature.
 
 pub mod context;
 pub mod event;
