@@ -1,0 +1,19 @@
+{
+  "id": "000016",
+  "timestamp": "2026-06-27T12:30:00Z",
+  "task": "BUG-001: nwt.ts uses node:fs/path — build fails because desktop webview is browser",
+  "summary": "BUG-001: nwt.ts uses node:fs/path — build fails because desktop webview is browser",
+  "reason": "Chairman: '及时记录bug, 回头统一修理'. During Polish 16 E2E build attempt: `pnpm tauri build` failed at vite step. Error: src/tools/nwt.ts(39:9): \"join\" is not exported by \"__vite-browser-external\", imported by \"src/tools/nwt.ts\". Vite externalized node:fs and node:path as browser-incompatible stubs. Root cause: apps/desktop/src/tools/nwt.ts is a TS port of upstream nwt Python, but it uses Node built-ins (readFileSync, writeFileSync, readdirSync, existsSync, mkdirSync, unlinkSync, join, relative). The desktop runs in a Tauri webview (browser context, not Node). Two architectural options to fix: (A) move FS ops to Rust side via new Tauri commands (nwt_init, nwt_log, nwt_read, nwt_history, nwt_search, etc.) and have TS call them via invoke(); or (B) keep TS code but use Tauri's `@tauri-apps/plugin-fs` plugin which works in browser context. Option A is more consistent with the existing NWT architecture — Rust side already has crates/agent-core/src/tool/nwt.rs (Step D). Severity: BLOCKING (no build, no release). Repro: pnpm tauri build at 2bcf032.",
+  "files": [
+    "apps/desktop/src/tools/nwt.ts",
+    "apps/desktop/src/App.tsx"
+  ],
+  "tags": [
+    "bug",
+    "build",
+    "nwt",
+    "blocking",
+    "vite",
+    "node-fs"
+  ]
+}
