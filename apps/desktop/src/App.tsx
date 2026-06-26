@@ -125,6 +125,21 @@ export function App() {
   const [agentStatus, setAgentStatus] = useState<AgentStatusMap>({ ...INITIAL_AGENT_STATUS });
   const [events, setEvents] = useState<WfEvent[]>([]);
   const [cmd, setCmd] = useState('');
+  // Recent command history (persisted in localStorage so it
+  // survives quit+relaunch). Most-recent first, capped at 50.
+  // recentCmds is loaded from localStorage lazily; setRecentCmds is
+  // not used at the call site (the only call site uses the setter
+  // inside a callback which TS lint does not detect). Suppress the
+  // unused warning by underscore-prefixing the import.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [recentCmds, setRecentCmds] = useState<string[]>(() => {
+    try {
+      const raw = localStorage.getItem('flowntier.cmd_history');
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed.slice(0, 50) : [];
+    } catch { return []; }
+  });
   const [busy, setBusy] = useState(false);
   const [completed, setCompleted] = useState(false);
   const [milestones, setMilestones] = useState<string[]>([]);
@@ -415,6 +430,13 @@ export function App() {
     }
     const text = cmd.trim() || '实现 POST /auth/login 接口';
     setCmd('');
+    // Push to recent-commands history (most-recent first, deduped,
+    // capped at 50). localStorage so it survives quit+relaunch.
+    setRecentCmds((prev) => {
+      const next = [text, ...prev.filter((c) => c !== text)].slice(0, 50);
+      try { localStorage.setItem('flowntier.cmd_history', JSON.stringify(next)); } catch {}
+      return next;
+    });
     void startRealWorkflow(text);
   };
 
@@ -647,6 +669,7 @@ export function App() {
         onCommandSubmit={handleSubmit}
         busy={busy}
         {...(completed ? { resetLabel: '重置' } : {})}
+        recent={recentCmds}
       />
 
       {/* v0.3 ChatZone — progressive. Collapsed by default; toggle via TopBar. */}

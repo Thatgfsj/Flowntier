@@ -9,6 +9,8 @@ export interface CommandDockProps {
   busy?: boolean;
   /** Optional reset button label (shown when workflow is complete). */
   resetLabel?: string;
+  /** Recent commands for the autocomplete history dropdown. */
+  recent?: string[];
 }
 
 /**
@@ -21,6 +23,7 @@ export function CommandDock({
   onCommandSubmit,
   busy = false,
   resetLabel,
+  recent,
 }: CommandDockProps) {
   const { t } = useTranslation();
   const handleSubmit = (e: FormEvent) => {
@@ -42,6 +45,7 @@ export function CommandDock({
         type="text"
         value={commandInput}
         onChange={(e) => onCommandChange(e.target.value)}
+        list={recent && recent.length > 0 ? 'flowntier-cmd-history' : undefined}
         placeholder={
           isReset
             ? t('commandDock.empty')
@@ -58,6 +62,13 @@ export function CommandDock({
       >
         {isReset ? resetLabel : t('commandDock.submit')}
       </button>
+      {recent && recent.length > 0 && (
+        <datalist id="flowntier-cmd-history">
+          {recent.slice(0, 10).map((cmd, i) => (
+            <option key={i} value={cmd} />
+          ))}
+        </datalist>
+      )}
     </form>
   );
 }
