@@ -228,6 +228,17 @@ const zhCN = {
   // PerTaskConsole
   'perTask.filter': '过滤:',
   'perTask.task': '任务',
+  // ── Polish 15: search_log UI ───────────────────────
+  'settings.about.searchBug': '搜索我的 bug',
+  'settings.about.searchBugHint': '粘贴 ErrorBoundary 上的错误码 (例如 FE-3a7b9c2d)，会在本地日志中查找匹配行。',
+  'settings.about.searchBugPlaceholder': 'FE-xxxxxxxx',
+  'settings.about.searchBugButton': '搜索',
+  'settings.about.searchBugSearching': '搜索中...',
+  'settings.about.searchBugEmpty': '没有匹配的行。可能日志已被清理，或者错误码输入有误。',
+  'settings.about.searchBugError': '搜索失败: {{error}}',
+  'settings.about.searchBugScanned': '已扫描 {{count}} 个文件，命中 {{matches}} 个匹配行。',
+  'settings.about.openLogsFolder': '打开日志文件夹',
+  'settings.about.openLogsFolderHint': '在系统文件管理器中查看完整日志。',
   // ── Drift banner (Phase 5) ───────────────────────────
   'drift.message':
     '⚠ Sidecar 运行时版本 (v{{sidecar}}) 低于 shell 期望 (v{{expected}}). 某些功能可能不可用。请重新构建 sidecar。',

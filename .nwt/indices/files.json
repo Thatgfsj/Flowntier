@@ -42,11 +42,15 @@
     "000002",
     "000003",
     "000006",
-    "000010"
+    "000010",
+    "000013"
   ],
   "apps/desktop/src/components/ErrorBoundary.tsx": [
     "000003",
     "000010"
+  ],
+  "apps/desktop/src/components/SearchBugPanel.tsx": [
+    "000013"
   ],
   "apps/desktop/src/i18n/{index": [
     "000003"
@@ -143,14 +147,19 @@
   ],
   "apps/desktop/src/i18n/zh-CN.ts": [
     "000010",
-    "000011"
+    "000011",
+    "000012",
+    "000013"
   ],
   "apps/desktop/src/i18n/en-US.ts": [
     "000010",
-    "000011"
+    "000011",
+    "000012",
+    "000013"
   ],
   "apps/desktop/src/zones/Settings.tsx": [
-    "000010"
+    "000010",
+    "000013"
   ],
   "apps/desktop/src/zones/TopBar.tsx": [
     "000010"

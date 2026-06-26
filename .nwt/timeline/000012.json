@@ -1,0 +1,15 @@
+{
+  "id": "000012",
+  "timestamp": "2026-06-26T12:34:39Z",
+  "task": "Polish 14: 25+ i18n keys added for Welcome/CenterPanel/PerTaskConsole",
+  "summary": "Polish 14: 25+ i18n keys added for Welcome/CenterPanel/PerTaskConsole",
+  "reason": "Chairman: '继续' (Polish 14). Added 25 new i18n keys for the user-visible strings in Welcome.tsx, CenterPanel.tsx, and PerTaskConsole.tsx. The JSX migration (replacing hardcoded Chinese with t() calls) is deferred to Polish 14-prime because the module-scope Card/Footer helpers in Welcome.tsx need t-injection via props — a non-trivial refactor. The keys are landed first so the vocabulary is locked in.",
+  "files": [
+    "apps/desktop/src/i18n/zh-CN.ts",
+    "apps/desktop/src/i18n/en-US.ts"
+  ],
+  "tags": [
+    "polish-14",
+    "i18n"
+  ]
+}
