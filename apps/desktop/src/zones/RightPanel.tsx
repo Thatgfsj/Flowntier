@@ -31,6 +31,10 @@ const STATE_LABEL: Record<string, string> = {
   UNDER_REVIEW: '评审中',
   REPAIR_REQUESTED: '需修复',
   REPAIRING: '修复中',
+  // BUG-FRONTEND-2 (audit 000026 #86/87): REJECTED was
+  // missing from both maps, so a task in REJECTED state
+  // rendered as "?" + the raw "REJECTED" string.
+  REJECTED: '已驳回',
   APPROVED: '已通过',
   DONE: '完成',
   FAILED: '失败',
@@ -45,6 +49,7 @@ const STATE_ICONS: Record<string, string> = {
   UNDER_REVIEW: '◔',
   REPAIR_REQUESTED: '⚠',
   REPAIRING: '↻',
+  REJECTED: '✗',
   APPROVED: '✓',
   DONE: '✓',
   FAILED: '✗',

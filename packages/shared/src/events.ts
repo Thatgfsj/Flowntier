@@ -56,6 +56,11 @@ export interface ConsoleEvent {
   readonly agent_id: string;
   readonly level: LogLevel;
   readonly message: string;
+  /** ISO 8601 timestamp when the event was emitted (optional;
+   *  older event payloads from before v0.4 may not include it).
+   *  PerTaskConsole uses this for the per-line timestamp; when
+   *  absent we fall back to wall-clock NOW. */
+  readonly ts?: string;
 }
 
 export interface MilestoneEvent {

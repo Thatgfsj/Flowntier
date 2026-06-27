@@ -48,7 +48,7 @@ export function CenterPanel({ chiefCard, hasActiveWorkflow, onTrySample }: Cente
               <button
                 type="button"
                 onClick={onTrySample}
-                className="mt-2 self-center rounded-md bg-accent px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90"
+                className="mt-2 self-center rounded-md bg-chief px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90"
               >
                 {t('centerPanel.orTrySample')}
               </button>
@@ -63,23 +63,34 @@ export function CenterPanel({ chiefCard, hasActiveWorkflow, onTrySample }: Cente
     <div className="flex flex-col gap-3">
       {chiefCard}
 
-      <ReasoningBubble
-        agentName={t('perTask.agent.chief')}
-        roleColorClass="border-t-chief"
-        step={t('centerPanel.activeStep')}
-        body={t('centerPanel.activeBody')}
-        ago={t('centerPanel.agoSeconds', { seconds: 2 })}
-      />
+      {/* BUG-FRONTEND-5 (audit 000026 #80/#81): the previous code
+          rendered TWO ReasoningBubble + TWO ReviewVerdict cards
+          simultaneously when App.tsx passed chiefCard. App.tsx
+          already renders the live versions; this branch is the
+          demo/static content shown when chiefCard is null (i.e.
+          the placeholder UI). Skip the static bubbles when a
+          live chiefCard is supplied. */}
+      {!chiefCard && (
+        <>
+          <ReasoningBubble
+            agentName={t('perTask.agent.chief')}
+            roleColorClass="border-t-chief"
+            step={t('centerPanel.activeStep')}
+            body={t('centerPanel.activeBody')}
+            ago={t('centerPanel.agoSeconds', { seconds: 2 })}
+          />
 
-      <Card>
-        <h3 className="mb-2 text-sm font-semibold">{t('centerPanel.reviewHeading')}</h3>
-        <ReviewVerdict
-          verdict="PASS"
-          confidence={0.87}
-          issues={[]}
-          summary={t('centerPanel.reviewSummary')}
-        />
-      </Card>
+          <Card>
+            <h3 className="mb-2 text-sm font-semibold">{t('centerPanel.reviewHeading')}</h3>
+            <ReviewVerdict
+              verdict="PASS"
+              confidence={0.87}
+              issues={[]}
+              summary={t('centerPanel.reviewSummary')}
+            />
+          </Card>
+        </>
+      )}
     </div>
   );
 }

@@ -682,13 +682,15 @@ export function App() {
                         user_request: string;
                         display_name: string;
                       }>('load_sample_workflow');
-                      // BUG-022 fix (event 000020): the command name
-                      // is `start_workflow_cmd`, not `start_workflow`,
-                      // and the args are flat `{ text }` not wrapped
-                      // in `{ request: { text } }` (per lib.rs:539).
-                      await invoke('start_workflow_cmd', {
-                        text: wf.user_request,
-                      });
+                      // BUG-FRONTEND-3 (audit 000026 #14): the
+                      // previous code only invoked start_workflow_cmd
+                      // and then did nothing — busy/phase states
+                      // never updated, so the dashboard appeared
+                      // unchanged after clicking. Now delegate to
+                      // the same startRealWorkflow path the cmd
+                      // bar uses, so the sample workflow gets the
+                      // exact same UI treatment as a real command.
+                      await startRealWorkflow(wf.user_request);
                     } catch (e) {
                       console.warn('[App] onTrySample failed:', e);
                     }

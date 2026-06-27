@@ -1,0 +1,27 @@
+{
+  "id": "000027",
+  "timestamp": "2026-06-27T18:00:00Z",
+  "task": "FRONTEND-FIX-BATCH: 6 highest-impact frontend bugs fixed (FRONTEND-1..6)",
+  "summary": "FRONTEND-FIX-BATCH: 6 highest-impact frontend bugs fixed (FRONTEND-1..6)",
+  "reason": "Chairman: '你用用截图看看前端, 然后继续记录, 然后再修'. I cannot actually screenshot the GUI from this terminal environment, so I ran a comprehensive static analysis audit (event 000026) that identified 125 frontend issues that would appear in screenshots. This commit fixes the top 6 highest-impact issues. FRONTEND-1 (audit #42): PerTaskConsole timestamps were wall-clock NOW for every line, so old tasks showed lines stamped with the current time — added optional `ts?: string` to ConsoleEvent in packages/shared/src/events.ts and use it when present, fall back to NOW. FRONTEND-2 (audit #86/87): RightPanel's STATE_ICONS and STATE_LABEL were missing REJECTED, so REJECTED tasks rendered as '?' + raw 'REJECTED' string — added the entries. FRONTEND-3 (audit #14): onTrySample invoked start_workflow_cmd but never updated busy/phase state — refactored to call the same startRealWorkflow(text) function that the cmd bar uses. FRONTEND-4 (audit #54): Settings header rendered both 'Saving...' AND 'Saved · HH:MM:SS' simultaneously — now mutually exclusive via if/else. FRONTEND-5 (audit #80/81): CenterPanel in active mode rendered TWO ReasoningBubble + TWO ReviewVerdict cards (one static inside CenterPanel, one dynamic from App.tsx) — now skips the static bubbles when chiefCard is supplied. FRONTEND-6 (audit #83): CenterPanel's 'Or try sample workflow' button used bg-accent (undefined in index.css → invisible/grey) — changed to bg-chief. Validation: 36/36 E2E pass, pnpm typecheck clean, pnpm tauri build --bundles nsis produces Flowntier_0.4.0_x64-setup.exe. Remaining 119 issues from the audit: most are hardcoded Chinese strings throughout App.tsx / LeftRoster / PluginsPanel / ConnectionBanner that won't translate when locale flips — these are v0.5 i18n polish, deferred until chairman's next 'i18n polish' directive.",
+  "files": [
+    "apps/desktop/src/components/PerTaskConsole.tsx",
+    "apps/desktop/src/zones/RightPanel.tsx",
+    "apps/desktop/src/zones/CenterPanel.tsx",
+    "apps/desktop/src/zones/Settings.tsx",
+    "apps/desktop/src/App.tsx",
+    "packages/shared/src/events.ts"
+  ],
+  "tags": [
+    "frontend-fix-batch",
+    "frontend-1",
+    "frontend-2",
+    "frontend-3",
+    "frontend-4",
+    "frontend-5",
+    "frontend-6",
+    "i18n",
+    "ux-polish",
+    "audit-fix"
+  ]
+}

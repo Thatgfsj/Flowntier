@@ -313,8 +313,16 @@ export function Settings({ open, onClose, workdir }: SettingsProps) {
             <p className="text-xs text-text-secondary">{t('settings.headerSubtitle')}</p>
           </div>
           <div className="flex items-center gap-3">
-            {savedAt !== null && <span className="text-xs text-text-secondary">{t('settings.action.savedAt', {time: savedAt})}</span>}
-            {saving && <span className="text-xs text-text-secondary">{t('settings.action.save')}</span>}
+            {/* BUG-FRONTEND-4 (audit 000026 #54): the previous
+                code rendered both "Saving..." and "Saved · HH:MM:SS"
+                simultaneously when saving completes, producing
+                a confusing visual. Now they are mutually exclusive
+                via an if/else. */}
+            {saving ? (
+              <span className="text-xs text-text-secondary">{t('settings.action.save')}</span>
+            ) : savedAt !== null ? (
+              <span className="text-xs text-text-secondary">{t('settings.action.savedAt', {time: savedAt})}</span>
+            ) : null}
             <button type="button" onClick={onClose} className="rounded-md border border-border bg-surface-1 px-3 py-1.5 text-xs text-text-secondary hover:text-primary">{t('settings.action.close')}</button>
           </div>
         </header>

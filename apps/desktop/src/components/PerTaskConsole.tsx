@@ -122,7 +122,13 @@ export function PerTaskConsole({ taskId, events, className }: PerTaskConsoleProp
             return (
               <div key={i} className="flex gap-2 py-0.5">
                 <span className="shrink-0 text-text-secondary">
-                  {shortTime(new Date().toISOString())}
+                  {/* BUG-FRONTEND-1 (audit 000026 #42): the previous
+                      code stamped every console line with the
+                      current wall-clock NOW, so a task from 10
+                      minutes ago showed lines all stamped with
+                      "current time". Now use e.ts when present,
+                      fall back to now. */}
+                  {e.ts ? shortTime(e.ts) : shortTime(new Date().toISOString())}
                 </span>
                 <span className={`shrink-0 ${LEVEL_COLORS[e.level]}`}>
                   {LEVEL_LABELS[e.level]}
