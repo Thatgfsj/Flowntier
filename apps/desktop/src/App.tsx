@@ -287,9 +287,23 @@ export function App() {
         }>('rpc_version');
         if (cancelled) return;
         // Simple semver comparison: split on '.', compare ints.
-        const parse = (s: string) => s.split('.').map((n) => parseInt(n, 10) || 0);
+        // BUG-027 fix (event 000025): bail out if either version
+        // contains a non-numeric segment, instead of silently
+        // treating malformed input as 0 (which always triggers
+        // the drift banner). The sidecar is expected to return
+        // strict semver; if it doesn't, we just don't show the
+        // banner.
+        const parse = (s: string): number[] | null => {
+          const parts = s.split('.').map((n) => parseInt(n, 10));
+          if (parts.some((n) => Number.isNaN(n))) return null;
+          return parts;
+        };
         const a = parse(r.sidecar);
         const b = parse(r.min_compatible);
+        if (a === null || b === null) {
+          console.warn('[App] rpc_version returned non-semver:', r);
+          return;
+        }
         const v = (arr: number[], i: number): number => arr[i] ?? 0;
         // Strict less-than: sidecar < min_compatible.
         const isDrift =

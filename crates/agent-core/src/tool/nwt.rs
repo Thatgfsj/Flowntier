@@ -61,14 +61,20 @@ static NWT_ROOT: Mutex<Option<PathBuf>> = Mutex::new(None);
 /// after the workdir is configured (WorkdirSetup onConfirm) or
 /// after the user picks a project from the dashboard.
 pub fn set_nwt_root(root: PathBuf) {
-    let mut g = NWT_ROOT.lock().expect("NWT_ROOT mutex poisoned");
+    // BUG-040 fix (event 000025): recover from a poisoned mutex
+    // instead of panicking. A panic elsewhere in the process
+    // holding NWT_ROOT would, on the next set_nwt_root call,
+    // panic again and permanently break the nwt_log tool. The
+    // standard `unwrap_or_else(|e| e.into_inner())` recovers the
+    // inner value, allowing the rest of the program to continue.
+    let mut g = NWT_ROOT.lock().unwrap_or_else(|e| e.into_inner());
     *g = Some(root);
 }
 
 /// Clear the workspace root. Called when the user clears all
 /// data or changes workdir.
 pub fn clear_nwt_root() {
-    let mut g = NWT_ROOT.lock().expect("NWT_ROOT mutex poisoned");
+    let mut g = NWT_ROOT.lock().unwrap_or_else(|e| e.into_inner());
     *g = None;
 }
 
@@ -355,7 +361,7 @@ impl Tool for NwtLogTool {
         // nwt-root level so the upstream nwt CLI can navigate
         // them.
         let root = {
-            let g = NWT_ROOT.lock().expect("NWT_ROOT mutex poisoned");
+            let g = NWT_ROOT.lock().unwrap_or_else(|e| e.into_inner());
             g.clone()
         };
         let Some(root) = root else {

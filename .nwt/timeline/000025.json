@@ -1,0 +1,20 @@
+{
+  "id": "000025",
+  "timestamp": "2026-06-27T17:00:00Z",
+  "task": "BUG-FIX-BATCH-5: BUG-027 + BUG-040 (3 LOW bugs fixed)",
+  "summary": "BUG-FIX-BATCH-5: BUG-027 + BUG-040 (3 LOW bugs fixed)",
+  "reason": "Chairman: '继续修复'. Three quick LOW bug fixes. BUG-027 (rpc_version NaN → silent drift banner): App.tsx parse() now returns null if any segment is non-numeric and bails out instead of treating malformed input as 0 (which always triggered the drift banner). The sidecar is expected to return strict semver; if it doesn't, we don't show the banner. BUG-040 (mutex poison panic in nwt.rs): replaced 3 `.expect(\"NWT_ROOT mutex poisoned\")` calls with `unwrap_or_else(|e| e.into_inner())` so a panic elsewhere in the process holding the mutex doesn't permanently break the nwt_log tool. Same pattern already used for INDEX_LOCK in batch-3. Validation: cargo check --workspace clean, pnpm typecheck clean, 36/36 E2E pass. Status: this batch closes the 'easy LOW wins' from the original audit. Remaining LOW bugs are mostly stylistic (cosmetic UX, doc comments, more verbose error messages) — not worth a separate PR each. All MEDIUM and HIGH bugs except BUG-017 (BLOCKING, deferred to v0.5) are now fixed.",
+  "files": [
+    "apps/desktop/src/App.tsx",
+    "crates/agent-core/src/tool/nwt.rs"
+  ],
+  "tags": [
+    "bug-fix-batch",
+    "bug-027",
+    "bug-040",
+    "low",
+    "rpc-version",
+    "mutex-poison",
+    "nwt"
+  ]
+}
