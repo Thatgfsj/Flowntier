@@ -1,0 +1,27 @@
+{
+  "id": "000024",
+  "timestamp": "2026-06-27T16:30:00Z",
+  "task": "BUG-FIX-BATCH-4: BUG-018 + 3 LOW bugs fixed (Settings workdir editor, localStorage warn, trim, prop type)",
+  "summary": "BUG-FIX-BATCH-4: BUG-018 + 3 LOW bugs fixed (Settings workdir editor, localStorage warn, trim, prop type)",
+  "reason": "Chairman: '继续修复'. Fixed BUG-018 (the last outstanding MEDIUM) plus 3 quick LOW bugs in one batch. BUG-018 (kv nwt_root staleness): added 'Change workdir' button in Settings > About card. Uses @tauri-apps/plugin-dialog for directory picker (falls back to window.prompt if unavailable), then calls atomic set_workdir_with_nwt + reloads. New workdir prop plumbed from App.tsx to Settings. 4 new i18n keys for both zh-CN and en-US: changeWorkdir, changeWorkdirPrompt, changeWorkdirError, currentWorkdir. BUG-025 (localStorage quota silent failure): App.tsx setRecentCmds now console.warns on quota exceeded instead of silent swallow. BUG-055 (WorkdirSetup onConfirm prop type drift): prop type widened from `(path: string) => void` to `(path: string) => void | Promise<void>` to match App.tsx's actual async usage. BUG-056 (SearchBugPanel trim-on-keystroke UX bug): trim is now applied only on submit (search() does code.trim()) instead of every keystroke; the previous code truncated intermediate whitespace and made typing feel janky. The onChange handler now just uppercases without trimming. Validation: 36/36 E2E tests pass, pnpm typecheck clean, pnpm tauri build --bundles nsis produces Flowntier_0.4.0_x64-setup.exe. Status: 11 of 12 MEDIUM bugs fixed, plus 4 LOW bugs from the ~30 batch. Only BUG-017 (BLOCKING, kv cross-process sync) remains — deferred to v0.5 (architectural change to pipe-server). Polish 17 (animated transitions) still pending as the final v0.4 polish.",
+  "files": [
+    "apps/desktop/src/App.tsx",
+    "apps/desktop/src/zones/Settings.tsx",
+    "apps/desktop/src/components/SearchBugPanel.tsx",
+    "apps/desktop/src/components/WorkdirSetup.tsx",
+    "apps/desktop/src/i18n/zh-CN.ts",
+    "apps/desktop/src/i18n/en-US.ts"
+  ],
+  "tags": [
+    "bug-fix-batch",
+    "bug-018",
+    "bug-025",
+    "bug-055",
+    "bug-056",
+    "i18n",
+    "workdir-edit",
+    "tauri-dialog",
+    "localStorage",
+    "ux-polish"
+  ]
+}

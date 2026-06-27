@@ -35,8 +35,15 @@ export interface WorkdirSetupProps {
   /**
    * Called when the user confirms a workdir. Receives the
    * absolute path. The parent should persist + re-render.
+   * May be async (returns a Promise) — e.g. App.tsx awaits
+   * `invoke('set_workdir_with_nwt')` before resolving.
    */
-  onConfirm: (path: string) => void;
+  // BUG-055 fix (event 000024): allow async — the prop was
+  // typed as `(path: string) => void` but App.tsx passes
+  // `(path) => Promise<void>`. TypeScript was inferring the
+  // broader signature and skipping the mismatch; tightening
+  // it now catches accidental sync-only callbacks.
+  onConfirm: (path: string) => void | Promise<void>;
   /**
    * Called when the user clicks "Skip" (advanced users who want
    * to set the workdir later from the command line). Most users

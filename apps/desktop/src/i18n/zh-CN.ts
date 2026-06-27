@@ -175,6 +175,10 @@ const zhCN = {
   'settings.about.clearDataConfirmYes': '✓ 是，清除所有数据',
   'settings.about.clearDataConfirmNo': '✗ 否',
   'settings.about.clearDataError': '清除失败：{{error}}',
+  'settings.about.changeWorkdir': '更换工作目录',
+  'settings.about.changeWorkdirPrompt': '请输入新的工作目录路径：',
+  'settings.about.changeWorkdirError': '更换失败：{{error}}',
+  'settings.about.currentWorkdir': '当前工作目录',
   // ── Error fallbacks (Polish 12) ──────────────────
   'settings.error.saveFailed': '保存失败',
   'settings.error.alreadyExists': '模型 {{id}} 已存在',

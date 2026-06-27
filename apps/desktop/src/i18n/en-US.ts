@@ -177,6 +177,10 @@ const enUS: Translations = {
   'settings.about.clearDataConfirmYes': '✓ Yes, clear everything',
   'settings.about.clearDataConfirmNo': '✗ No',
   'settings.about.clearDataError': 'Clear failed: {{error}}',
+  'settings.about.changeWorkdir': 'Change work directory',
+  'settings.about.changeWorkdirPrompt': 'Enter the new work directory path:',
+  'settings.about.changeWorkdirError': 'Change failed: {{error}}',
+  'settings.about.currentWorkdir': 'Current work directory',
   // ── Error fallbacks (Polish 12) ──────────────────
   'settings.error.saveFailed': 'Save failed',
   'settings.error.alreadyExists': 'Model {{id}} already exists',

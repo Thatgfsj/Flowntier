@@ -482,7 +482,15 @@ export function App() {
     // capped at 50). localStorage so it survives quit+relaunch.
     setRecentCmds((prev) => {
       const next = [text, ...prev.filter((c) => c !== text)].slice(0, 50);
-      try { localStorage.setItem('flowntier.cmd_history', JSON.stringify(next)); } catch {}
+      try {
+        localStorage.setItem('flowntier.cmd_history', JSON.stringify(next));
+      } catch (e) {
+        // BUG-025 fix (event 000024): localStorage quota (~5 MB)
+        // is small enough that an over-eager history could
+        // exceed it. Previously we swallowed the error; now we
+        // warn so power users hitting the cap can see it.
+        console.warn('[App] cmd history persist failed (quota?):', e);
+      }
       return next;
     });
     void startRealWorkflow(text);
@@ -792,7 +800,7 @@ export function App() {
 
       <BottomConsole events={events} />
 
-      <Settings open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <Settings open={settingsOpen} onClose={() => setSettingsOpen(false)} workdir={workdir} />
     </div>
   );
 }

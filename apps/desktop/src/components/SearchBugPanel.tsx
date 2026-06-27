@@ -68,7 +68,14 @@ export function SearchBugPanel() {
         <input
           type="text"
           value={code}
-          onChange={(e) => setCode(e.target.value.toUpperCase().trim())}
+          // BUG-056 fix (event 000024): apply uppercase + trim
+          // only on submit (and on the disabled check), not on
+          // every keystroke. The previous code did
+          // `e.target.value.toUpperCase().trim()` per keystroke,
+          // which truncated intermediate whitespace and made
+          // typing feel janky (cursor jumped when the trimmed
+          // value was shorter than the raw value).
+          onChange={(e) => setCode(e.target.value.toUpperCase())}
           onKeyDown={(e) => e.key === 'Enter' && void search()}
           placeholder={t('settings.about.searchBugPlaceholder')}
           className="flex-1 rounded border border-border bg-surface-1 px-2 py-1.5 font-mono text-xs outline-none focus:border-chief"

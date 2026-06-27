@@ -169,9 +169,12 @@ function getRoleLabel(t: (k: string) => string, role: string): string {
 export interface SettingsProps {
   open: boolean;
   onClose: () => void;
+  /** Current workdir, if set. Used by the About card's
+   *  "Change workdir" UI (BUG-018 fix). */
+  workdir?: string | null;
 }
 
-export function Settings({ open, onClose }: SettingsProps) {
+export function Settings({ open, onClose, workdir }: SettingsProps) {
   const { t } = useTranslation();
   const [snapshot, setSnapshot] = useState<RuntimeSnapshot>(EMPTY);
   const [selected, setSelected] = useState<string | null>(null);
@@ -459,6 +462,48 @@ export function Settings({ open, onClose }: SettingsProps) {
                   <p className="mb-3 text-xs text-text-secondary">
                     {dataDir}
                   </p>
+                  {/* BUG-018 fix (event 000024): Settings → About
+                      now exposes a "Change workdir" button that
+                      calls `set_workdir_with_nwt` (atomic) with a
+                      new path. Previously this code path didn't
+                      exist; users who picked a workdir on first
+                      launch were stuck with it. */}
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      // Use the Tauri dialog plugin to pick a
+                      // directory. Falls back to a manual text
+                      // prompt if the plugin is unavailable.
+                      let newPath: string | null = null;
+                      try {
+                        const { open } = await import('@tauri-apps/plugin-dialog');
+                        newPath = await open({ directory: true, multiple: false });
+                      } catch (e) {
+                        console.warn('[Settings] dialog plugin unavailable:', e);
+                      }
+                      if (!newPath) {
+                        const input = window.prompt(t('settings.about.changeWorkdirPrompt'));
+                        if (!input) return;
+                        newPath = input.trim();
+                      }
+                      if (!newPath) return;
+                      try {
+                        await invoke('set_workdir_with_nwt', { path: newPath });
+                        // Reload to re-fetch workdir state in App.tsx.
+                        setTimeout(() => window.location.reload(), 100);
+                      } catch (e) {
+                        alert(t('settings.about.changeWorkdirError', { error: String(e) }));
+                      }
+                    }}
+                    className="mb-2 rounded-md border border-border bg-surface-2 px-3 py-2 text-xs text-text-primary hover:bg-surface-3"
+                  >
+                    {t('settings.about.changeWorkdir')}
+                  </button>
+                  {workdir && (
+                    <p className="mb-3 break-all text-[10px] text-text-secondary">
+                      {t('settings.about.currentWorkdir')}: {workdir}
+                    </p>
+                  )}
                   <button
                     type="button"
                     onClick={async () => {
