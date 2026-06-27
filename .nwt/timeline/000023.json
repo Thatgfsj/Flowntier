@@ -1,0 +1,33 @@
+{
+  "id": "000023",
+  "timestamp": "2026-06-27T16:00:00Z",
+  "task": "BUG-FIX-BATCH-3: 7 MEDIUM bugs fixed (BUG-019, 052, 010, 012, 031, 041, 042) — 36/36 E2E",
+  "summary": "BUG-FIX-BATCH-3: 7 MEDIUM bugs fixed (BUG-019, 052, 010, 012, 031, 041, 042) — 36/36 E2E",
+  "reason": "Chairman: '继续修复'. Fixed 7 MEDIUM bugs from event 000019 audit. BUG-019 (workdir empty string silently broken): App.tsx now treats both null and '' as 'needs workdir' — triggers the WorkdirSetup dialog instead of rendering a dashboard with no workdir behind it. BUG-052 (metadata schema inconsistency): crates/agent-core/src/tool/nwt.rs renamed `\"created\"` → `\"created_at\"` to match the desktop's set_workdir_with_nwt command and the upstream nwt CLI. BUG-010 (panic logs hard-excluded): added `include_panic_logs` param to search_log Tauri command + a checkbox in SearchBugPanel UI (default unchecked). The user can opt in when hunting a crash. New i18n keys for both zh-CN/en-US. BUG-012 (root path accepted): added components-count guard in set_workdir_with_nwt that rejects paths with ≤1 component (i.e. `/` on Unix). BUG-031 (CSP doesn't include custom origins): widened connect-src from a fixed list to `https:` — still blocks http:// but allows any custom-provider HTTPS origin. BUG-041 (nwt index race): added INDEX_LOCK Mutex around update_index read-modify-write. BUG-042 (nwt next_id TOCTOU): wrapped next_id under INDEX_LOCK + use OpenOptions::create_new for atomic file create, retrying with bumped IDs up to 100 times. Added 4 new tests: e2e_boundary_search_log_includes_panic_when_opted_in, e2e_boundary_atomic_rejects_root_path, e2e_boundary_atomic_accepts_nested_path, e2e_boundary_metadata_schema_consistent_created_at. Total: 36 E2E pass (was 32). Workspace 134 pass. pnpm typecheck clean. Tauri NSIS build: Flowntier_0.4.0_x64-setup.exe produced.",
+  "files": [
+    "apps/desktop/src/App.tsx",
+    "apps/desktop/src/components/SearchBugPanel.tsx",
+    "apps/desktop/src/i18n/zh-CN.ts",
+    "apps/desktop/src/i18n/en-US.ts",
+    "apps/desktop/src-tauri/src/lib.rs",
+    "apps/desktop/src-tauri/tauri.conf.json",
+    "apps/desktop/src-tauri/tests/e2e_nwt_standalone.rs",
+    "crates/agent-core/src/tool/nwt.rs"
+  ],
+  "tags": [
+    "bug-fix-batch",
+    "bug-019",
+    "bug-052",
+    "bug-010",
+    "bug-012",
+    "bug-031",
+    "bug-041",
+    "bug-042",
+    "i18n",
+    "nwt",
+    "search_log",
+    "csp",
+    "concurrency",
+    "schema-consistency"
+  ]
+}

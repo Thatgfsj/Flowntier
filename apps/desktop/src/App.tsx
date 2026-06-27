@@ -200,10 +200,23 @@ export function App() {
       try {
         const r = await invoke<string | null>('get_workdir');
         if (cancelled) return;
-        setWorkdir(r);
+        // BUG-019 fix (event 000023): treat BOTH `null` (no
+        // workdir.json yet) and empty string `""` (workdir.json
+        // exists but value is empty) as "needs workdir". Previously
+        // an empty string silently let the dashboard render with
+        // no workdir set, which made every subsequent nwt_log
+        // fail. Now both cases trigger the WorkdirSetup dialog.
+        if (r === null || r === '') {
+          setWorkdir(null);
+        } else {
+          setWorkdir(r);
+        }
       } catch (e) {
         console.warn('[App] get_workdir failed; defaulting to dashboard:', e);
-        setWorkdir('');  // empty string = "skipped"
+        // Even on error, treat as "needs workdir" — the user
+        // re-runs setup. Safer than rendering a dashboard with
+        // no workdir behind it.
+        setWorkdir(null);
       } finally {
         if (!cancelled) setWorkdirReady(true);
       }

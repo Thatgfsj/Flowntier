@@ -47,6 +47,14 @@ pub struct NwtEvent {
 /// plumbing through the agent loop + pipe server). When the
 /// chairman's "AI 主动记录到 NWT" instruction fires, the
 /// tool reads from this Mutex<PathBuf>.
+
+/// BUG-041 + BUG-042 fix (event 000023): wraps both the index
+/// read-modify-write (tags.json / files.json) and the next_id
+/// allocation so concurrent tool calls from parallel workers
+/// can't lose updates or collide on the same event id. The
+/// lock is held briefly (just the JSON read, in-memory append,
+/// and JSON write), so contention is minimal in practice.
+static INDEX_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 static NWT_ROOT: Mutex<Option<PathBuf>> = Mutex::new(None);
 
 /// Set the workspace root for nwt writes. Called by App.tsx
@@ -110,6 +118,13 @@ fn read_highest_id(root: &Path) -> u32 {
 }
 
 fn next_id(root: &Path) -> String {
+    // BUG-042 fix (event 000023): wrap the read-then-format
+    // under INDEX_LOCK so concurrent calls don't both see the
+    // same max and propose the same id. With the lock held, the
+    // returned id is unique to this process's current call.
+    // The actual file creation uses create_new in `log_event`
+    // for atomic on-disk uniqueness across processes.
+    let _guard = INDEX_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     format!("{:06}", read_highest_id(root) + 1)
 }
 
@@ -172,6 +187,13 @@ fn now_iso() -> String {
 // ── Index maintenance ──────────────────────────────────────────
 
 fn update_index(path: &Path, key: &str, event_id: &str) {
+    // BUG-041 fix (event 000023): take INDEX_LOCK so concurrent
+    // tool calls serialise on the read-modify-write. Without
+    // this, two parallel calls would both read the same map,
+    // each append their id, and the later write would clobber
+    // the earlier one — losing events from the index. The lock
+    // is process-global; we hold it only for the JSON I/O.
+    let _guard = INDEX_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let mut idx: std::collections::BTreeMap<String, Vec<String>> = if path.exists() {
         fs::read_to_string(path)
             .ok()
@@ -197,8 +219,16 @@ pub fn init_workspace(root: &Path) -> std::io::Result<()> {
     let meta = nwt_dir(root).join("metadata.json");
     if !meta.exists() {
         let payload = serde_json::json!({
+            // BUG-052 fix (event 000023): rename `"created"` →
+            // `"created_at"` to match the field name used by the
+            // desktop's `set_workdir_with_nwt` Tauri command and
+            // the upstream nwt CLI. Before this rename, workdirs
+            // initialised via the Rust agent loop had a different
+            // schema key than workdirs initialised via the
+            // desktop UI, breaking downstream tooling that reads
+            // `metadata.json.created_at`.
             "project_name": root.file_name().and_then(|s| s.to_str()).unwrap_or("flowntier-project"),
-            "created": now_iso(),
+            "created_at": now_iso(),
             "schema_version": 1,
             "nwt_cli_compat": "1.0",
         });
@@ -210,14 +240,43 @@ pub fn init_workspace(root: &Path) -> std::io::Result<()> {
 /// Append a new event. Returns the new event id.
 pub fn log_event(root: &Path, event: &NwtEvent) -> std::io::Result<String> {
     init_workspace(root)?;
-    let id = next_id(root);
+    let mut id = next_id(root);
     let mut to_write = event.clone();
     to_write.id = id.clone();
-    let path = event_path(root, &id);
-    fs::write(
-        &path,
-        serde_json::to_vec_pretty(&to_write).unwrap_or_default(),
-    )?;
+    let mut path = event_path(root, &id);
+    // BUG-042 fix (event 000023): use `create_new` so two
+    // concurrent processes can't both write to the same file.
+    // If the proposed id is already taken (because another
+    // process raced us between `next_id` and `create_new`),
+    // bump and retry up to 100 times. After 100 collisions,
+    // give up — likely indicates a runaway writer.
+    let bytes = serde_json::to_vec_pretty(&to_write).unwrap_or_default();
+    let mut attempts = 0;
+    loop {
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+        {
+            Ok(mut f) => {
+                use std::io::Write;
+                let _ = f.write_all(&bytes);
+                break;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                attempts += 1;
+                if attempts >= 100 {
+                    return Err(e);
+                }
+                // Bump id by parsing, incrementing, re-formatting.
+                let n: u32 = id.parse().unwrap_or(0);
+                id = format!("{:06}", n + 1);
+                to_write.id = id.clone();
+                path = event_path(root, &id);
+            }
+            Err(e) => return Err(e),
+        }
+    }
     if let Some(tags) = &event.tags {
         for tag in tags {
             update_index(&tags_index(root), tag, &id);

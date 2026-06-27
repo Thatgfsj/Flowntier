@@ -805,11 +805,16 @@ fn redact_secrets(line: &str) -> String {
 /// they have a different format (free-form backtrace dump) and
 /// false-positive heavily on user-provided error codes.
 #[tauri::command]
-fn search_log(code: String, since: Option<String>) -> Result<serde_json::Value, String> {
+fn search_log(
+    code: String,
+    since: Option<String>,
+    include_panic_logs: Option<bool>,
+) -> Result<serde_json::Value, String> {
     let needle = code.trim();
     if needle.is_empty() {
         return Err("code is empty".into());
     }
+    let include_panic_logs = include_panic_logs.unwrap_or(false);
     let Some(data_dir) = storage::Repository::default_data_dir() else {
         return Err("cannot determine data dir".into());
     };
@@ -834,15 +839,20 @@ fn search_log(code: String, since: Option<String>) -> Result<serde_json::Value, 
     // Collect (path, modified) so we can scan newest-first. A
     // user who just hit the error wants to see today's lines
     // before yesterday's.
+    //
+    // BUG-010 fix (event 000023): panic dumps are now opt-in
+    // via the `include_panic_logs` param. Default false because
+    // panic dumps are hundreds of KB of backtrace and false-
+    // positive heavily on substring searches, but the user
+    // knows best when they're hunting a crash.
     let mut files: Vec<(std::path::PathBuf, std::time::SystemTime, u64)> = entries
         .filter_map(|e| e.ok())
         .filter_map(|e| {
             let p = e.path();
             let name = p.file_name()?.to_str()?;
-            if !name.starts_with("flowntier.log") {
-                return None;
-            }
-            if name.starts_with("panic-") {
+            let is_panic = name.starts_with("panic-");
+            let is_log = name.starts_with("flowntier.log");
+            if !(is_log || (include_panic_logs && is_panic)) {
                 return None;
             }
             let meta = e.metadata().ok()?;
@@ -1042,6 +1052,19 @@ async fn set_workdir_with_nwt(path: String) -> Result<String, String> {
     if !root.is_dir() {
         return Err(format!(
             "workdir is not a directory: {}",
+            root.display()
+        ));
+    }
+    // BUG-012 fix (event 000023): reject filesystem root paths
+    // (`/` on Unix, `C:\` / drive roots on Windows). Without this
+    // guard, a power user typing `C:\` into the manual text
+    // input would silently succeed and create `C:\.nwt\`,
+    // polluting the system drive. We compare against the OS-
+    // reported root components.
+    let root_components = root.components().count();
+    if root_components <= 1 {
+        return Err(format!(
+            "workdir cannot be a filesystem root: {}",
             root.display()
         ));
     }

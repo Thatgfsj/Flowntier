@@ -269,6 +269,7 @@ const zhCN = {
   'settings.about.searchBugEmpty': '没有匹配的行。可能日志已被清理，或者错误码输入有误。',
   'settings.about.searchBugError': '搜索失败: {{error}}',
   'settings.about.searchBugScanned': '已扫描 {{count}} 个文件，命中 {{matches}} 个匹配行。',
+  'settings.about.includePanicLogs': '同时搜索 panic 转储文件（崩溃时有用，可能匹配很多行）',
   'settings.about.openLogsFolder': '打开日志文件夹',
   'settings.about.openLogsFolderHint': '在系统文件管理器中查看完整日志。',
 

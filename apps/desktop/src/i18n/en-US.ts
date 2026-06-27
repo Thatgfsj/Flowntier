@@ -272,6 +272,7 @@ const enUS: Translations = {
   'settings.about.searchBugEmpty': 'No matches. The log may have been cleared, or the code is wrong.',
   'settings.about.searchBugError': 'Search failed: {{error}}',
   'settings.about.searchBugScanned': 'Scanned {{count}} files, {{matches}} matches.',
+  'settings.about.includePanicLogs': 'Also search panic dump files (useful for crash debugging; may produce many matches)',
   'settings.about.openLogsFolder': 'Open logs folder',
   'settings.about.openLogsFolderHint': 'View full logs in the system file manager.',
 

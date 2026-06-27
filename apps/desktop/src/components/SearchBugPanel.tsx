@@ -27,6 +27,14 @@ export function SearchBugPanel() {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<SearchResult | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  // BUG-010 fix (event 000023): panic dumps are the most useful
+  // thing to find when debugging a crash — but the previous code
+  // hard-excluded them. Now the user can opt in via a checkbox;
+  // by default they're still excluded because panic dumps can
+  // be hundreds of KB of backtrace (false-positive heavily on
+  // substring searches), but the user knows best when they're
+  // hunting a crash.
+  const [includePanicLogs, setIncludePanicLogs] = useState(false);
 
   const search = async () => {
     const trimmed = code.trim();
@@ -38,6 +46,7 @@ export function SearchBugPanel() {
       const r = await invoke<SearchResult>('search_log', {
         code: trimmed,
         since: null,
+        include_panic_logs: includePanicLogs,
       });
       setResult(r);
     } catch (e) {
@@ -74,6 +83,15 @@ export function SearchBugPanel() {
           {busy ? t('settings.about.searchBugSearching') : t('settings.about.searchBugButton')}
         </button>
       </div>
+      <label className="mt-2 flex items-center gap-1.5 text-[10px] text-text-secondary">
+        <input
+          type="checkbox"
+          checked={includePanicLogs}
+          onChange={(e) => setIncludePanicLogs(e.target.checked)}
+          className="h-3 w-3"
+        />
+        {t('settings.about.includePanicLogs')}
+      </label>
 
       {err && (
         <p
