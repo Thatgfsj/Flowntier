@@ -1,0 +1,24 @@
+{
+  "id": "000030",
+  "timestamp": "2026-06-27T20:00:00Z",
+  "task": "i18n batch: 32 new keys + App.tsx + LeftRoster.tsx migrated to t()",
+  "summary": "i18n batch: 32 new keys + App.tsx + LeftRoster.tsx migrated to t()",
+  "reason": "Chairman: '继续修复'. After the screenshot E2E revealed the entire dashboard is locked to Chinese (hardcoded strings in App.tsx PHASES labels, TopBar subtitle, chief card subtitle, Center ReasoningBubble body, ChatZone buttons, aria-labels, etc., plus all of LeftRoster.tsx), this batch migrates the highest-impact strings to i18n. 32 new keys added to both zh-CN.ts and en-US.ts. App.tsx: phase labels resolved via t(`phases.${name}`), TopBar subtitle via topbar.status.{idle,busy,done}, workflow statuses via workflow.status.*, verdict summaries via workflow.verdict.*, cmd fallback via workflow.cmd.fallback, chief subtitle via roster.chief.*, aria-labels via app.aria.*, ChatZone buttons via app.{chatCollapse,chatExpand}, reset label via app.reset, chief name via perTask.agent.chief (shared with PerTaskConsole for consistency). LeftRoster.tsx rewritten to useTranslation: section headings (chief/reviewers/worker), agent card names (perTask.agent.*), and subtitles (roster.chief.thinking, leftRoster.criticASubtitle/BSubtitle/workerSubtitle). Verification: 36/36 Rust E2E pass, pnpm typecheck clean. Screenshot E2E confirms full English translation works — locale toggle button now actually flips all dashboard strings (before this fix, locale toggle was broken because App.tsx hardcoded Chinese). Approximately 10 more hardcoded Chinese strings remain in out-of-the-way panels (PluginsPanel, ConnectionBanner, StartupScreen, a few Settings fields) — deferred to next batch. Chairman confirmed next step is to continue with remaining LOW/MEDIUM bugs or Polish 17.",
+  "files": [
+    "apps/desktop/src/App.tsx",
+    "apps/desktop/src/zones/LeftRoster.tsx",
+    "apps/desktop/src/i18n/zh-CN.ts",
+    "apps/desktop/src/i18n/en-US.ts"
+  ],
+  "tags": [
+    "i18n",
+    "frontend",
+    "audit-fix",
+    "translation",
+    "zh-CN",
+    "en-US",
+    "app",
+    "left-roster",
+    "phases"
+  ]
+}

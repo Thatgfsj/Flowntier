@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { AgentCard, type AgentStatus } from '@flowntier/ui';
 
 export interface LeftRosterProps {
@@ -9,6 +10,11 @@ export interface LeftRosterProps {
 
 /**
  * Z2 — left roster. Lists every agent with status.
+ *
+ * BUG-FRONTEND-RT-4 (event 000030): all user-facing strings
+ * were hardcoded Chinese. Now resolved via i18n at render time.
+ * The chief/critic/worker agent names use the same i18n keys
+ * as perTask.agent.* so they stay in sync with PerTaskConsole.
  */
 export function LeftRoster({
   chiefStatus,
@@ -16,43 +22,44 @@ export function LeftRoster({
   criticBStatus,
   workerStatus,
 }: LeftRosterProps) {
+  const { t } = useTranslation();
   return (
     <div className="flex flex-col gap-2">
       <h2 className="px-1 text-xs font-semibold uppercase tracking-wide text-text-secondary">
-        主理
+        {t('perTask.agent.chief')}
       </h2>
       <AgentCard
         role="chief"
-        name="主理代理"
+        name={t('perTask.agent.chief')}
         status={chiefStatus}
-        subtitle="沉稳的策略师 · 正在分析"
+        subtitle={t('roster.chief.thinking')}
         progress={chiefStatus === 'thinking' ? 0.5 : undefined}
       />
 
       <h2 className="mt-3 px-1 text-xs font-semibold uppercase tracking-wide text-text-secondary">
-        审核员
+        {t('leftRoster.reviewers')}
       </h2>
       <AgentCard
         role="critic-a"
-        name="审核员 A"
+        name={t('perTask.agent.criticA')}
         status={criticAStatus}
-        subtitle="找茬"
+        subtitle={t('leftRoster.criticASubtitle')}
       />
       <AgentCard
         role="critic-b"
-        name="审核员 B"
+        name={t('perTask.agent.criticB')}
         status={criticBStatus}
-        subtitle="架构师"
+        subtitle={t('leftRoster.criticBSubtitle')}
       />
 
       <h2 className="mt-3 px-1 text-xs font-semibold uppercase tracking-wide text-text-secondary">
-        实施
+        {t('perTask.agent.worker')}
       </h2>
       <AgentCard
         role="worker"
-        name="实施"
+        name={t('perTask.agent.worker')}
         status={workerStatus}
-        subtitle="执行任务中"
+        subtitle={t('leftRoster.workerSubtitle')}
       />
     </div>
   );

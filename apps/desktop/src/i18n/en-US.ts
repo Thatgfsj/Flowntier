@@ -52,6 +52,9 @@ const enUS: Translations = {
   'topbar.tagline': '· Visual AI Software Company',
   'topbar.chat': 'Chat',
   'topbar.settings': 'Settings',
+  'topbar.status.idle': 'Ready',
+  'topbar.status.busy': 'Running…',
+  'topbar.status.done': 'Last workflow complete',
 
   // ── CommandDock ────────────────────────────────────────
   'commandDock.placeholder': 'Send a command to the Chief...  e.g. implement POST /auth/login',
@@ -294,7 +297,38 @@ const enUS: Translations = {
   'workdir.errorPick': 'Failed to pick directory: {{error}}',
   'workdir.pickTitle': 'Pick work directory',
 
-  // ── Drift banner (Phase 5) ───────────────────────────
+  // ── Phases + workflow status ─────────────────────────
+  'phases.requirement': 'Requirement',
+  'phases.planning': 'Planning',
+  'phases.plan_review': 'Plan review',
+  'phases.dispatch': 'Dispatch',
+  'phases.development': 'Development',
+  'phases.review': 'Review',
+  'phases.repair': 'Repair',
+  'phases.delivery': 'Delivery',
+  'workflow.status.idle': 'Waiting for your command in the bar below.',
+  'workflow.status.running': 'Running the current phase… (full plan in the 8-phase timeline on the left)',
+  'workflow.status.done': 'Workflow complete. See the delivery summary on the right.',
+  'workflow.verdict.pass': 'Workflow complete',
+  'workflow.verdict.timeout': 'Workflow timed out',
+  'workflow.cmd.fallback': 'Implement POST /auth/login',
+  'roster.chief.thinking': 'Calm strategist · analysing',
+  'roster.chief.speaking': 'Calm strategist · reporting',
+  'roster.chief.idle': 'Calm strategist · standing by',
+  'leftRoster.reviewers': 'Reviewers',
+  'leftRoster.criticASubtitle': 'Critic A',
+  'leftRoster.criticBSubtitle': 'Critic B',
+  'leftRoster.workerSubtitle': 'Worker',
+  'app.aria.roster': 'Agent roster',
+  'app.aria.workspace': 'Workspace',
+  'app.aria.tasks': 'Tasks panel',
+  'app.aria.chatCollapse': 'Collapse ChatZone',
+  'app.aria.chatExpand': 'Expand ChatZone',
+  'app.chatCollapse': '▾ Collapse',
+  'app.chatExpand': 'Direct agent-core driver · click to expand',
+  'app.reset': 'Reset',
+
+// ── Drift banner (Phase 5) ───────────────────────────
   'drift.message':
     '⚠ Sidecar runtime version (v{{sidecar}}) is older than the shell expects (v{{expected}}). Some features may be unavailable. Please rebuild the sidecar.',
   'drift.dismiss': 'Dismiss',

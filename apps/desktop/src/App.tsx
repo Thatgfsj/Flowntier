@@ -120,6 +120,10 @@ function DriftBanner({ sidecar, minCompatible, onDismiss }: DriftBannerProps) {
 }
 
 export function App() {
+  // BUG-FRONTEND-RT-4 (event 000030): pull t() out of useTranslation
+  // for the App-level JSX (TopBar subtitle, chiefCard, etc.). The
+  // DriftBanner child component has its own t() at line 102.
+  const { t } = useTranslation();
   const [activePhase, setActivePhase] = useState(0);
   const [phaseStates, setPhaseStates] = useState<Record<Phase['name'], PhaseState>>({ ...PHASE_STATE });
   const [tasks, setTasks] = useState<TaskRow[]>([...INITIAL_TASKS]);
@@ -393,7 +397,7 @@ export function App() {
       busyRef.current = false;
       setBusy(false);
       setCompleted(true);
-      setReviewVerdict({ verdict: 'PASS', summary: '工作流已完成' });
+      setReviewVerdict({ verdict: 'PASS', summary: t('workflow.verdict.pass') });
     }
     if (event.kind === 'transition' && event.to) {
       const idx = PHASES.findIndex((p) => p.name === event.to);
@@ -501,7 +505,7 @@ export function App() {
       }
 
       if (!completed) {
-        setReviewVerdict({ verdict: 'REPAIR', summary: '工作流超时' });
+        setReviewVerdict({ verdict: 'REPAIR', summary: t('workflow.verdict.timeout') });
       }
     } catch (e) {
       console.warn('workflow failed', e);
@@ -518,7 +522,7 @@ export function App() {
       reset();
       return;
     }
-    const text = cmd.trim() || '实现 POST /auth/login 接口';
+    const text = cmd.trim() || t('workflow.cmd.fallback');
     setCmd('');
     // Push to recent-commands history (most-recent first, deduped,
     // capped at 50). localStorage so it survives quit+relaunch.
@@ -607,10 +611,10 @@ export function App() {
         projectName="Flowntier"
         subtitle={
           completed
-            ? '上次工作流已完成'
+            ? t('topbar.status.done')
             : busy
-              ? '运行中…'
-              : '准备就绪'
+              ? t('topbar.status.busy')
+              : t('topbar.status.idle')
         }
         onSettingsClick={() => setSettingsOpen(true)}
         onChatClick={() => setChatOpen((v) => !v)}
@@ -637,7 +641,7 @@ export function App() {
       <div className="flex flex-1 overflow-hidden">
         <aside
           className="w-[260px] shrink-0 overflow-y-auto border-r border-border bg-surface-2 p-2"
-          aria-label="智能体名册"
+          aria-label={t('app.aria.roster')}
         >
           <LeftRoster
             chiefStatus={agentStatusToRole(agentStatus.chief)}
@@ -647,12 +651,16 @@ export function App() {
           />
         </aside>
 
-        <main role="main" aria-label="工作区" className="flex-1 overflow-y-auto p-3">
+        <main role="main" aria-label={t('app.aria.workspace')} className="flex-1 overflow-y-auto p-3">
           <div className="mb-3 rounded-lg border border-border bg-surface-1 p-2">
             <PhaseTimeline
               steps={PHASES.map((p) => ({
                 name: p.name,
-                label: p.label,
+                // BUG-FRONTEND-RT-4 (event 000030): phase labels
+                // were hardcoded Chinese. Now resolved via i18n at
+                // render time. PHASES itself keeps the names as
+                // stable keys for event correlation.
+                label: t(`phases.${p.name}`),
                 state: phaseStates[p.name],
               }))}
               onStepClick={(name) => {
@@ -728,28 +736,28 @@ export function App() {
               <>
                 <AgentCard
                   role="chief"
-                  name="主理"
+                  name={t('perTask.agent.chief')}
                   status={agentStatusToRole(agentStatus.chief)}
                   subtitle={
                     agentStatus.chief === 'thinking'
-                      ? '沉稳的策略师 · 正在分析'
+                      ? t('roster.chief.thinking')
                       : agentStatus.chief === 'speaking'
-                        ? '沉稳的策略师 · 正在汇报'
-                        : '沉稳的策略师 · 待命'
+                        ? t('roster.chief.speaking')
+                        : t('roster.chief.idle')
                   }
                   progress={busy ? 0.5 : undefined}
                 />
 
                 <ReasoningBubble
-                  agentName="主理"
+                  agentName={t('perTask.agent.chief')}
                   roleColorClass="border-t-chief"
-                  step={`阶段 ${activePhase + 1} / 8`}
+                  step={`${t('phases.delivery')} ${activePhase + 1} / 8`}
                   body={
                     completed
-                      ? '工作流已完成。请查看右侧交付摘要。'
+                      ? t('workflow.status.done')
                       : busy
-                        ? '正在执行当前阶段…（完整规划在左侧 8 阶段时间线上）'
-                        : '等待用户在下方的命令栏输入指令。'
+                        ? t('workflow.status.running')
+                        : t('workflow.status.idle')
                   }
                   ago={busy ? '正在运行' : '空闲'}
                 />
@@ -791,7 +799,7 @@ export function App() {
 
         <aside
           className="w-[360px] shrink-0 overflow-y-auto border-l border-border bg-surface-2 p-3"
-          aria-label="任务面板"
+          aria-label={t('app.aria.tasks')}
         >
           <RightPanel tasks={tasks} events={events} />
           <div className="mt-3">
@@ -805,7 +813,7 @@ export function App() {
         onCommandChange={setCmd}
         onCommandSubmit={handleSubmit}
         busy={busy}
-        {...(completed ? { resetLabel: '重置' } : {})}
+        {...(completed ? { resetLabel: t('app.reset') } : {})}
         recent={recentCmds}
       />
 
@@ -824,9 +832,9 @@ export function App() {
               type="button"
               onClick={() => setChatOpen(false)}
               className="absolute right-2 top-1 rounded border border-border bg-surface-2 px-2 py-0.5 text-xs text-text-secondary hover:bg-surface-1"
-              aria-label="折叠 ChatZone"
+              aria-label={t('app.aria.chatCollapse')}
             >
-              ▾ 折叠
+              {t('app.chatCollapse')}
             </button>
           </>
         ) : (
@@ -834,10 +842,10 @@ export function App() {
             type="button"
             onClick={() => setChatOpen(true)}
             className="flex h-9 w-full items-center justify-between gap-2 bg-surface-2 px-4 text-left text-xs text-text-secondary hover:bg-surface-1"
-            aria-label="打开 ChatZone"
+            aria-label={t('app.aria.chatExpand')}
           >
             <span className="font-mono">ChatZone ▸</span>
-            <span>直接驱动 agent-core · 点这里展开</span>
+            <span>{t('app.chatExpand')}</span>
           </button>
         )}
       </div>

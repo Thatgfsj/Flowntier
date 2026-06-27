@@ -49,6 +49,9 @@ const zhCN = {
   'topbar.tagline': '· 智能体公司操作系统',
   'topbar.chat': 'Chat',
   'topbar.settings': '设置',
+  'topbar.status.idle': '准备就绪',
+  'topbar.status.busy': '运行中…',
+  'topbar.status.done': '上次工作流已完成',
 
   // ── CommandDock ────────────────────────────────────────
   // v0.4.0-rc1 polish.
@@ -291,7 +294,38 @@ const zhCN = {
   'workdir.errorPick': '选择目录失败：{{error}}',
   'workdir.pickTitle': '选择工作目录',
 
-  // ── Drift banner (Phase 5) ───────────────────────────
+  // ── Phases + workflow status ─────────────────────────
+  'phases.requirement': '需求',
+  'phases.planning': '规划',
+  'phases.plan_review': '计划审核',
+  'phases.dispatch': '派发',
+  'phases.development': '开发',
+  'phases.review': '评审',
+  'phases.repair': '修复',
+  'phases.delivery': '交付',
+  'workflow.status.idle': '等待用户在下方的命令栏输入指令。',
+  'workflow.status.running': '正在执行当前阶段…（完整规划在左侧 8 阶段时间线上）',
+  'workflow.status.done': '工作流已完成。请查看右侧交付摘要。',
+  'workflow.verdict.pass': '工作流已完成',
+  'workflow.verdict.timeout': '工作流超时',
+  'workflow.cmd.fallback': '实现 POST /auth/login 接口',
+  'roster.chief.thinking': '沉稳的策略师 · 正在分析',
+  'roster.chief.speaking': '沉稳的策略师 · 正在汇报',
+  'roster.chief.idle': '沉稳的策略师 · 待命',
+  'leftRoster.reviewers': '审核员',
+  'leftRoster.criticASubtitle': '找茬',
+  'leftRoster.criticBSubtitle': '架构师',
+  'leftRoster.workerSubtitle': '执行任务中',
+  'app.aria.roster': '智能体名册',
+  'app.aria.workspace': '工作区',
+  'app.aria.tasks': '任务面板',
+  'app.aria.chatCollapse': '折叠 ChatZone',
+  'app.aria.chatExpand': '打开 ChatZone',
+  'app.chatCollapse': '▾ 折叠',
+  'app.chatExpand': '直接驱动 agent-core · 点这里展开',
+  'app.reset': '重置',
+
+// ── Drift banner (Phase 5) ───────────────────────────
   'drift.message':
     '⚠ Sidecar 运行时版本 (v{{sidecar}}) 低于 shell 期望 (v{{expected}}). 某些功能可能不可用。请重新构建 sidecar。',
   'drift.dismiss': '关闭',
