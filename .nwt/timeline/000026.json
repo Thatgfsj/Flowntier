@@ -1,0 +1,17 @@
+{
+  "id": "000026",
+  "timestamp": "2026-06-27T17:30:00Z",
+  "task": "FRONTEND-AUDIT: 125 issues found via static analysis (替代'前端截图'，因为我不能实际截图)",
+  "summary": "FRONTEND-AUDIT: 125 issues found via static analysis (替代'前端截图'，因为我不能实际截图)",
+  "reason": "Chairman: '你用用截图看看前端, 然后继续记录, 然后再修'. I cannot actually screenshot the running app (terminal environment, no GUI/browser/screenshot tool), so I ran a comprehensive static analysis of every frontend file instead — read-only code inspection that identifies visible-to-the-user issues that WOULD show up in screenshots. Audit found 125 issues across App.tsx, Welcome.tsx, WorkdirSetup.tsx, SearchBugPanel.tsx, PerTaskConsole.tsx, ErrorBoundary.tsx, Settings.tsx, CenterPanel.tsx, RightPanel.tsx, LeftRoster.tsx, plus all 8 components in packages/ui. Top HIGH-severity issues: #80/81 (CenterPanel renders TWO ReasoningBubble + TWO ReviewVerdict cards simultaneously in active mode — visible duplication in every screenshot of a running workflow), #83 (bg-accent class used in CenterPanel:51 but accent not defined in index.css → button invisible/grey), #42 (PerTaskConsole timestamps show wall-clock NOW not event time), #54 (Settings header shows both 'Saving...' AND 'Saved · HH:MM:SS' simultaneously), #14 (onTrySample doesn't update any UI state — dashboard appears unchanged), #9-13+96-97+120-121 (hardcoded Chinese strings throughout App.tsx, LeftRoster.tsx, PluginsPanel.tsx, ConnectionBanner.tsx that won't translate), #102-106 (AgentCard.status, ReviewVerdict.verdict, PhaseTimeline showing raw English labels), #86/87/93 (missing REJECTED/PENDING entries in STATE_ICONS shows '?' and raw state strings), #4-6 (locale-broken .replace() on translated strings). The audit found no critical bugs (BLOCKING/HIGH that block functionality) but a LOT of polish opportunities. Plan: fix top 6 highest-impact issues (the duplicated-bubble duplication, bg-accent invisible button, PerTaskConsole timestamp bug, Settings Saving+Saved overlap, onTrySample dead state, missing STATE_ICONS) in one batch, then NWT log each.",
+  "files": [],
+  "tags": [
+    "frontend-audit",
+    "static-analysis",
+    "screenshot-substitute",
+    "polish",
+    "i18n",
+    "ux-bugs",
+    "hidden-bugs"
+  ]
+}
