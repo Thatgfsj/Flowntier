@@ -15,6 +15,12 @@ export interface ReviewVerdictProps {
   confidence: number;
   issues: readonly ReviewIssue[];
   summary: string;
+  /** BUG-FRONTEND-RT-5 (event 000031): optional localized label
+   *  for the verdict pill. Falls back to the raw enum when
+   *  omitted. Pass e.g. `t('reviewVerdict.verdict.PASS')`. */
+  verdictLabel?: string;
+  /** Optional localized label for the confidence field. */
+  confidenceLabel?: string;
   className?: string;
 }
 
@@ -35,6 +41,8 @@ export function ReviewVerdict({
   confidence,
   issues,
   summary,
+  verdictLabel,
+  confidenceLabel,
   className,
 }: ReviewVerdictProps) {
   return (
@@ -46,10 +54,10 @@ export function ReviewVerdict({
             verdictColor[verdict],
           )}
         >
-          {verdict}
+          {verdictLabel ?? verdict}
         </span>
         <span className="text-xs text-text-secondary tabular-nums">
-          confidence {confidence.toFixed(2)}
+          {confidenceLabel ?? `confidence ${confidence.toFixed(2)}`}
         </span>
       </div>
       <p className="mt-2 text-sm">{summary}</p>

@@ -410,9 +410,11 @@ export function Settings({ open, onClose, workdir }: SettingsProps) {
                       <Field label={t('settings.custom.apiKeyLabel')}><code className="font-mono">{sel.api_key_env}</code></Field>
                       <Field label={t('settings.field.keyConfigured')}>
                         {sel.key_present ? (
-                          <span className="text-status-done">✓ 是</span>
+                          <span className="text-status-done">{t('settings.field.keyYes')}</span>
                         ) : (
-                          <span className="text-status-warn">✗ 否（设置 <code className="font-mono">{sel.api_key_env}</code> 后重启 runtime）</span>
+                          <span className="text-status-warn">
+                            {t('settings.field.keyNo', { env: sel.api_key_env })}
+                          </span>
                         )}
                       </Field>
                     </div>
@@ -1204,7 +1206,7 @@ function CustomProviderForm({ onSaved }: { onSaved: () => void }) {
           disabled={busy}
           className="rounded-md bg-chief px-4 py-1.5 text-xs font-medium text-white hover:bg-chief/90 disabled:opacity-30"
         >
-          {busy ? t('settings.action.save') : t('settings.customProvider.title')}
+          {busy ? t('settings.action.save') : t('settings.action.create')}
         </button>
       </div>
     </div>

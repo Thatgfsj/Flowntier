@@ -10,6 +10,9 @@ export interface AgentCardProps {
   status: AgentStatus;
   /** Optional sub-line, e.g. "Calm strategist". */
   subtitle?: string;
+  /** Optional localized label for the status pill. Falls back
+   *  to the raw enum if not provided. */
+  statusLabel?: string;
   /** Optional avatar element (e.g. Live2D in v0.5). */
   avatar?: ReactNode;
   /** Optional progress 0..1. */
@@ -31,6 +34,19 @@ const statusPills: Record<AgentStatus, string> = {
   error: 'bg-status-failed/20 text-status-failed',
 };
 
+/** BUG-FRONTEND-RT-5 (event 000031): raw English status
+ *  (`idle` / `thinking` / `speaking` / `error`) was rendered
+ *  verbatim on the agent card pill — users saw "IDLE" instead
+ *  of "Idle" / "思考中". Now the consumer can pass an optional
+ *  `statusLabel` prop (typically via `t('agentCard.status.<id>')`)
+ *  to localize. Falls back to the raw enum when not provided. */
+const DEFAULT_STATUS_LABELS: Record<AgentStatus, string> = {
+  idle: 'idle',
+  thinking: 'thinking',
+  speaking: 'speaking',
+  error: 'error',
+};
+
 /**
  * Card representing a single agent. See `docs/UI_GUIDELINES.md` §6.1.
  */
@@ -39,6 +55,7 @@ export function AgentCard({
   name,
   status,
   subtitle,
+  statusLabel,
   avatar,
   progress,
   className,
@@ -65,7 +82,7 @@ export function AgentCard({
               statusPills[status],
             )}
           >
-            {status}
+            {statusLabel ?? DEFAULT_STATUS_LABELS[status]}
           </span>
         </div>
         {subtitle && (

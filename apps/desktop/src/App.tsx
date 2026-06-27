@@ -738,6 +738,7 @@ export function App() {
                   role="chief"
                   name={t('perTask.agent.chief')}
                   status={agentStatusToRole(agentStatus.chief)}
+                  statusLabel={t(`agentCard.status.${agentStatusToRole(agentStatus.chief)}`)}
                   subtitle={
                     agentStatus.chief === 'thinking'
                       ? t('roster.chief.thinking')
@@ -764,12 +765,14 @@ export function App() {
 
                 <Card>
                   <h3 className="mb-2 text-sm font-semibold">审核员 B — 架构审查</h3>
-                  <ReviewVerdict
-                    verdict="PASS"
-                    confidence={0.87}
-                    issues={[]}
-                    summary="模块边界清晰，鉴权模块与路由处理器解耦，结构良好。"
-                  />
+<ReviewVerdict
+                verdict="PASS"
+                verdictLabel={t('reviewVerdict.verdict.PASS')}
+                confidenceLabel={t('reviewVerdict.confidence', { value: '0.87' })}
+                confidence={0.87}
+                issues={[]}
+                summary={t('centerPanel.reviewSummary')}
+              />
                 </Card>
               </>
             }
@@ -777,9 +780,11 @@ export function App() {
 
           {reviewVerdict !== null && (
             <Card>
-              <h3 className="mb-2 text-sm font-semibold">最终评审</h3>
+              <h3 className="mb-2 text-sm font-semibold">{t('app.finalReview')}</h3>
               <ReviewVerdict
                 verdict={reviewVerdict.verdict}
+                verdictLabel={t(`reviewVerdict.verdict.${reviewVerdict.verdict}`)}
+                confidenceLabel={t('reviewVerdict.confidence', { value: '1.00' })}
                 confidence={1.0}
                 issues={[]}
                 summary={reviewVerdict.summary}

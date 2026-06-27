@@ -32,6 +32,7 @@ export function LeftRoster({
         role="chief"
         name={t('perTask.agent.chief')}
         status={chiefStatus}
+        statusLabel={t(`agentCard.status.${chiefStatus}`)}
         subtitle={t('roster.chief.thinking')}
         progress={chiefStatus === 'thinking' ? 0.5 : undefined}
       />
@@ -43,12 +44,14 @@ export function LeftRoster({
         role="critic-a"
         name={t('perTask.agent.criticA')}
         status={criticAStatus}
+        statusLabel={t(`agentCard.status.${criticAStatus}`)}
         subtitle={t('leftRoster.criticASubtitle')}
       />
       <AgentCard
         role="critic-b"
         name={t('perTask.agent.criticB')}
         status={criticBStatus}
+        statusLabel={t(`agentCard.status.${criticBStatus}`)}
         subtitle={t('leftRoster.criticBSubtitle')}
       />
 
@@ -59,6 +62,7 @@ export function LeftRoster({
         role="worker"
         name={t('perTask.agent.worker')}
         status={workerStatus}
+        statusLabel={t(`agentCard.status.${workerStatus}`)}
         subtitle={t('leftRoster.workerSubtitle')}
       />
     </div>

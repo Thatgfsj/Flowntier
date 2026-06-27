@@ -61,6 +61,13 @@ function fnv1a(s: string): string {
 
 
 export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  // BUG-FRONTEND-RT-5 (event 000031): class-component t() helper.
+  // We can't use useTranslation() in a class component, so we
+  // bind a local reference from the module-level i18n instance.
+  // All translated strings in lifecycle methods (componentDidCatch,
+  // copyLogs, reportIssue) flow through this.t.
+  private t = i18n.t.bind(i18n);
+
   override state: ErrorBoundaryState = {
     error: null,
     componentStack: null,
@@ -144,11 +151,11 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     ].join('\n');
     try {
       await navigator.clipboard.writeText(payload);
-      alert('日志已复制到剪贴板');
+      alert(this.t('error.action.copySuccess'));
     } catch (e) {
       // Fallback: select-and-prompt for environments without clipboard API
       console.warn('clipboard.writeText failed:', e);
-      prompt('复制以下日志:', payload);
+      prompt(this.t('error.copyFallback'), payload);
     }
   };
 
@@ -189,7 +196,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
         '',
         '**Logs**',
         '',
-        '_Use the "复制日志" button on the error screen, then paste here._',
+        this.t('error.reportBodyLogs'),
       ].join('\n'),
     });
     const url = `https://github.com/Thatgfsj/Flowntier/issues/new?${params.toString()}`;
@@ -200,7 +207,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
       // grants shell:allow-open) — fall back to clipboard so the user
       // can paste manually.
       console.warn('openExternal failed:', e);
-      prompt('复制以下 URL 到浏览器打开:', url);
+      prompt(this.t('error.reportFallback'), url);
     }
   };
 

@@ -5,6 +5,7 @@
  */
 
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Card, TaskItem, type TaskState } from '@flowntier/ui';
 import type { WfEvent } from '@flowntier/shared';
 import { PerTaskConsole } from '../components/PerTaskConsole.js';
@@ -64,6 +65,7 @@ function toTaskState(s: string): TaskState {
  * Z4 — right panel. Task list, progress, current file.
  */
 export function RightPanel({ tasks, events = [] }: RightPanelProps) {
+  const { t } = useTranslation();
   const [selectedTask, setSelectedTask] = useState<string | null>(null);
   const [showConsole, setShowConsole] = useState(false);
 
@@ -78,9 +80,9 @@ export function RightPanel({ tasks, events = [] }: RightPanelProps) {
       {/* Task list */}
       <Card>
         <div className="mb-2 flex items-center justify-between">
-          <h2 className="text-sm font-semibold">任务列表</h2>
+          <h2 className="text-sm font-semibold">{t('rightPanel.taskList')}</h2>
           <span className="text-xs text-text-secondary">
-            {done} / {total} 完成
+            {done} / {total} {t('rightPanel.done')}
           </span>
         </div>
         <div className="mb-2 h-1.5 w-full overflow-hidden rounded-full bg-surface-3">
@@ -132,7 +134,7 @@ export function RightPanel({ tasks, events = [] }: RightPanelProps) {
               onClick={() => setShowConsole(!showConsole)}
               className="text-xs text-status-active hover:underline"
             >
-              {showConsole ? '隐藏日志' : '查看日志'}
+              {showConsole ? t('rightPanel.hideLogs') : t('rightPanel.viewLogs')}
             </button>
           </div>
 
@@ -147,7 +149,7 @@ export function RightPanel({ tasks, events = [] }: RightPanelProps) {
             </div>
             <div>
               <span className="text-text-secondary">负责人: </span>
-              <span className="text-primary">{selected.owner || '未分配'}</span>
+              <span className="text-primary">{selected.owner || t('rightPanel.unassigned')}</span>
             </div>
             {selected.fileHint && (
               <div>

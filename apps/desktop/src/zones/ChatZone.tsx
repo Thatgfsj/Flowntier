@@ -17,22 +17,28 @@
  *   - token usage + final status
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
+import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
 import { useAgentStream, type AgentEvent } from '../hooks/useAgentStream.js';
 
 interface RoleSpec {
   id: string;
-  label: string;
-  hint: string;
+  /** i18n key suffix (e.g. "chief", "worker", "criticA") — the
+   *  component resolves label + hint via t() at render time. */
+  i18nKey: string;
 }
 
-const ROLES: RoleSpec[] = [
-  { id: 'agent:chief',    label: '主理',   hint: '拆任务、调度、汇总' },
-  { id: 'agent:worker',   label: '实施',   hint: '写代码、改文件、跑命令' },
-  { id: 'agent:critic:a', label: '找茬',   hint: '挖 bug、安全、边界' },
-  { id: 'agent:critic:b', label: '审查',   hint: '命名、抽象、文档' },
-  { id: 'agent:planner',  label: '计划',   hint: '方案、接口、验收' },
-  { id: 'agent:reporter', label: '汇报',   hint: '给用户写最终总结' },
+/** BUG-FRONTEND-RT-4 (event 000030 follow-up): the role
+ *  definitions used to be a hardcoded Chinese array. Now each
+ *  entry carries an i18n key suffix; the consumer (useChatZone
+ *  via buildRoles) translates both label and hint at render. */
+const ROLE_DEFS: RoleSpec[] = [
+  { id: 'agent:chief',    i18nKey: 'chief' },
+  { id: 'agent:worker',   i18nKey: 'worker' },
+  { id: 'agent:critic:a', i18nKey: 'criticA' },
+  { id: 'agent:critic:b', i18nKey: 'criticB' },
+  { id: 'agent:planner',  i18nKey: 'planner' },
+  { id: 'agent:reporter', i18nKey: 'reporter' },
 ];
 
 interface ProviderSpec {
@@ -62,6 +68,7 @@ export function ChatZone({
   defaultKeyEnvVar = 'OPENAI_API_KEY',
   defaultModel = 'gpt-4o-mini',
 }: ChatZoneProps) {
+  const { t } = useTranslation();
   const [task, setTask] = useState('');
   const [role, setRole] = useState<string>('agent:chief');
   const [provider, setProvider] = useState<ProviderSpec>(DEFAULT_PROVIDER);
@@ -172,9 +179,9 @@ export function ChatZone({
             disabled={sending}
             className="rounded border border-border bg-surface-1 px-2 py-1 disabled:opacity-50"
           >
-            {ROLES.map((r) => (
-              <option key={r.id} value={r.id} title={r.hint}>
-                {r.label}
+            {ROLE_DEFS.map((r) => (
+              <option key={r.id} value={r.id} title={t(`chatZone.roles.${r.i18nKey}Hint`)}>
+                {t(`chatZone.roles.${r.i18nKey}`)}
               </option>
             ))}
           </select>

@@ -17,6 +17,10 @@ export interface PhaseStep {
   state: PhaseState;
   label: string;
   durationMs?: number;
+  /** BUG-FRONTEND-RT-5 (event 000031): optional pre-formatted
+   *  duration string (e.g. "12s" / "12 秒"). Falls back to a
+   *  hardcoded `<n>秒` if not provided. */
+  durationLabel?: string;
 }
 
 export interface PhaseTimelineProps {
@@ -68,7 +72,7 @@ export function PhaseTimeline({ steps, onStepClick, className }: PhaseTimelinePr
             <span className="truncate text-center">{s.label}</span>
             {s.durationMs !== undefined && (
               <span className="text-[10px] text-text-secondary tabular-nums">
-                {Math.round(s.durationMs / 1000)}秒
+                {s.durationLabel ?? `${Math.round(s.durationMs / 1000)}秒`}
               </span>
             )}
           </button>

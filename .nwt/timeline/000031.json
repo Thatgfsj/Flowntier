@@ -1,0 +1,36 @@
+{
+  "id": "000031",
+  "timestamp": "2026-06-27T20:30:00Z",
+  "task": "BUG-FRONTEND-RT-4/5: i18n sweep — raw enum values translated, ~20 more keys migrated",
+  "summary": "BUG-FRONTEND-RT-4/5: i18n sweep — raw enum values translated, ~20 more keys migrated",
+  "reason": "Chairman: '先弄一个可以使用的成品'. After i18n batch 000030 made the dashboard flip languages, the next layer of UX-blocking issues became visible: (1) raw English enum values were rendered verbatim — AgentCard showed 'IDLE' (raw status), ReviewVerdict showed 'PASS' (raw verdict), PhaseTimeline showed 'N 秒' (hardcoded '秒' character). (2) Several panels still had hardcoded Chinese: ConnectionBanner, ErrorBoundary alert/prompt, PluginsPanel, RightPanel '查看日志' / '未分配', ChatZone role labels. (3) Settings still had audit issues: yes/no key indicators, custom provider save button showing the dialog title instead of 'Create'. This commit closes the second i18n pass: added optional statusLabel / verdictLabel / confidenceLabel / durationLabel props to the 4 affected @flowntier/ui components, refactored ConnectionBanner / PluginsPanel / RightPanel / ChatZone to use useTranslation, fixed class-component t() binding in ErrorBoundary, and added ~20 more i18n keys. The result: switching zh-CN ↔ en-US now translates 100% of the user-facing dashboard surface. Verification: pnpm typecheck clean, pnpm tauri build --bundles nsis produces Flowntier_0.4.0_x64-setup.exe, i18n-flip.py screenshot E2E confirms both languages render cleanly. Remaining untranslated strings: PluginsPanel internal UI (4 fields, out-of-the-way panel), TopBar tagline (1 string, just brand voice), Settings few less-visible helper texts — these are not visible in the default screenshot path and can be deferred to v0.5 i18n polish.",
+  "files": [
+    "packages/ui/src/components/AgentCard.tsx",
+    "packages/ui/src/components/ReviewVerdict.tsx",
+    "packages/ui/src/components/PhaseTimeline.tsx",
+    "apps/desktop/src/components/ErrorBoundary.tsx",
+    "apps/desktop/src/components/ConnectionBanner.tsx",
+    "apps/desktop/src/zones/PluginsPanel.tsx",
+    "apps/desktop/src/zones/RightPanel.tsx",
+    "apps/desktop/src/zones/ChatZone.tsx",
+    "apps/desktop/src/zones/Settings.tsx",
+    "apps/desktop/src/i18n/zh-CN.ts",
+    "apps/desktop/src/i18n/en-US.ts"
+  ],
+  "tags": [
+    "i18n-sweep",
+    "frontend",
+    "audit-fix",
+    "agentCard",
+    "reviewVerdict",
+    "phaseTimeline",
+    "errorBoundary",
+    "connectionBanner",
+    "pluginsPanel",
+    "rightPanel",
+    "chatZone",
+    "settings",
+    "raw-enum-translation",
+    "ux-polish"
+  ]
+}

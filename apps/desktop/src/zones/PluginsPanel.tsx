@@ -3,6 +3,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Card } from '@flowntier/ui';
 import { listPlugins, invokePlugin, type PluginDescriptor } from '../lib/api.js';
 
@@ -13,6 +14,7 @@ interface PluginResult {
 }
 
 export function PluginsPanel() {
+  const { t } = useTranslation();
   const [plugins, setPlugins] = useState<PluginDescriptor[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -52,8 +54,8 @@ export function PluginsPanel() {
     }
   };
 
-  if (loading) return <Card><div className="text-sm text-text-secondary">加载插件中...</div></Card>;
-  if (error) return <Card><div className="text-sm text-status-failed">错误: {error}</div><button onClick={fetchPlugins} className="mt-2 text-xs text-status-active hover:underline">重试</button></Card>;
+  if (loading) return <Card><div className="text-sm text-text-secondary">{t('plugins.loading')}</div></Card>;
+  if (error) return <Card><div className="text-sm text-status-failed">{t('plugins.error', { error })}</div><button onClick={fetchPlugins} className="mt-2 text-xs text-status-active hover:underline">{t('plugins.retry')}</button></Card>;
 
   // BUG-FRONTEND-RT-1 (event 000028): the previous code called
   // `plugins.find(...)` without a null check. When `listPlugins()`
@@ -69,7 +71,7 @@ export function PluginsPanel() {
 
   return (
     <Card>
-      <h3 className="mb-2 text-sm font-semibold">插件</h3>
+      <h3 className="mb-2 text-sm font-semibold">{t('plugins.title')}</h3>
       <div className="mb-3 flex flex-wrap gap-1.5">
         {safePlugins.map((p) => (
           <button key={p.name} type="button" onClick={() => { setSelectedPlugin(p.name); setSelectedAction(null); setResult(null); }}
@@ -103,7 +105,7 @@ export function PluginsPanel() {
               </div>
               <button type="button" onClick={handleInvoke} disabled={invoking}
                 className="rounded bg-status-active px-3 py-1.5 text-xs text-white hover:bg-status-active/80 disabled:opacity-50">
-                {invoking ? '执行中...' : '执行'}
+                {invoking ? t('plugins.invoking') : t('plugins.invoke')}
               </button>
             </>
           )}
@@ -119,7 +121,7 @@ export function PluginsPanel() {
         </div>
       )}
 
-      {!selected && <p className="text-xs text-text-secondary">选择一个插件查看详情</p>}
+      {!selected && <p className="text-xs text-text-secondary">{t('plugins.emptyHint')}</p>}
     </Card>
   );
 }
