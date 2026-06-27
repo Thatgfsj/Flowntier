@@ -1,0 +1,19 @@
+{
+  "id": "000035",
+  "timestamp": "2026-06-27T22:50:00Z",
+  "task": "v0.4.1: fix BUG-FRONTEND-RT-4 (dialog ACL) + workdir hint visibility",
+  "summary": "v0.4.1: fix BUG-FRONTEND-RT-4 (dialog ACL) + workdir hint visibility",
+  "reason": "Chairman reported a runtime error after installing v0.4.0: '选择目录失败：Command plugin:dialog|open not allowed by ACL'. Root cause: apps/desktop/src-tauri/capabilities/default.json did not include the `dialog:default` permission set, so the @tauri-apps/plugin-dialog `open({ directory: true })` calls in WorkdirSetup.tsx (browse button), Settings.tsx (change workdir), and lib/updater.ts (ask/message) were rejected by Tauri's ACL. The component-level TypeScript wrappers caught the error (the 'try { await import... } catch { ... }' fallback in WorkdirSetup and Settings) but the error message was visible in the alert('Error: ...') and looked like a crash to the chairman. Two fixes: (1) Added `dialog:default` plus the 5 specific allow-* permissions to default.json — `dialog:allow-open`, `dialog:allow-save`, `dialog:allow-message`, `dialog:allow-ask`, `dialog:allow-confirm`. Verified that `tauri-plugin-dialog` was already in Cargo.toml [dependencies]. (2) Hidden the '提示：可以是空目录...' hint when the user has already typed a path — the hint is only useful when the input is empty. Small UX polish. Rebuilt NSIS installer (16,054,137 bytes, ~5KB smaller than v0.4.0 since the only changes were JSON and a one-line conditional). Verification: pnpm typecheck clean, cargo test 39/39 pass, Tauri build produces new NSIS installer. Next step: push v0.4.1 to GitHub as a new release that REPLACES the v0.4.0 installer (or as a delta). Will also note the workdir dialog now actually works so the chairman can pick directories without the error.",
+  "files": [
+    "apps/desktop/src-tauri/capabilities/default.json",
+    "apps/desktop/src/components/WorkdirSetup.tsx"
+  ],
+  "tags": [
+    "bug-fix",
+    "frontend-runtime",
+    "dialog-acl",
+    "v0.4.1",
+    "ux-polish",
+    "workdir-hint"
+  ]
+}

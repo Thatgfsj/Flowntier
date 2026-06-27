@@ -146,9 +146,11 @@ export function WorkdirSetup({ initialPath, onConfirm, onSkip, mode }: WorkdirSe
           </p>
         )}
 
-        <p className="mt-3 text-xs text-text-secondary">
-          {t('workdir.hint')}
-        </p>
+        {path.trim().length === 0 && (
+          <p className="mt-3 text-xs text-text-secondary">
+            {t('workdir.hint')}
+          </p>
+        )}
 
         <div className="mt-5 flex items-center justify-end gap-2">
           {isFirstLaunch && onSkip && (
