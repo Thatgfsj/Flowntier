@@ -180,7 +180,40 @@ export function Settings({ open, onClose, workdir }: SettingsProps) {
   const [selected, setSelected] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<string | null>(null);
+  // BUG-FRONTEND-RT-6 (event 000038): double-confirmation flow
+  // for destructive "Clear local data" — the user must type a
+  // specific phrase before the destructive button activates.
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deletePhrase, setDeletePhrase] = useState('');
+  const [deleteBusy, setDeleteBusy] = useState(false);
   const customModels = useCustomModels();
+
+  // BUG-FRONTEND-RT-6 (event 000038): the destructive "Clear
+  // local data" action. The dialog has its own phrase check;
+  // this function only runs after the user has typed the
+  // expected phrase. We do a final defence-in-depth check here
+  // in case the function is ever called from a different code
+  // path (e.g. a refactor) that bypasses the dialog.
+  const confirmWipe = async () => {
+    if (deletePhrase !== t('settings.about.deletePhrase')) {
+      console.warn('[Settings] wipe blocked: phrase mismatch');
+      return;
+    }
+    setDeleteBusy(true);
+    try {
+      await invoke('wipe_all_data');
+      setDeleteDialogOpen(false);
+      setDeletePhrase('');
+      // Reload the page so the React state re-initializes from
+      // an empty data dir. The Welcome screen will appear next
+      // launch (kv.first_run is null => first run path).
+      setTimeout(() => window.location.reload(), 100);
+    } catch (e) {
+      alert(t('settings.about.clearDataError', { error: String(e) }));
+    } finally {
+      setDeleteBusy(false);
+    }
+  };
   // Best-effort: ask the Rust side for the resolved data dir
   // (so the About card can show "Logs are at..."). Falls back to
   // a friendly placeholder if the runtime is offline.
@@ -517,20 +550,15 @@ export function Settings({ open, onClose, workdir }: SettingsProps) {
                   <button
                     type="button"
                     onClick={async () => {
-                      if (!window.confirm(
-                        t('settings.about.clearDataConfirmBody')
-                      )) return;
-                      try {
-                        await invoke('wipe_all_data');
-                        // Reload the page so the React state
-                        // re-initializes from an empty data dir.
-                        // The Welcome screen will appear next
-                        // launch (kv.first_run is null => first
-                        // run path).
-                        setTimeout(() => window.location.reload(), 100);
-                      } catch (e) {
-                        alert(t('settings.about.clearDataError', { error: String(e) }));
-                      }
+                      // BUG-FRONTEND-RT-6 (event 000038): a
+                      // second confirmation is now required —
+                      // the user has to type a specific phrase
+                      // ("DELETE" in en-US / "删除" in zh-CN)
+                      // to prevent accidental data loss. The
+                      // destructive button stays disabled until
+                      // the input matches.
+                      setDeletePhrase('');
+                      setDeleteDialogOpen(true);
                     }}
                     className="rounded-md border border-status-failed/40 bg-status-failed/10 px-3 py-2 text-xs text-status-failed hover:bg-status-failed/20"
                   >
@@ -539,6 +567,68 @@ export function Settings({ open, onClose, workdir }: SettingsProps) {
                 </Card>
                 <SearchBugPanel />
               </main>
+
+      {/* BUG-FRONTEND-RT-6 (event 000038): double-confirmation
+          modal for destructive "Clear local data". The user must
+          type the specific phrase (`DELETE` in en-US, `删除` in
+          zh-CN) to activate the destructive button. Prevents
+          accidental data loss from a stray click. The phrase is
+          localized via `settings.about.deletePhrase`. */}
+      {deleteDialogOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="delete-dialog-title"
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setDeleteDialogOpen(false);
+          }}
+        >
+          <div className="w-[420px] max-w-[90vw] rounded-lg border border-status-failed/40 bg-surface-1 p-5 shadow-xl">
+            <h2 id="delete-dialog-title" className="text-base font-semibold text-status-failed">
+              {t('settings.about.clearData')}
+            </h2>
+            <p className="mt-2 text-xs text-text-secondary">
+              {t('settings.about.clearDataConfirmBody')}
+            </p>
+            <p className="mt-3 text-xs text-text-secondary">
+              {t('settings.about.deletePhraseHint', { phrase: t('settings.about.deletePhrase') })}
+            </p>
+            <input
+              type="text"
+              value={deletePhrase}
+              onChange={(e) => setDeletePhrase(e.target.value)}
+              placeholder={t('settings.about.deletePhrase')}
+              autoFocus
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && deletePhrase === t('settings.about.deletePhrase')) {
+                  confirmWipe();
+                } else if (e.key === 'Escape') {
+                  setDeleteDialogOpen(false);
+                }
+              }}
+              className="mt-2 w-full rounded border border-border bg-surface-2 px-2 py-1.5 font-mono text-sm focus:border-status-failed focus:outline-none"
+            />
+            <div className="mt-4 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setDeleteDialogOpen(false)}
+                className="rounded-md border border-border bg-surface-2 px-3 py-1.5 text-xs text-text-secondary hover:text-primary"
+              >
+                {t('settings.action.close')}
+              </button>
+              <button
+                type="button"
+                disabled={deleteBusy || deletePhrase !== t('settings.about.deletePhrase')}
+                onClick={confirmWipe}
+                className="rounded-md border border-status-failed/40 bg-status-failed px-3 py-1.5 text-xs font-medium text-white hover:bg-status-failed/90 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {deleteBusy ? t('settings.action.save') : t('settings.about.clearData')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
         </div>
       </div>
     </div>

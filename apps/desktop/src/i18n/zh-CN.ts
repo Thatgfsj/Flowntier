@@ -367,6 +367,8 @@ const zhCN = {
   'settings.field.keyYes': '✓ 是',
   'settings.field.keyNo': '✗ 否（设置 {{env}} 后重启 runtime）',
   'settings.action.create': '创建',
+  'settings.about.deletePhrase': '删除',
+  'settings.about.deletePhraseHint': '请在下方输入 "{{phrase}}" 以确认删除所有本地数据。',
   'plugins.title': '插件',
   'plugins.loading': '加载插件中...',
   'plugins.error': '错误: {{error}}',

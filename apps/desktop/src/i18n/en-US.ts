@@ -370,6 +370,8 @@ const enUS: Translations = {
   'settings.field.keyYes': '✓ Yes',
   'settings.field.keyNo': '✗ Not set (set {{env}} and restart the runtime)',
   'settings.action.create': 'Create',
+  'settings.about.deletePhrase': 'DELETE',
+  'settings.about.deletePhraseHint': 'Type "{{phrase}}" below to confirm deleting all local data.',
   'plugins.title': 'Plugins',
   'plugins.loading': 'Loading plugins...',
   'plugins.error': 'Error: {{error}}',

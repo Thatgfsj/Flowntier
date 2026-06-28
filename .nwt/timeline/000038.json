@@ -1,0 +1,26 @@
+{
+  "id": "000038",
+  "timestamp": "2026-06-28T14:05:00Z",
+  "task": "v0.4.3: Settings double-confirmation dialog + WorkdirSetup keyboard shortcuts",
+  "summary": "v0.4.3: Settings double-confirmation dialog + WorkdirSetup keyboard shortcuts",
+  "reason": "Chairman: 'ok我这边进行测试, 你那边优化一下用户体验吧' (I'll test on my side, you optimize the UX). Three UX improvements landed in v0.4.3: (1) BUG-FRONTEND-RT-6: 'Clear local data' button in Settings no longer uses `window.confirm()` (a single click = data loss). It now opens a real modal with role=dialog, aria-modal=true, aria-labelledby. The user must type a specific phrase (DELETE in en-US, 删除 in zh-CN) to enable the destructive button. Phrase is i18n'd via `settings.about.deletePhrase` + a hint string `settings.about.deletePhraseHint`. The destructive button is disabled until the input matches. The phrase check is duplicated inside `confirmWipe()` (defence-in-depth) so a refactor that bypasses the modal still can't wipe data without the correct phrase. Enter inside the input submits; Escape closes. (2) BUG-FRONTEND-RT-7: WorkdirSetup dialog now supports keyboard shortcuts — Enter in the path input submits, Escape clears the field. Matches user expectations for any dialog. (3) v0.4.2: tauri.conf.json + package.json version bumped to 0.4.3 so the NSIS installer filename shows `Flowntier_0.4.3_x64-setup.exe`. Verification: 39/39 Rust E2E pass, pnpm typecheck clean, Tauri NSIS build produces 16,056,295-byte installer. Chairman's previous v0.4.2 install on desktop is superseded — the v0.4.3 installer is now at `C:\\Users\\thatg\\Desktop\\Flowntier_0.4.3_x64-setup.exe`. The delete confirmation UX was a real concern — a real user clicking the red '擦除本地数据' button by accident would lose all their API keys, custom providers, and NWT timeline. The double-confirmation makes this impossible without typing the exact phrase.",
+  "files": [
+    "apps/desktop/src/zones/Settings.tsx",
+    "apps/desktop/src/components/WorkdirSetup.tsx",
+    "apps/desktop/src/i18n/zh-CN.ts",
+    "apps/desktop/src/i18n/en-US.ts",
+    "apps/desktop/src-tauri/tauri.conf.json",
+    "apps/desktop/package.json"
+  ],
+  "tags": [
+    "v0.4.3",
+    "ux-improvement",
+    "bug-fix",
+    "double-confirmation",
+    "destructive-action",
+    "keyboard-a11y",
+    "workdir-setup",
+    "enter-submit",
+    "escape-cancel"
+  ]
+}

@@ -122,6 +122,20 @@ export function WorkdirSetup({ initialPath, onConfirm, onSkip, mode }: WorkdirSe
               setPath(e.target.value);
               setErr(null);
             }}
+            // BUG-FRONTEND-RT-7 (event 000039): pressing Enter
+            // in the input now submits the workdir — matches
+            // every other dialog in the app and what real users
+            // expect. Escape clears the field (analogous to
+            // the Settings delete dialog's Escape-cancels).
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                confirm();
+              } else if (e.key === 'Escape') {
+                setPath('');
+                setErr(null);
+              }
+            }}
             placeholder={t('workdir.placeholder')}
             className="flex-1 rounded border border-border bg-surface-2 px-3 py-2 font-mono text-sm outline-none focus:border-chief"
             aria-label={t('workdir.placeholder')}
