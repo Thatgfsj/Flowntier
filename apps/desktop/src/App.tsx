@@ -214,6 +214,24 @@ export function App() {
       } catch {}
     })();
   }, []);
+
+  // BUG-FRONTEND-RT-17 (event 000045): seed env-var API keys
+  // on app startup. The Rust shell's seed_secrets command
+  // reads standard env vars (OPENAI_API_KEY, ANTHROPIC_API_KEY,
+  // GOOGLE_API_KEY, DEEPSEEK_API_KEY, MOONSHOT_API_KEY,
+  // OPEN_BIGMODEL_API_KEY) and stores them in the keychain.
+  // Without this, users with env vars set up wouldn't see any
+  // providers in Settings — the panel would say (0) even
+  // though keys are available.
+  useEffect(() => {
+    void (async () => {
+      try {
+        await invoke('seed_secrets');
+      } catch (e) {
+        console.warn('[App] seed_secrets failed:', e);
+      }
+    })();
+  }, []);
   useEffect(() => {
     let cancelled = false;
     void (async () => {

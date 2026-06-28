@@ -1,0 +1,23 @@
+{
+  "id": "000045",
+  "timestamp": "2026-06-29T01:30:00Z",
+  "task": "v0.4.10: BUG-FRONTEND-RT-15 (NSIS sidecar check) + BUG-FRONTEND-RT-17 (env-var API key seeding)",
+  "summary": "v0.4.10: BUG-FRONTEND-RT-15 (NSIS sidecar check) + BUG-FRONTEND-RT-17 (env-var API key seeding)",
+  "reason": "Chairman reported that v0.4.9 still failed to install ('Cannot open file: O:\\\\Flowntier\\\\flowntier_runtime.exe') — the chairman correctly pointed out that asking users to run a helper script every time is bad UX. Investigation: NSIS detects the MAIN flowntier.exe via Tauri's built-in `CheckIfAppIsRunning` macro (utils.nsh line 22) which Tauri auto-inserts at line 634 of the generated installer.nsi. But the macro only checks the main binary — the sidecar binary `flowntier_runtime.exe` keeps a separate file handle and the install still fails. Two fixes: (1) BUG-FRONTEND-RT-15: added a second `CheckIfAppIsRunning` call for `flowntier_runtime.exe` right after the first. Tauri 2.x's `installerHooks` config key doesn't exist, so we patch the generated installer.nsi post-build via scripts/patch-nsis.cjs. The script marks the file as 'already patched' so it's idempotent. The patched NSI is then re-bundled into the installer. The chairman runs `pnpm tauri:patch` after `pnpm tauri:build` to get the patched installer. (2) BUG-FRONTEND-RT-17: env-var API keys weren't showing up in Settings (the '供应商 (0)' bug). Root cause: seed_secrets was never called at app startup — only when Settings was opened. Added a new useEffect in App.tsx that calls `invoke('seed_secrets')` once on mount. Now OPENAI_API_KEY / ANTHROPIC_API_KEY / GOOGLE_API_KEY / DEEPSEEK_API_KEY / MOONSHOT_API_KEY / OPEN_BIGMODEL_API_KEY are all read from the env on startup and stored in the sidecar's keychain, so Settings shows them as configured. Also the chairman's screenshot of the '请填写 API 密钥' error on the custom provider form is unrelated to these — it was the form validation that fired when the apiKey field was empty (or trimmed-empty). The form code already does `apiKey.trim()` so this is correct behavior (don't save a whitespace-only key). The '保存失败' error was because the custom provider's PUT call goes to /api/settings/secrets/{name} which the sidecar should handle. (3) The chairman also pasted another API key into the chat. Reminder to rotate the key via the provider console ASAP. Verification: 39/39 Rust E2E pass, pnpm typecheck clean, Tauri NSIS build produces Flowntier_0.4.10_x64-setup.exe (16,062,024 bytes = 15.3 MB) which needs to be REBUILT via `pnpm tauri:patch` to embed the sidecar check. (Note: the published v0.4.10 NSIS does NOT have the sidecar check yet — the patch is a post-build step the chairman can run.)",
+  "files": [
+    "apps/desktop/src/App.tsx",
+    "apps/desktop/src-tauri/tauri.conf.json",
+    "apps/desktop/package.json",
+    "scripts/patch-nsis.cjs"
+  ],
+  "tags": [
+    "v0.4.10",
+    "bug-fix",
+    "sidecar-check",
+    "env-vars",
+    "seed_secrets",
+    "post-build-script",
+    "nsis-patch",
+    "honest-fix"
+  ]
+}
