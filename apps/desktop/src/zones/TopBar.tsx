@@ -92,6 +92,12 @@ function LanguageToggle() {
     <button
       type="button"
       onClick={() => {
+        // BUG-FRONTEND-RT-?? (event 000046): when the Settings
+        // modal is open, the modal backdrop intercepts pointer
+        // events. Dispatch a custom event that App listens
+        // for to close the Settings modal first, so the locale
+        // toggle always works regardless of modal state.
+        window.dispatchEvent(new CustomEvent('flowntier:close-modals'));
         void i18n.changeLanguage(next);
       }}
       title={t('lang.label') + ': ' + (SUPPORTED.find((l) => l === next) ?? '')}

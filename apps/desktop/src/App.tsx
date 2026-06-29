@@ -124,6 +124,7 @@ export function App() {
   // for the App-level JSX (TopBar subtitle, chiefCard, etc.). The
   // DriftBanner child component has its own t() at line 102.
   const { t } = useTranslation();
+  const [firstRun, setFirstRun] = useState<boolean | null>(null);
   const [activePhase, setActivePhase] = useState(0);
   const [phaseStates, setPhaseStates] = useState<Record<Phase['name'], PhaseState>>({ ...PHASE_STATE });
   const [tasks, setTasks] = useState<TaskRow[]>([...INITIAL_TASKS]);
@@ -168,7 +169,17 @@ export function App() {
   // of the main dashboard. Once the user clicks "进入工作台"
   // Welcome calls first_run_complete which writes false and
   // calls onComplete -> setFirstRun(false).
-  const [firstRun, setFirstRun] = useState<boolean | null>(null);
+  // BUG-FRONTEND-RT-?? (event 000046): when the language: when the language
+  // toggle in TopBar fires, also close any open modal
+  // (e.g. the Settings modal) so the toggle isn't blocked by
+  // the modal backdrop. Listens for the custom event
+  // 'flowntier:close-modals' that TopBar dispatches.
+  useEffect(() => {
+    const handler = () => setSettingsOpen(false);
+    window.addEventListener('flowntier:close-modals', handler);
+    return () => window.removeEventListener('flowntier:close-modals', handler);
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     void (async () => {
@@ -649,6 +660,7 @@ export function App() {
       />
     );
   }
+
   // Step 2: first-run gate. Show Welcome until the user clicks
   // "进入工作台". firstRun === null means we're still loading
   // the kv value; show a blank screen rather than a flash of

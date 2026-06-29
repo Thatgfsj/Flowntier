@@ -1,0 +1,24 @@
+{
+  "id": "000046",
+  "timestamp": "2026-06-29T05:00:00Z",
+  "task": "v0.4.11: get_diagnostics + locale-close-modals fix + chairman diagnostic helper",
+  "summary": "v0.4.11: get_diagnostics + locale-close-modals fix + chairman diagnostic helper",
+  "reason": "Chairman explicitly asked for a detailed local log + a real local run of v0.4.11, so the chairman could compare his real machine against it. Three deliverables: (1) NEW Tauri command 'get_diagnostics' that returns a JSON snapshot of: data_dir + log_dir paths, tauri_version, which env vars (MINIMAX_API_KEY, OPENAI_API_KEY, etc.) are set/unset, workdir_json + nwt_root_json file state, secrets_count (from keychain), sidecar_path, log_tail, and timestamp. Chairman can invoke this from the dev console and share the output. (2) BUG-FRONTEND-RT-??: language toggle in TopBar was blocked by the Settings modal backdrop — clicking 🌐 中文 when the modal was open would fail. Fix: TopBar dispatches a custom 'flowntier:close-modals' event; App listens for it and calls setSettingsOpen(false) BEFORE the locale toggle fires. So language switching works regardless of modal state. (3) scripts/diagnose.cmd — a chairman-facing diagnostic helper that captures running processes (tasklist), install dir state (O:\\Flowntier + C:\\Program Files\\Flowntier), AppData state (%APPDATA%\\flowntier), env vars (all 7 known keys), and NSIS log presence. Output goes to C:\\Users\\thatg\\flowntier-diagnose.txt. Also wrote C:\\Users\\thatg\\v0411-diagnostics-comparison.md with: (a) local test results, (b) get_diagnostics example output, (c) what chairman should do step-by-step (uninstall old → run diagnose → install → run diagnose again → test → report), (d) honest disclaimers — the local test does NOT prove v0.4.11 works on chairman's real Windows machine. It only proves code compiles, 0 console errors, NSIS builds, sidecar check patch works. Real hands-on test is the only verification path. Local E2E: 0 page errors, 0 console errors, 6 screenshots, full log at C:\\Users\\thatg\\v0411-local.log. Build: 39/39 Rust E2E pass, pnpm typecheck clean, Tauri NSIS build produces 16,080,216-byte v0.4.11 installer at C:\\Users\\thatg\\Desktop\\. Patched NSIS so sidecar check is in.",
+  "files": [
+    "apps/desktop/src-tauri/src/lib.rs",
+    "apps/desktop/src/App.tsx",
+    "apps/desktop/src/zones/TopBar.tsx",
+    "scripts/diagnose.cmd",
+    "apps/desktop/src-tauri/tauri.conf.json",
+    "apps/desktop/package.json"
+  ],
+  "tags": [
+    "v0.4.11",
+    "diagnostics",
+    "get_diagnostics",
+    "locale-close-modals",
+    "diagnose-cmd",
+    "chairman-handoff",
+    "honest-disclaimers"
+  ]
+}
