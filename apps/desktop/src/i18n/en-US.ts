@@ -129,7 +129,9 @@ const enUS: Translations = {
   'settings.quickAdd.added': '✓ Added successfully',
   'settings.quickAdd.addedShort': '✓ added',
   'settings.quickAdd.keyPlaceholder': 'sk-...',
-  'settings.quickAdd.modelCount': '{{count}} models · {{keyEnv}}',
+  'settings.quickAdd.modelCount': '{{count}} models',
+  'settings.quickAdd.configuredHint': 'API key configured',
+  'settings.quickAdd.addKeyHint': 'Click to add API key',
   'settings.quickAdd.errorMissingName': 'Please enter a display name',
   'settings.quickAdd.errorMissingKey': 'Please enter an API key',
   'settings.quickAdd.errorInvalidKey': 'API key has an invalid format (letters, digits, underscore only)',
@@ -163,11 +165,9 @@ const enUS: Translations = {
   'settings.models.defaultContext': 'default context',
   'settings.models.thinking.low': 'Low',
   'settings.models.thinking.medium': 'Medium',
-  'settings.models.thinking.high': 'High',
-
-  // ── CompatHints (per-provider 兼容接口 hint) ─────────
-  'settings.compat.title': 'Compatible interfaces (pick one)',
-  'settings.compat.restartHint': 'Set these environment variables (or add <MINIMAX_API_KEY> in the panel below and the runtime will inject os.environ), then restart the runtime.',
+'settings.models.thinking.high': 'High',
+  'settings.models.metadata.thinking': 'think',
+  'settings.models.metadata.context': 'ctx',
 
   // ── Model manager dialog ─────────────────────
   'settings.models.fallbackChain': 'Fallback chain ({{count}})',
@@ -180,6 +180,7 @@ const enUS: Translations = {
   'settings.roles.chief': 'Chief',
   'settings.roles.worker': 'Worker',
   'settings.roles.reporter': 'Reporter',
+  'settings.roles.planner': 'Planner',
   'settings.quickAdd.errorSaveFailed': 'Save failed',
   'settings.quickAdd.errorNoModels': 'Please add at least one model',
   'settings.providers.siliconflow.desc': 'SiliconFlow',

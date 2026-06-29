@@ -292,23 +292,21 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
     });
 
     // Router: per-role default-model + fallback chain. v0.4 fixes
-    // the v0.3 bug where every role pointed to
-    // 'anthropic:claude-sonnet-4' (a model id that doesn't exist
-    // in the presets list — Settings.tsx would have shown it
-    // as invalid). All roles now default to Claude Opus 4.8 with
-    // Sonnet 4.6 as the automatic fallback.
+    // v0.4.16 (event 000052): chairman rejected the v0.4.15 hard-coded
+    // defaults of "anthropic:claude-opus-4-8" + ["anthropic:claude-sonnet-4-6"].
+    // Every role now starts empty — the user picks what they actually have.
     d.register("GET", "/api/router/roles", |_body| {
         Box::pin(async {
             Ok((
                 200,
                 json!({
                     "roles": [
-                        { "role": "agent:chief",    "default_model": "anthropic:claude-opus-4-8",    "fallback_chain": ["anthropic:claude-sonnet-4-6"] },
-                        { "role": "agent:worker",   "default_model": "anthropic:claude-opus-4-8",    "fallback_chain": ["anthropic:claude-sonnet-4-6"] },
-                        { "role": "agent:planner",  "default_model": "anthropic:claude-opus-4-8",    "fallback_chain": ["anthropic:claude-sonnet-4-6"] },
-                        { "role": "agent:critic:a", "default_model": "anthropic:claude-opus-4-8",    "fallback_chain": ["anthropic:claude-sonnet-4-6"] },
-                        { "role": "agent:critic:b", "default_model": "anthropic:claude-opus-4-8",    "fallback_chain": ["anthropic:claude-sonnet-4-6"] },
-                        { "role": "agent:reporter", "default_model": "anthropic:claude-opus-4-8",    "fallback_chain": ["anthropic:claude-sonnet-4-6"] },
+                        { "role": "agent:chief",    "default_model": "", "fallback_chain": [] },
+                        { "role": "agent:worker",   "default_model": "", "fallback_chain": [] },
+                        { "role": "agent:planner",  "default_model": "", "fallback_chain": [] },
+                        { "role": "agent:critic:a", "default_model": "", "fallback_chain": [] },
+                        { "role": "agent:critic:b", "default_model": "", "fallback_chain": [] },
+                        { "role": "agent:reporter", "default_model": "", "fallback_chain": [] },
                     ],
                 }),
             ))
@@ -683,9 +681,20 @@ async fn list_models(
     // Anthropic has no /v1/models endpoint — return the hard-coded
     // fallback list directly.
     if !has_live {
-        let models: Vec<Value> = crate::providers::ANTHROPIC_FALLBACK_MODELS.iter()
-            .map(|(id, label)| json!({
-                "id": id, "display_name": label, "source": "fallback",
+        // v0.4.16: prefer the per-provider OPENAI_FALLBACK_MODELS
+        // entry if one exists, then fall back to Anthropic's.
+        let entries: &[crate::providers::ModelEntry] =
+            crate::providers::OPENAI_FALLBACK_MODELS.iter()
+                .find(|(pid, _)| *pid == id)
+                .map(|(_, m)| *m)
+                .unwrap_or(crate::providers::ANTHROPIC_FALLBACK_MODELS);
+        let models: Vec<Value> = entries.iter()
+            .map(|m| json!({
+                "id": m.id,
+                "display_name": m.display_name,
+                "thinking_strength": m.thinking_strength,
+                "context_length": m.context_length,
+                "source": "fallback",
             }))
             .collect();
         let body_str = serde_json::to_string(&models).unwrap();
@@ -730,14 +739,15 @@ async fn list_models(
         .await
         .map_err(|e| format!("GET {url}: {e}"))?;
     let status = resp.status();
-    if !status.is_success() {
-        return Ok((status.as_u16(), json!({
-            "error": format!("provider returned {status}"),
-            "url": url,
-        })));
-    }
-    let body: Value = resp.json().await
-        .map_err(|e| format!("parse {url}: {e}"))?;
+if !status.is_success() {
+            return Ok((status.as_u16(), json!({
+                "error": format!("provider returned {status}"),
+                "url": url,
+                "provider_id": id,
+            })));
+        }
+        let body: Value = resp.json().await
+            .map_err(|e| format!("parse {url}: {e}"))?;
     // OpenAI-compatible /models response shape:
     // { "object": "list", "data": [{ id, object, ... }, ...] }
     let models: Vec<Value> = body.get("data")
@@ -754,13 +764,14 @@ async fn list_models(
         models_json: body_str,
         fetched_at: chrono::Utc::now().timestamp(),
     }).await;
-    Ok((200, json!({
-        "provider_id": id,
-        "models": models,
-        "cached": false,
-        "fallback": false,
-    })))
-}
+Ok((200, json!({
+            "provider_id": id,
+            "models": models,
+            "cached": false,
+            "fallback": false,
+            "url": url,
+        })))
+    }
 
 /// POST /api/providers/custom — add a relay-station / private-gateway
 /// provider. The api_key lives in the encrypted secret store under
@@ -862,9 +873,18 @@ async fn refresh_stale_caches(state: &Arc<ServerState>) -> usize {
             let cached = state.repo.get_model_cache(preset.id).await
                 .ok().flatten();
             if cached.is_none() {
-                let models: Vec<Value> = crate::providers::ANTHROPIC_FALLBACK_MODELS.iter()
-                    .map(|(id, label)| json!({
-                        "id": id, "display_name": label, "source": "fallback",
+                let entries: &[crate::providers::ModelEntry] =
+                    crate::providers::OPENAI_FALLBACK_MODELS.iter()
+                        .find(|(pid, _)| *pid == preset.id)
+                        .map(|(_, m)| *m)
+                        .unwrap_or(crate::providers::ANTHROPIC_FALLBACK_MODELS);
+                let models: Vec<Value> = entries.iter()
+                    .map(|m| json!({
+                        "id": m.id,
+                        "display_name": m.display_name,
+                        "thinking_strength": m.thinking_strength,
+                        "context_length": m.context_length,
+                        "source": "fallback",
                     }))
                     .collect();
                 let body = serde_json::to_string(&models).unwrap_or_default();

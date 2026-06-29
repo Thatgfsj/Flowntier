@@ -127,7 +127,9 @@ const zhCN = {
   'settings.quickAdd.added': '✓ 添加成功',
   'settings.quickAdd.addedShort': '✓已添加',
   'settings.quickAdd.keyPlaceholder': 'sk-...',
-  'settings.quickAdd.modelCount': '{{count}} 个模型 · {{keyEnv}}',
+  'settings.quickAdd.modelCount': '{{count}} 个模型',
+  'settings.quickAdd.configuredHint': '已配置 API 密钥',
+  'settings.quickAdd.addKeyHint': '点击此处添加 API 密钥',
   'settings.quickAdd.errorMissingName': '请填写显示名称',
   'settings.quickAdd.errorMissingKey': '请填写 API 密钥',
   'settings.quickAdd.errorInvalidKey': 'API 密钥格式无效（英文+数字+下划线）',
@@ -162,10 +164,8 @@ const zhCN = {
   'settings.models.thinking.low': '低',
   'settings.models.thinking.medium': '中',
   'settings.models.thinking.high': '高',
-
-  // ── CompatHints (per-provider 兼容接口 hint) ─────────
-  'settings.compat.title': '兼容接口（任选其一）',
-  'settings.compat.restartHint': '把以上命令放进系统环境变量（或者在下方添加 <MINIMAX_API_KEY> 后由 runtime 自动注入 os.environ），然后重启 runtime。',
+  'settings.models.metadata.thinking': '思考',
+  'settings.models.metadata.context': '上下文',
 
   // ── Model manager dialog ─────────────────────
   'settings.models.fallbackChain': '回退链（{{count}}）',
@@ -178,6 +178,7 @@ const zhCN = {
   'settings.roles.chief': '主理',
   'settings.roles.worker': '实施',
   'settings.roles.reporter': '汇报',
+  'settings.roles.planner': '策划',
   'settings.quickAdd.errorSaveFailed': '保存失败',
   'settings.quickAdd.errorNoModels': '请至少添加一个模型',
   'settings.providers.siliconflow.desc': 'SiliconFlow (硅基流动)',

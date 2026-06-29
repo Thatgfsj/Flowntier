@@ -1,0 +1,29 @@
+{
+  "id": "000052",
+  "timestamp": "2026-06-30T00:48:00Z",
+  "task": "v0.4.16 — six fixes from screenshot + follow-up",
+  "summary": "v0.4.16 — six fixes from screenshot + follow-up",
+  "reason": "Chairman reported six issues against v0.4.15:\n\n(A) Why does the provider row still show the env-var name (e.g. OPENAI_API_KEY) when it should be reading the keychain? — Settings.tsx:436 always rendered '{{count}} 个模型 · {{keyEnv}}'. After v0.4.12 removed the env-var fallback this string is actively misleading. Fixed: removed keyEnv from the rendered text; added addKeyHint CTA when the row is unconfigured.\n\n(B) Why does an unconfigured provider still appear in the list? — Chairman reversed his earlier 'list all 9' request and explicitly said '没配 key 的不要显示'. Filter is now has_secret || is_local. Header count is the filtered count.\n\n(C) Why are the role names showing as English ('agent:planner' etc.)? — ROLE_KEYS in Settings.tsx:157 only had 5 short names ('chief', 'critic_a', 'critic_b', 'worker', 'reporter'). Rust emits 6 role IDs prefixed with 'agent:' (chief, worker, planner, critic:a, critic:b, reporter). getRoleLabel did an exact-match lookup so the unrecognised IDs fell back to the raw role string. Fixed: strip 'agent:' prefix and ':' to '_' before lookup; added planner i18n key.\n\n(D) Why is the fallback chain pre-populated with 'anthropic:claude-sonnet-4-6' when I never installed Anthropic? — handlers.rs:306-311 hard-coded all six roles to default_model=anthropic:claude-opus-4-8 + fallback_chain=[anthropic:claude-sonnet-4-6]. Fixed: changed in-memory defaults to default_model='' and fallback_chain=[] for all 6 roles. No migration needed because defaults are returned in-memory (no DB row written until chairman saves via PATCH).\n\n(E) '拉取 MiniMax 模型失败' — silent error swallow. — Settings.tsx:957 had `setError(res.error ?? t('settings.models.pullError'))`. When res.error was present but i18n fired instead, chairman couldn't tell whether it was a 401, network error, or non-OpenAI response shape. Fixed: surface res.error verbatim, fall back to i18n only when missing; also added provider_id and url to FetchedModelsResult error shape in handlers.rs:733.\n\n(F) 'MINIMAX_API_KEY 怎么又在调用环境变量' — Settings.tsx:697-727 rendered three `export ...=...` snippets with the i18n string 'runtime 自动注入 os.environ'. After v0.4.12 removed the env-var fallback this is dead code AND lies to the user. Fixed: deleted the entire CompatShim block, the <CompatHints> usage site, and the compat i18n keys.\n\nBonus (G1, G3): chairman needs thinking_strength + context_length metadata for each model. Fixed: extended providers.rs ANTHROPIC_FALLBACK_MODELS into a new OPENAI_FALLBACK_MODELS table with structured ModelEntry (id, display_name, thinking_strength, context_length) for all 9 presets. Added modelBadge helper in Settings.tsx that renders '[think: high] [128k]' inline in the role default + add-fallback dropdown options.\n\n(G2) deferred: custom-model add UI doesn't yet collect thinking_strength + context_length. The user can still edit localStorage JSON or wait for v0.4.17.\n\nFiles: Settings.tsx, providers.rs, handlers.rs, e2e_pipe.rs (added list_roles_returns_empty_defaults, removed stale router_roles_have_real_model_ids), i18n/{zh-CN,en-US}.ts. Bumped 0.4.15 → 0.4.16. NSIS installer (8,375,549 bytes) at C:\\Users\\thatg\\Desktop\\Flowntier_0.4.16_x64-setup.exe. Awaiting hand-test.",
+  "files": [
+    "apps/desktop/src/zones/Settings.tsx",
+    "apps/desktop/src/i18n/zh-CN.ts",
+    "apps/desktop/src/i18n/en-US.ts",
+    "crates/pipe-server/src/providers.rs",
+    "crates/pipe-server/src/handlers.rs",
+    "crates/pipe-server/tests/e2e_pipe.rs",
+    "apps/desktop/src-tauri/tauri.conf.json",
+    "apps/desktop/package.json"
+  ],
+  "tags": [
+    "v0.4.16",
+    "remove-env-var-ui",
+    "hide-unconfigured-providers",
+    "empty-role-defaults",
+    "real-pull-error",
+    "model-metadata-badge",
+    "fallback-catalog-extended",
+    "role-name-localization",
+    "chairman-handoff",
+    "no-tag-yet"
+  ]
+}

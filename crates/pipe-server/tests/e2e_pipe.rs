@@ -386,34 +386,6 @@ async fn custom_provider_full_crud() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn router_roles_have_real_model_ids() {
-    let (addr, handle) = spawn_server("router-roles").await;
-    let resp = client::connect_and_request(
-        &addr,
-        serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": 40,
-            "method": "GET",
-            "params": {"path": "/api/router/roles", "body": null}
-        }),
-    )
-    .await;
-    let roles = resp["result"]["body"]["roles"].as_array().unwrap();
-    assert_eq!(roles.len(), 6);
-    for r in roles {
-        let m = r["default_model"].as_str().unwrap();
-        assert!(
-            m == "anthropic:claude-opus-4-8" || m == "anthropic:claude-sonnet-4-6",
-            "stale model id: {m}"
-        );
-        let chain = r["fallback_chain"].as_array().unwrap();
-        assert!(!chain.is_empty(), "role {} has empty fallback", r["role"]);
-        assert_eq!(chain[0].as_str(), Some("anthropic:claude-sonnet-4-6"));
-    }
-    handle.abort();
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn patch_provider_toggles_enabled() {
     let (addr, handle) = spawn_server("patch").await;
     let resp = client::connect_and_request(
@@ -729,5 +701,64 @@ async fn put_secret_handler_is_registered() {
         "expected HTTP-style response; got status={status} resp={resp_text}"
     );
 
+    handle.abort();
+}
+
+// v0.4.16 (event 000052): chairman rejected the v0.4.15 hard-coded
+// defaults of "anthropic:claude-opus-4-8" + ["anthropic:claude-sonnet-4-6"].
+// Every role must start with default_model:"" and fallback_chain:[].
+// No migration is needed because the handler returns the defaults
+// in-memory each call (no DB row written until chairman explicitly
+// saves via PATCH).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn list_roles_returns_empty_defaults() {
+    let (addr, handle) = spawn_server("roles-empty").await;
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    let resp = client::connect_and_request(
+        &addr,
+        serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "GET",
+            "params": {"path": "/api/router/roles", "body": null}
+        }),
+    )
+    .await;
+    let resp_text = serde_json::to_string(&resp).unwrap_or_default();
+    assert_eq!(resp["result"]["status"].as_u64().unwrap_or(0), 200);
+    let roles = resp["result"]["body"]["roles"]
+        .as_array()
+        .expect("roles array");
+    // Exactly 6 roles, including the v0.4.16 "agent:planner"
+    // addition that wasn't in the v0.4.15 ROLE_KEYS map.
+    assert_eq!(roles.len(), 6, "expected 6 roles; got resp={resp_text}");
+    let expected_ids = [
+        "agent:chief", "agent:worker", "agent:planner",
+        "agent:critic:a", "agent:critic:b", "agent:reporter",
+    ];
+    let ids: Vec<String> = roles.iter()
+        .map(|r| r["role"].as_str().unwrap_or("").to_string())
+        .collect();
+    for id in &expected_ids {
+        assert!(ids.contains(&id.to_string()),
+                "missing role {id} in {ids:?}");
+    }
+    // Every role must start with empty default_model and empty
+    // fallback_chain. This is the chairman's explicit v0.4.16
+    // directive.
+    for r in roles {
+        let id = r["role"].as_str().unwrap_or("?");
+        assert_eq!(
+            r["default_model"].as_str().unwrap_or("<missing>"),
+            "",
+            "role {id} must have empty default_model; resp={resp_text}"
+        );
+        let chain = r["fallback_chain"].as_array()
+            .expect("fallback_chain must be array");
+        assert_eq!(
+            chain.len(), 0,
+            "role {id} must have empty fallback_chain; resp={resp_text}"
+        );
+    }
     handle.abort();
 }

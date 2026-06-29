@@ -159,11 +159,17 @@ const ROLE_KEYS: Record<string, string> = {
   critic_a: 'settings.roles.criticA',
   critic_b: 'settings.roles.criticB',
   worker: 'settings.roles.worker',
+  planner: 'settings.roles.planner',
   reporter: 'settings.roles.reporter',
 };
 function getRoleLabel(t: (k: string) => string, role: string): string {
-  const key = ROLE_KEYS[role];
-  return key ? t(key) : role;
+  // v0.4.16: Rust emits "agent:chief" / "agent:critic:a" etc.
+  // Strip the "agent:" prefix and normalize the critic separators
+  // so ROLE_KEYS (which uses short names) matches.
+  const short = role.startsWith('agent:') ? role.slice('agent:'.length) : role;
+  const normalized = short.replace(/:/g, '_'); // critic:a -> critic_a
+  const key = ROLE_KEYS[normalized];
+  return key ? t(key) : (normalized || role);
 }
 
 export interface SettingsProps {
@@ -384,13 +390,11 @@ export function Settings({ open, onClose, workdir }: SettingsProps) {
                 <CustomProviderForm onSaved={() => void refresh()} />
               </div>
                 <h3 className="mb-2 px-1 text-xs font-semibold uppercase tracking-wide text-text-secondary">
-                  {t('settings.providers.titleWithCount', { count: snapshot.providers.length })}
+                  {t('settings.providers.titleWithCount', { count: snapshot.providers.filter((p) => p.has_secret || p.is_local).length })}
                 </h3>
-                <p className="mb-2 px-1 text-[10px] text-text-secondary">
-                  {t('settings.providers.configuredCount', { count: snapshot.providers.filter((p) => p.has_secret || p.is_local).length })}
-                </p>
                 <div className="flex flex-col gap-2">
                   {snapshot.providers
+                    .filter((p) => p.has_secret || p.is_local)
                     .map((p) => {
                     const isSel = p.id === selected;
                     // v0.4.15: was `p.notes.includes` — but Rust
@@ -433,9 +437,12 @@ export function Settings({ open, onClose, workdir }: SettingsProps) {
                             button lives in the detail panel to keep this
                             row compact. */}
                         <div className="text-[11px] text-text-secondary">
-                          {t('settings.quickAdd.modelCount', {count: p.models.length, keyEnv: p.secret_name})}
+                          {t('settings.quickAdd.modelCount', {count: p.models.length})}
                         </div>
                         <KeyBadge present={p.has_secret} />
+                        {!p.has_secret && (
+                          <div className="text-[10px] text-chief">{t('settings.quickAdd.addKeyHint')}</div>
+                        )}
                       </button>
                     );
                   })}
@@ -482,8 +489,6 @@ export function Settings({ open, onClose, workdir }: SettingsProps) {
                       onRemove={(modelId) => customModels.remove(sel.id, modelId)}
                       onClear={() => customModels.clear(sel.id)}
                     />
-
-                    <CompatHints providerId={sel.id} />
                   </Card>
                 )}
 
@@ -688,46 +693,6 @@ function KeyBadge({ present }: { present: boolean }) {
   );
 }
 
-// Per-provider "兼容接口" hint card. Some providers (e.g. minimax)
-// offer multiple SDK-compatible endpoints; surface the snippets so the
-// user knows which env vars to set.
-function CompatHints({ providerId }: { providerId: string }) {
-  const { t } = useTranslation();
-  if (providerId !== 'minimax') return null;
-  return (
-    <div className="mt-4 rounded-md border border-border bg-surface-2 p-3">
-      <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-text-secondary">
-        {t('settings.compat.title')}
-      </h4>
-      <div className="space-y-3 text-[11px]">
-        <div>
-          <div className="mb-1 font-medium"></div>
-          <pre className="overflow-x-auto rounded bg-surface-3 p-2 font-mono leading-relaxed">
-{`export ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic
-export ANTHROPIC_API_KEY=\${YOUR_API_KEY}`}
-          </pre>
-        </div>
-        <div>
-          <div className="mb-1 font-medium">{t('settings.custom.kind.openai')}</div>
-          <pre className="overflow-x-auto rounded bg-surface-3 p-2 font-mono leading-relaxed">
-{`export OPENAI_BASE_URL=https://api.minimaxi.com/v1
-export OPENAI_API_KEY=\${YOUR_API_KEY}`}
-          </pre>
-        </div>
-        <div>
-          <div className="mb-1 font-medium">{t('settings.custom.kindLabel')}</div>
-          <pre className="overflow-x-auto rounded bg-surface-3 p-2 font-mono leading-relaxed">
-{`export MINIMAX_API_KEY=\${YOUR_API_KEY}`}
-          </pre>
-        </div>
-        <div className="text-text-secondary">
-          {t('settings.compat.restartHint')}
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // ── Per-role assignment card ──────────────────────────────────────
 
 interface AvailableModel {
@@ -735,6 +700,23 @@ interface AvailableModel {
   provider_display: string;
   model: string;
   display_name: string;
+  thinking_strength?: string;
+  context_length?: number | null;
+}
+
+// v0.4.16: render the thinking + context metadata inline next to
+// each option so the user can pick the right model without
+// leaving the page. Returns "" when the model has no metadata
+// (e.g. live-catalog entries without metadata fields).
+function modelBadge(m: AvailableModel): string {
+  const parts: string[] = [];
+  if (m.thinking_strength) {
+    parts.push(`[think: ${m.thinking_strength}]`);
+  }
+  if (typeof m.context_length === 'number' && m.context_length > 0) {
+    parts.push(`[${Math.round(m.context_length / 1000)}k]`);
+  }
+  return parts.length > 0 ? '· ' + parts.join(' ') : '';
 }
 
 interface RoleAssignmentCardProps {
@@ -813,7 +795,7 @@ function RoleAssignmentCard({
                 const ref = `${m.provider}:${m.model}`;
                 return (
                   <option key={ref} value={ref}>
-                    {m.provider_display} · {m.display_name}
+                    {m.provider_display} · {m.display_name}  {modelBadge(m)}
                   </option>
                 );
               })
@@ -844,7 +826,7 @@ function RoleAssignmentCard({
                 const ref = `${m.provider}:${m.model}`;
                 return (
                   <option key={ref} value={ref}>
-                    {m.provider_display} · {m.display_name}
+                    {m.provider_display} · {m.display_name}  {modelBadge(m)}
                   </option>
                 );
               })}
@@ -954,7 +936,19 @@ function ProviderModelManager({
     try {
       const res = await fetchProviderModels(providerId);
       if (!res.ok) {
-        setError(res.error ?? t('settings.models.pullError'));
+        // v0.4.16: surface the real backend error verbatim. The
+        // previous behaviour swallowed it behind a generic
+        // "拉取失败" string and chairman couldn't tell whether
+        // it was a 401, a network error, or a non-OpenAI
+        // response shape. We still keep the i18n key as a
+        // fallback if for some reason backend returns no error.
+        const backendErr = res.error ?? t('settings.models.pullError');
+        setError(backendErr);
+        try {
+          // Console-log the structured info so the user can
+          // copy-paste it into a bug report.
+          console.warn('[Flowntier] pull models failed', res);
+        } catch {/* ignore */}
       } else {
         setFetched(res.models);
       }
