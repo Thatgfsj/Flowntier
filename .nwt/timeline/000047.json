@@ -1,0 +1,17 @@
+{
+  "id": "000047",
+  "timestamp": "2026-06-29T13:30:00Z",
+  "task": "Release v0.4.11 to GitHub",
+  "summary": "Release v0.4.11 to GitHub",
+  "reason": "Committed 536c44f, tagged v0.4.11, pushed to origin/main, created GitHub release id 346125091 via API (gh CLI was broken — ERR_USE_AFTER_CLOSE in inquirer). Uploaded Flowntier_0.4.11_x64-setup.exe (16,080,216 bytes) as release asset, marked latest. Direct download: https://github.com/Thatgfsj/Flowntier/releases/download/v0.4.11/Flowntier_0.4.11_x64-setup.exe. Also staged C:\\Users\\thatg\\Desktop\\Flowntier_0.4.11_x64-setup.exe (same file) so chairman can install locally without re-downloading. Ready for chairman hands-on test.",
+  "files": [
+    ".nwt/timeline/000047.json"
+  ],
+  "tags": [
+    "v0.4.11",
+    "github-release",
+    "gh-broken",
+    "api-fallback",
+    "ready-for-chairman-test"
+  ]
+}
