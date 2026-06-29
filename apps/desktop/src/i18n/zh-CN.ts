@@ -190,6 +190,8 @@ const zhCN = {
   'settings.about.clearDataConfirmNo': '✗ 否',
   'settings.about.clearDataError': '清除失败：{{error}}',
   'settings.about.changeWorkdir': '更换工作目录',
+  'settings.about.logDir': '日志目录',
+  'settings.about.logDirHint': '日志按天轮换（UTC），文件命名 flowntier.log.YYYY-MM-DD',
   'settings.about.changeWorkdirPrompt': '请输入新的工作目录路径：',
   'settings.about.changeWorkdirError': '更换失败：{{error}}',
   'settings.about.currentWorkdir': '当前工作目录',

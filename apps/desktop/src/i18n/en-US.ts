@@ -192,6 +192,8 @@ const enUS: Translations = {
   'settings.about.clearDataConfirmNo': '✗ No',
   'settings.about.clearDataError': 'Clear failed: {{error}}',
   'settings.about.changeWorkdir': 'Change work directory',
+  'settings.about.logDir': 'Log directory',
+  'settings.about.logDirHint': 'Logs rotate daily (UTC); file naming flowntier.log.YYYY-MM-DD',
   'settings.about.changeWorkdirPrompt': 'Enter the new work directory path:',
   'settings.about.changeWorkdirError': 'Change failed: {{error}}',
   'settings.about.currentWorkdir': 'Current work directory',

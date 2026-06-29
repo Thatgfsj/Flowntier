@@ -454,3 +454,99 @@ async fn patch_provider_toggles_enabled() {
 
     handle.abort();
 }
+
+// v0.4.12 (event 000048): the api_key_env fallback in
+// /api/run_task was removed. The Tauri shell resolves the key
+// from the OS credential store (DPAPI via keyring) and sends
+// plaintext in body.api_key. This test pins the contract:
+// sending api_key_env alone (even with the env var set in the
+// process) MUST NOT authenticate.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn run_task_rejects_api_key_env_fallback() {
+    // Make sure a stray env var from the host environment does
+    // NOT silently satisfy the new contract.
+    let unique_var = "FLOWNTIER_E2E_DUMMY_KEY_DO_NOT_USE";
+    std::env::set_var(unique_var, "sk-leaked-value-from-env");
+
+    let (addr, handle) = spawn_server("nokey").await;
+    let resp = client::connect_and_request(
+        &addr,
+        serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "POST",
+            "params": {
+                "path": "/api/run_task",
+                "body": {
+                    "task": "ping",
+                    "role": "agent:worker",
+                    "provider_kind": "openai_compat",
+                    "base_url": "https://api.openai.com/v1",
+                    "model": "gpt-4o-mini",
+                    "api_key_env": unique_var
+                }
+            }
+        }),
+    )
+    .await;
+
+    // The handler returns Err(...) because api_key is missing.
+    // dispatcher wraps that into a JSON-RPC error response:
+    //   { "jsonrpc": "2.0", "id": 1, "error": { "code": -32603, "message": "<e>" } }
+    // Either a JSON-RPC error OR a result with status >= 400 counts
+    // as "rejected". Both prove the env var was NOT read.
+    let resp_text = serde_json::to_string(&resp).unwrap_or_default();
+    let rpc_error_msg = resp["error"]["message"].as_str().unwrap_or("");
+    let status = resp["result"]["status"].as_u64().unwrap_or(0);
+    let body_str = resp["result"]["body"].to_string();
+    let rejected = !rpc_error_msg.is_empty()
+        || status >= 400
+        || body_str.contains("missing")
+        || body_str.contains("api_key")
+        || body_str.contains("no env-var fallback");
+    assert!(
+        rejected,
+        "expected api_key_env fallback to be rejected; got resp={resp_text}"
+    );
+    // And the error message must mention the api_key, NOT the env var.
+    let combined = format!("{rpc_error_msg} {body_str}");
+    assert!(
+        combined.contains("api_key"),
+        "rejection reason should mention api_key; got resp={resp_text}"
+    );
+
+    // Sanity: providing api_key explicitly still passes the auth gate.
+    // We don't try to actually call an LLM — we just confirm the
+    // request doesn't fail at the missing-api_key check.
+    let resp = client::connect_and_request(
+        &addr,
+        serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "POST",
+            "params": {
+                "path": "/api/run_task",
+                "body": {
+                    "task": "ping",
+                    "role": "agent:worker",
+                    "provider_kind": "openai_compat",
+                    "base_url": "https://api.openai.com/v1",
+                    "model": "gpt-4o-mini",
+                    "api_key": "sk-explicit-from-keyring"
+                }
+            }
+        }),
+    )
+    .await;
+    let resp_text = serde_json::to_string(&resp).unwrap_or_default();
+    let rpc_error_msg = resp["error"]["message"].as_str().unwrap_or("");
+    let body_str = resp["result"]["body"].to_string();
+    let combined = format!("{rpc_error_msg} {body_str}");
+    assert!(
+        !combined.contains("missing or empty 'api_key'"),
+        "api_key path should not be rejected at the missing-api_key gate; got resp={resp_text}"
+    );
+
+    std::env::remove_var(unique_var);
+    handle.abort();
+}

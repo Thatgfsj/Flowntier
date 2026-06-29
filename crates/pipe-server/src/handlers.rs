@@ -994,19 +994,18 @@ async fn run_task(body: Value, state: Arc<ServerState>) -> Result<(u16, Value), 
         .and_then(|v| v.as_str())
         .ok_or_else(|| "missing 'model'".to_string())?
         .to_string();
-    // Two ways to pass the key: explicit `api_key` (preferred for
-    // an embedded sidecar) or `api_key_env` (read from process env
-    // — useful when the Tauri shell wants to keep secrets out of
-    // the JSON payload).
-    let api_key = match body.get("api_key").and_then(|v| v.as_str()) {
-        Some(s) if !s.is_empty() => s.to_string(),
-        _ => match body.get("api_key_env").and_then(|v| v.as_str()) {
-            Some(var) => std::env::var(var).map_err(|_| {
-                format!("api_key_env '{var}' not set in process environment")
-            })?,
-            None => String::new(),
-        },
-    };
+    // v0.4.12 (event 000048): the api_key_env fallback is
+    // removed. The Tauri shell now resolves the key from the OS
+    // credential store via reveal_secret() and passes the
+    // plaintext in body.api_key. We never read process env vars
+    // for credentials — this prevents the key from leaking via
+    // /proc/<pid>/environ, task manager, or shell history.
+    let api_key = body
+        .get("api_key")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| "missing or empty 'api_key' (no env-var fallback in v0.4.12)".to_string())?
+        .to_string();
     let role = body
         .get("role")
         .and_then(|v| v.as_str())

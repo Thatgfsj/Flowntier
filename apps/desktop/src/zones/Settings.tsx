@@ -218,6 +218,7 @@ export function Settings({ open, onClose, workdir }: SettingsProps) {
   // (so the About card can show "Logs are at..."). Falls back to
   // a friendly placeholder if the runtime is offline.
   const [dataDir, setDataDir] = useState<string>('');
+  const [logDir, setLogDir] = useState<string>('');
 
   const refresh = async () => {
     try {
@@ -274,15 +275,31 @@ export function Settings({ open, onClose, workdir }: SettingsProps) {
     void refresh();
   }, [open]);
   useEffect(() => {
-    // Best-effort: ask the pipe-server for the data_dir it's
-    // using. Currently the pipe-server doesn't expose this, so
-    // we fall back to a platform-default hint. The exact path is
-    // shown in the log file (%APPDATA%/flowntier/logs/...)
-    // when the user clicks "Copy logs" on the error screen.
-    const isWin = navigator.userAgent.toLowerCase().includes('win');
-    setDataDir(isWin
-      ? '%APPDATA%' + String.fromCharCode(92) + 'flowntier' + String.fromCharCode(92)
-      : '~/.config/flowntier/');
+    // v0.4.12 (event 000048): replaced the UA-sniff hack with
+    // a real call to get_diagnostics. This returns both the
+    // data_dir and log_dir that the running process is actually
+    // using — not a platform-default guess.
+    let cancelled = false;
+    void (async () => {
+      try {
+        const diag = (await invoke('get_diagnostics')) as {
+          data_dir?: string | null;
+          log_dir?: string | null;
+        };
+        if (cancelled) return;
+        if (diag.data_dir && diag.data_dir !== '<unknown>') {
+          setDataDir(diag.data_dir);
+        }
+        if (diag.log_dir) {
+          setLogDir(diag.log_dir);
+        }
+      } catch (e) {
+        console.warn('[Settings] get_diagnostics failed:', e);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const toggle = async (id: string, enabled: boolean) => {
@@ -477,23 +494,6 @@ export function Settings({ open, onClose, workdir }: SettingsProps) {
                   </Card>
                 )}
 
-                <h3 className="mb-2 px-1 text-xs font-semibold uppercase tracking-wide text-text-secondary">{t('settings.roles.title')}</h3>
-                <p className="mb-2 px-1 text-[10px] text-text-secondary">
-                  
-                </p>
-                <div className="flex flex-col gap-2">
-                  {snapshot.roles.map((r) => (
-                    <RoleAssignmentCard
-                      key={r.role}
-                      role={r}
-                      availableModels={snapshot.available_models}
-                      saving={saving}
-                      onDefaultChange={(model) => void setRoleDefault(r.role, model)}
-                      onFallbackChange={(chain) => void setRoleFallback(r.role, chain)}
-                    />
-                  ))}
-                </div>
-
                 <Card className="mt-4">
                   <h3 className="mb-1 text-sm font-semibold">{t('settings.about.title')}</h3>
                   <p className="mb-3 text-xs text-text-secondary">
@@ -502,9 +502,19 @@ export function Settings({ open, onClose, workdir }: SettingsProps) {
                       build: buildSha ? ' (' + buildSha + ')' : ''
                     })}
                   </p>
-                  <p className="mb-3 text-xs text-text-secondary">
+                  <p className="mb-2 text-xs text-text-secondary">
                     {dataDir}
                   </p>
+                  {logDir && (
+                    <>
+                      <p className="mb-1 break-all text-[10px] text-text-secondary">
+                        {t('settings.about.logDir')}: {logDir}
+                      </p>
+                      <p className="mb-3 text-[10px] text-text-tertiary">
+                        {t('settings.about.logDirHint')}
+                      </p>
+                    </>
+                  )}
                   {/* BUG-018 fix (event 000024): Settings → About
                       now exposes a "Change workdir" button that
                       calls `set_workdir_with_nwt` (atomic) with a
@@ -566,6 +576,28 @@ export function Settings({ open, onClose, workdir }: SettingsProps) {
                   </button>
                 </Card>
                 <SearchBugPanel />
+
+                {/* v0.4.12 (event 000048): RoleAssignmentCard moved
+                    here (was above the About card). Keeps the
+                    "Search bug" UI immediately above the role
+                    assignments, since both are read-mostly
+                    diagnostic / configuration views. */}
+                <h3 className="mb-2 mt-4 px-1 text-xs font-semibold uppercase tracking-wide text-text-secondary">{t('settings.roles.title')}</h3>
+                <p className="mb-2 px-1 text-[10px] text-text-secondary">
+
+                </p>
+                <div className="flex flex-col gap-2">
+                  {snapshot.roles.map((r) => (
+                    <RoleAssignmentCard
+                      key={r.role}
+                      role={r}
+                      availableModels={snapshot.available_models}
+                      saving={saving}
+                      onDefaultChange={(model) => void setRoleDefault(r.role, model)}
+                      onFallbackChange={(chain) => void setRoleFallback(r.role, chain)}
+                    />
+                  ))}
+                </div>
               </main>
 
       {/* BUG-FRONTEND-RT-6 (event 000038): double-confirmation

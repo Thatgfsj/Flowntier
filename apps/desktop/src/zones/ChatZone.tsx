@@ -20,6 +20,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
 import { useAgentStream, type AgentEvent } from '../hooks/useAgentStream.js';
+import { revealSecret } from '../lib/api.js';
 
 interface RoleSpec {
   id: string;
@@ -111,6 +112,29 @@ export function ChatZone({
       // call `run_agent_task` here. Until then, fall through to
       // a JSON-RPC call via the pipe if the backend adds a
       // `pipe_rpc` command.
+      // v0.4.12 (event 000048): resolve the API key from the OS
+      // credential store (DPAPI via keyring) at call-time, then
+      // pass the plaintext to run_agent_task in body.api_key.
+      // We no longer send api_key_env: pipe-server's env-var
+      // fallback path is removed.
+      let apiKey = '';
+      try {
+        apiKey = await revealSecret(keyEnvVar);
+      } catch (e) {
+        setError(
+          typeof e === 'string'
+            ? e
+            : (e as Error)?.message ?? `cannot reveal ${keyEnvVar}`,
+        );
+        setSending(false);
+        return;
+      }
+      if (!apiKey) {
+        setError(`API key "${keyEnvVar}" not set — add it in Settings`);
+        setSending(false);
+        return;
+      }
+
       const ok = await invoke<{ ok: boolean; error?: string }>('run_agent_task', {
         body: {
           task: trimmed,
@@ -118,7 +142,7 @@ export function ChatZone({
           provider_kind: provider.id,
           base_url: baseUrl,
           model,
-          api_key_env: keyEnvVar,
+          api_key: apiKey,
         },
       });
       if (!ok?.ok) {
