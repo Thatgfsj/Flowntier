@@ -552,6 +552,12 @@ async fn list_providers(
             "enabled": enabled,
             "note": p.note,
             "has_live_models_endpoint": p.has_live_models_endpoint,
+            // v0.4.15 (event 000051): emit empty models array +
+            // is_local:false so the TS ProviderInfo type can read
+            // both fields without runtime undefined. UI must hit
+            // discover_models to populate models[].
+            "models": [],
+            "is_local": false,
         })
     }).collect();
 

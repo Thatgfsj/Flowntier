@@ -384,36 +384,21 @@ export function Settings({ open, onClose, workdir }: SettingsProps) {
                 <CustomProviderForm onSaved={() => void refresh()} />
               </div>
                 <h3 className="mb-2 px-1 text-xs font-semibold uppercase tracking-wide text-text-secondary">
-                  {t('settings.providers.titleWithCount', { count:
-                    snapshot.providers.filter((p) => {
-                      if (p.is_local) return true;
-                      if (p.key_present) return true;
-                      const cm = customModels.map[p.id];
-                      if (cm && Object.keys(cm).length > 0) return true;
-                      return false;
-                    }).length
-                  })}
+                  {t('settings.providers.titleWithCount', { count: snapshot.providers.length })}
                 </h3>
+                <p className="mb-2 px-1 text-[10px] text-text-secondary">
+                  {t('settings.providers.configuredCount', { count: snapshot.providers.filter((p) => p.has_secret || p.is_local).length })}
+                </p>
                 <div className="flex flex-col gap-2">
                   {snapshot.providers
-                    .filter((p) => {
-                      // Only show providers the user can actually use:
-                      //  - local providers (Ollama / LM Studio) need no key
-                      //  - providers whose API key is already in the keychain
-                      //  - providers the user has added custom models to
-                      // Everything else (preset listed but key missing AND
-                      // no custom models) is hidden — the user adds it via
-                      // the "Quick Add AI" button in the panel above once
-                      // they paste a key.
-                      if (p.is_local) return true;
-                      if (p.key_present) return true;
-                      const cm = customModels.map[p.id];
-                      if (cm && Object.keys(cm).length > 0) return true;
-                      return false;
-                    })
                     .map((p) => {
                     const isSel = p.id === selected;
-                    const isCustom = p.notes.includes('Custom relay');
+                    // v0.4.15: was `p.notes.includes` — but Rust
+                    // emits `note` (singular). The old key was
+                    // undefined, so custom-provider rows never
+                    // showed the ✕ delete button.
+                    const isCustom = p.note.includes('Custom relay');
+                    const usable = p.has_secret || p.is_local;
                     const handleDeleteCustom = async (e: React.MouseEvent) => {
                       e.stopPropagation();
                       if (!confirm(t('settings.confirm.deleteCustom.title', {name: p.display_name}))) return;
@@ -427,7 +412,7 @@ export function Settings({ open, onClose, workdir }: SettingsProps) {
                     };
                     return (
                       <button key={p.id} type="button" onClick={() => setSelected(p.id)}
-                        className={`flex flex-col items-start gap-1 rounded-md border p-2 text-left transition-colors ${isSel ? 'border-chief bg-surface-1' : 'border-border bg-surface-1 hover:border-text-secondary'}`}>
+                        className={`flex flex-col items-start gap-1 rounded-md border p-2 text-left transition-colors ${isSel ? 'border-chief bg-surface-1' : 'border-border bg-surface-1 hover:border-text-secondary'} ${!usable ? 'opacity-60' : ''}`}>
                         <div className="flex w-full items-center justify-between">
                           <div className="flex items-center gap-2">
                             <span className="font-medium text-sm">{p.display_name}</span>
@@ -435,14 +420,22 @@ export function Settings({ open, onClose, workdir }: SettingsProps) {
                             {isCustom && <span className="rounded bg-chief/20 px-1.5 py-0.5 text-[10px] text-chief">{t('settings.custom.kindLabel')}</span>}
                           </div>
                           <div className="flex items-center gap-1.5">
-                            <Toggle on={p.enabled} onChange={(v) => void toggle(p.id, v)} disabled={!p.key_present && !p.is_local} />
+                            <Toggle on={p.enabled} onChange={(v) => void toggle(p.id, v)} disabled={!usable} />
                             {isCustom && (
                               <button type="button" onClick={handleDeleteCustom} title={String(t('settings.action.deleteCustom'))} className="rounded p-0.5 text-[10px] text-red-400 hover:bg-red-400/10 hover:text-red-300">✕</button>
                             )}
                           </div>
                         </div>
-                        <div className="text-[11px] text-text-secondary">{t('settings.quickAdd.modelCount', {count: p.models.length, keyEnv: p.api_key_env})}</div>
-                        <KeyBadge present={p.key_present} />
+                        {/* v0.4.15: server emits default_model and a
+                            hardcoded empty models array; we surface the
+                            default model name (and the env var it reads)
+                            so the row isn't empty. The "↻ discover"
+                            button lives in the detail panel to keep this
+                            row compact. */}
+                        <div className="text-[11px] text-text-secondary">
+                          {t('settings.quickAdd.modelCount', {count: p.models.length, keyEnv: p.secret_name})}
+                        </div>
+                        <KeyBadge present={p.has_secret} />
                       </button>
                     );
                   })}
@@ -453,17 +446,17 @@ export function Settings({ open, onClose, workdir }: SettingsProps) {
                 {sel && (
                   <Card className="mb-4">
                     <h3 className="mb-1 text-sm font-semibold">{sel.display_name}</h3>
-                    <p className="mb-3 text-xs text-text-secondary">{sel.notes}</p>
+                    <p className="mb-3 text-xs text-text-secondary">{sel.note}</p>
                     <div className="grid grid-cols-2 gap-3 text-xs">
-                      <Field label={t('settings.custom.kindLabel')}>{sel.kind}</Field>
+                      <Field label={t('settings.custom.kindLabel')}>{sel.api_kind}</Field>
                       <Field label={t('settings.custom.baseUrlLabel')}><code className="font-mono">{sel.base_url}</code></Field>
-                      <Field label={t('settings.custom.apiKeyLabel')}><code className="font-mono">{sel.api_key_env}</code></Field>
+                      <Field label={t('settings.custom.apiKeyLabel')}><code className="font-mono">{sel.secret_name}</code></Field>
                       <Field label={t('settings.field.keyConfigured')}>
-                        {sel.key_present ? (
+                        {sel.has_secret ? (
                           <span className="text-status-done">{t('settings.field.keyYes')}</span>
                         ) : (
                           <span className="text-status-warn">
-                            {t('settings.field.keyNo', { env: sel.api_key_env })}
+                            {t('settings.field.keyNo', { env: sel.secret_name })}
                           </span>
                         )}
                       </Field>

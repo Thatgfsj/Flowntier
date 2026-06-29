@@ -569,6 +569,118 @@ async fn run_task_rejects_api_key_env_fallback() {
     handle.abort();
 }
 
+// v0.4.15 (event 000051): chairman reported "供应商（0）" — the
+// provider list panel showed zero providers even after a key
+// was saved. Root cause: TS ProviderInfo type had wrong field
+// names (api_key_env, key_present, is_local, notes, models)
+// that the Rust list_providers handler never emits. Every read
+// returned undefined, so the UI-side filter dropped all 9
+// presets. This test pins the new contract:
+//
+//   1. PUT a secret, then GET /api/providers — the matching
+//      preset must come back with has_secret=true, and the
+//      other 8 presets must still have has_secret=false.
+//   2. Every preset row must include the new schema fields
+//      (models: [], is_local: false) so TS doesn't have to
+//      defend against undefined.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn list_providers_returns_presets_with_has_secret_set_after_put() {
+    let (addr, handle) = spawn_server("provlist").await;
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+
+    // 1. PUT MINIMAX_API_KEY
+    let put_resp = client::connect_and_request(
+        &addr,
+        serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "PUT",
+            "params": {
+                "path": "/api/settings/secrets/MINIMAX_API_KEY",
+                "body": { "value": "sk-minimax-fake-1234" }
+            }
+        }),
+    )
+    .await;
+    let put_status = put_resp["result"]["status"].as_u64().unwrap_or(0);
+    assert!(
+        put_status == 200 || put_status == 201,
+        "PUT secret should succeed; got status={put_status} resp={}",
+        serde_json::to_string(&put_resp).unwrap_or_default()
+    );
+
+    // 2. GET /api/providers
+    let resp = client::connect_and_request(
+        &addr,
+        serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "GET",
+            "params": {"path": "/api/providers", "body": null}
+        }),
+    )
+    .await;
+    let resp_text = serde_json::to_string(&resp).unwrap_or_default();
+    assert_eq!(resp["result"]["status"].as_u64().unwrap_or(0), 200);
+
+    let providers = resp["result"]["body"]["providers"]
+        .as_array()
+        .expect("providers should be array");
+
+    // 3. All 9 presets must be present.
+    assert_eq!(
+        providers.len(),
+        9,
+        "expected 9 presets; got {} resp={resp_text}",
+        providers.len()
+    );
+
+    // 4. Each preset must have the new schema fields.
+    for p in providers {
+        let id = p["id"].as_str().unwrap_or("<missing>");
+        assert!(
+            p.get("has_secret").is_some(),
+            "preset {id} missing has_secret; resp={resp_text}"
+        );
+        assert!(
+            p.get("secret_name").is_some(),
+            "preset {id} missing secret_name; resp={resp_text}"
+        );
+        assert!(
+            p.get("models").is_some() && p["models"].is_array(),
+            "preset {id} missing models[]; resp={resp_text}"
+        );
+        assert!(
+            p.get("is_local").is_some(),
+            "preset {id} missing is_local; resp={resp_text}"
+        );
+    }
+
+    // 5. The MiniMax row must now report has_secret=true; the
+    //    other 8 must remain false. This is the actual bug
+    //    chairman hit.
+    let minimax = providers
+        .iter()
+        .find(|p| p["id"] == "minimax")
+        .expect("minimax preset must exist");
+    assert_eq!(
+        minimax["has_secret"],
+        serde_json::json!(true),
+        "minimax should have has_secret:true after PUT; resp={resp_text}"
+    );
+    let openai = providers
+        .iter()
+        .find(|p| p["id"] == "openai")
+        .expect("openai preset must exist");
+    assert_eq!(
+        openai["has_secret"],
+        serde_json::json!(false),
+        "openai should have has_secret:false; resp={resp_text}"
+    );
+
+    handle.abort();
+}
+
 // v0.4.14 (event 000050): chairman reported "保存失败：no handler
 // registered for path /api/settings/secrets/MINIMAX_API_KEY".
 // This test pins the exact request shape the Tauri shell sends

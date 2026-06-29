@@ -1,0 +1,27 @@
+{
+  "id": "000051",
+  "timestamp": "2026-06-29T15:13:00Z",
+  "task": "v0.4.15 — fix provider-list field mismatch, show all 9 presets",
+  "summary": "v0.4.15 — fix provider-list field mismatch, show all 9 presets",
+  "reason": "Chairman reported '供应商（0）' even after saving MiniMax key successfully (v0.4.14). User requirements from the same message: (1) show all 9 presets by default — not just configured ones, (2) leave fallback chain default empty (no-op, current behavior), (3) provider/role rows missing some right-side buttons — the ✕ delete button for custom providers never appears, (4) UI polish — deferred to v0.5.\n\nRoot cause: TS `ProviderInfo` type (apps/desktop/src/lib/api.ts:61) declared 5 field names that the Rust `list_providers` handler (handlers.rs:543) never emitted. The filter `if (p.key_present || p.is_local || has_custom_models)` returned false for all 9 presets because every read was undefined — so the panel showed zero. The same mismatch also broke the ✕ custom-provider delete button (`p.notes.includes` → undefined.includes → false → no button), the env-var display (`p.api_key_env` → undefined), and the model count text (`p.models.length` → NaN).\n\nFix: canonicalized TS to read what Rust actually emits (secret_name, has_secret, note). Rust handler also now emits `models: []` and `is_local: false` for completeness (no longer required by the UI, but keeps the JSON contract discoverable). Filter logic in Settings.tsx:386-446 was rewritten to show all 9 presets unconditionally, dimming rows without has_secret (opacity-60) and disabling the toggle for those. Added a 'configured' subtitle count. Fallback chain default unchanged (left empty by design). Regression test added: list_providers_returns_presets_with_has_secret_set_after_put — pins the new schema + asserts has_secret toggles correctly after a PUT. 11/11 e2e + 20/20 unit pass. tsc clean.\n\nAlso: followed the v0.4.14 build sequence correctly this time — cargo build --release -p pipe-server --bin flowntier-runtime → cp to externalBin → pnpm tauri build → node scripts/patch-nsis.cjs → makensis. New runtime binary (8.2 MB stripped) shipped.\n\nVersion bumped 0.4.13 → 0.4.15 in tauri.conf.json + package.json. NSIS installer (8,373,846 bytes) at C:\\Users\\thatg\\Desktop\\Flowntier_0.4.15_x64-setup.exe. Awaiting chairman hand-test.",
+  "files": [
+    "apps/desktop/src/lib/api.ts",
+    "apps/desktop/src/zones/Settings.tsx",
+    "apps/desktop/src/i18n/zh-CN.ts",
+    "apps/desktop/src/i18n/en-US.ts",
+    "apps/desktop/src-tauri/tauri.conf.json",
+    "apps/desktop/package.json",
+    "crates/pipe-server/src/handlers.rs",
+    "crates/pipe-server/tests/e2e_pipe.rs"
+  ],
+  "tags": [
+    "v0.4.15",
+    "provider-list-field-mismatch",
+    "all-9-presets-shown",
+    "delete-custom-button-restored",
+    "regression-test-added",
+    "build-sequence-corrected",
+    "chairman-handoff",
+    "no-tag-yet"
+  ]
+}

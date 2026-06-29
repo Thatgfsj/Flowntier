@@ -89,6 +89,7 @@ const enUS: Translations = {
   'settings.secrets.addKey': 'Add API key',
   'settings.secrets.saveKeyFor': 'Save {{provider}} API key',
   'settings.providers.titleWithCount': 'Providers ({{count}})',
+  'settings.providers.configuredCount': '{{count}} configured',
   'settings.secrets.placeholder': 'Paste API key (sk-...)',
   'settings.secrets.never': 'Keys never leave this machine.',
   'settings.headerSubtitle': 'Manage LLM providers and per-role models',

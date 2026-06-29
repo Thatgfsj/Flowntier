@@ -87,6 +87,7 @@ const zhCN = {
   'settings.secrets.addKey': '添加 API 密钥',
   'settings.secrets.saveKeyFor': '保存 {{provider}} API 密钥',
   'settings.providers.titleWithCount': '供应商（{{count}}）',
+  'settings.providers.configuredCount': '已配置 {{count}}',
   'settings.secrets.placeholder': '粘贴 API 密钥 (sk-...)',
   'settings.secrets.never': '密钥不会离开本机。',
   'settings.headerSubtitle': '管理 LLM 供应商和角色模型',

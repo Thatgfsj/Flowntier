@@ -58,17 +58,30 @@ export async function seedSecrets(): Promise<string[]> {
 
 // ── Providers ────────────────────────────────────────────────────
 
+// v0.4.15: renamed fields to match what pipe-server
+// `list_providers` actually emits (handlers.rs:543-555). The
+// old names (api_key_env, key_present, is_local, notes, models)
+// were never produced by the server, so all reads were undefined
+// — which silently filtered every preset out of the list,
+// making the panel show "供应商（0）".
 export interface ProviderInfo {
   id: string;
   display_name: string;
-  kind: string;
+  api_kind: string;
   base_url: string;
-  api_key_env: string;
+  default_model: string;
+  secret_name: string;
+  has_secret: boolean;
   enabled: boolean;
-  key_present: boolean;
-  is_local: boolean;
-  notes: string;
+  note: string;
+  has_live_models_endpoint: boolean;
+  // Emitted as [] by the server; UI must hit
+  // discover_models or /api/providers/{id}/models to populate.
   models: { id: string; display_name: string }[];
+  // Always false in current presets (no Ollama/LM Studio yet).
+  // Kept in the type so future local providers don't require a
+  // schema migration.
+  is_local: boolean;
 }
 
 export async function listProviders(): Promise<{ providers: ProviderInfo[] }> {
