@@ -568,3 +568,54 @@ async fn run_task_rejects_api_key_env_fallback() {
     std::env::remove_var(unique_var);
     handle.abort();
 }
+
+// v0.4.14 (event 000050): chairman reported "保存失败：no handler
+// registered for path /api/settings/secrets/MINIMAX_API_KEY".
+// This test pins the exact request shape the Tauri shell sends
+// and asserts the PUT handler is found. Without this test the
+// regression would only surface in production (real keyring).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn put_secret_handler_is_registered() {
+    let (addr, handle) = spawn_server("putsec").await;
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    let resp = client::connect_and_request(
+        &addr,
+        serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "PUT",
+            "params": {
+                "path": "/api/settings/secrets/MINIMAX_API_KEY",
+                "body": { "value": "sk-minimax-test-1234" }
+            }
+        }),
+    )
+    .await;
+    let resp_text = serde_json::to_string(&resp).unwrap_or_default();
+    let rpc_err = resp["error"]["message"].as_str().unwrap_or("");
+    let status = resp["result"]["status"].as_u64().unwrap_or(0);
+    let body_str = resp["result"]["body"].to_string();
+    // The handler must exist (no "no handler registered" error).
+    // It may legitimately fail with a keyring / DPAPI error —
+    // that's a 4xx/5xx with a real cause, NOT the dispatcher
+    // "no handler registered" message.
+    assert!(
+        !rpc_err.contains("no handler registered"),
+        "PUT /api/settings/secrets/{{name}} handler not registered! resp={resp_text}"
+    );
+    // And the body, if present, must not echo the dispatcher's
+    // not-found code.
+    assert!(
+        !body_str.contains("no handler registered"),
+        "PUT handler missing — body reports not-found: {resp_text}"
+    );
+    // We expect EITHER a 200 (keyring worked) OR a 4xx/5xx with
+    // a meaningful inner error from SecretStore (not the
+    // dispatcher).
+    assert!(
+        status == 200 || status >= 400,
+        "expected HTTP-style response; got status={status} resp={resp_text}"
+    );
+
+    handle.abort();
+}

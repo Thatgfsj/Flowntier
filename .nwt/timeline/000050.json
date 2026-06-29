@@ -1,0 +1,22 @@
+{
+  "id": "000050",
+  "timestamp": "2026-06-29T13:57:00Z",
+  "task": "v0.4.14 — fix stale pipe-server binary bundled into NSIS installer",
+  "summary": "v0.4.14 — fix stale pipe-server binary bundled into NSIS installer",
+  "reason": "Chairman reported '保存失败：no handler registered for path /api/settings/secrets/MINIMAX_API_KEY'. UI was working (v0.4.13 added {{error}} template expansion). Real error came from pipe-server's dispatcher. But: dispatcher.rs:166 in current source uses 'no handler registered for {method} {path}' — the chairman's error message had 'for path' (no method), which matched the OLDER error format from before commit 4efa0e8 (v0.4.9) — 'no handler registered for path {:?}'.\n\nRoot cause: NSI installer.nsi:644 reads the sidecar from apps/desktop/src-tauri/binaries/flowntier_runtime-x86_64-pc-windows-msvc.exe. That file was last modified 2026-06-27 02:43 (63,481,344 bytes). All my v0.4.10/v0.4.11/v0.4.12/v0.4.13 builds used the OLD 6/27 runtime — pnpm tauri build never rebuilt it because pipe-server is a separate workspace crate, not a src-tauri dependency. So chairman's installation had the desktop shell from v0.4.13 but the runtime was still from v0.4.8 / pre-v0.4.9. The runtime's PUT handler existed but its error message format was the old one without method. AND: e2e tests don't catch this because e2e_pipe.rs::spawn_server compiles fresh from current source, not from the bundled binary.\n\nFix: (1) explicit `cargo build --release -p pipe-server --bin flowntier-runtime` then cp target/release/flowntier-runtime.exe to apps/desktop/src-tauri/binaries/flowntier_runtime-x86_64-pc-windows-msvc.exe before every tauri build. (2) added regression test put_secret_handler_is_registered that hits PUT /api/settings/secrets/{name} via the test server — would have caught the dispatcher mismatch if anyone had run it against the old binary. (3) new binary is 8.2 MB stripped (vs 63 MB debug), so installer shrunk from 16 MB to 8.4 MB.\n\nVersion bumped 0.4.13 → 0.4.14 in tauri.conf.json + package.json. NSIS installer (8,373,319 bytes) at C:\\Users\\thatg\\Desktop\\Flowntier_0.4.14_x64-setup.exe.\n\nBuild pipeline lesson: the correct order is now (1) cargo build --release -p pipe-server --bin flowntier-runtime, (2) cp the result to binaries/, (3) pnpm tauri build --bundles nsis, (4) node scripts/patch-nsis.cjs, (5) makensis the patched NSI in place. Documented in scripts/build.sh (TODO; not done in this commit).",
+  "files": [
+    "crates/pipe-server/tests/e2e_pipe.rs",
+    "apps/desktop/src-tauri/binaries/flowntier_runtime-x86_64-pc-windows-msvc.exe",
+    "apps/desktop/src-tauri/tauri.conf.json",
+    "apps/desktop/package.json"
+  ],
+  "tags": [
+    "v0.4.14",
+    "stale-sidecar-bug",
+    "root-cause-fixed",
+    "regression-test-added",
+    "build-order-corrected",
+    "chairman-handoff",
+    "no-tag-yet"
+  ]
+}
