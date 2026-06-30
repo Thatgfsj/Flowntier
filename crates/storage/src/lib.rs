@@ -326,6 +326,24 @@ pub struct ModelCacheRow {
     pub fetched_at: i64,
 }
 
+// ── v0.4.18 role overrides ───────────────────────────────────────
+// See migrations/0004_role_overrides.sql.
+
+/// Per-role override of `default_model` and `fallback_chain`. One
+/// row per role id (e.g. `"agent:chief"`). An empty row
+/// (default_model="", fallback_chain="[]") is a valid override
+/// meaning "user explicitly cleared the in-memory defaults".
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RoleOverrideRow {
+    pub role_id: String,
+    pub default_model: String,
+    /// Stored as a JSON-encoded array string in the DB; we keep
+    /// it as String here to avoid forcing the storage layer to
+    /// know about the agent-core role schema.
+    pub fallback_chain: Vec<String>,
+    pub updated_at: i64,
+}
+
 impl Repository {
     // ── Secret CRUD ────────────────────────────────────────────
 
@@ -578,6 +596,93 @@ impl Repository {
         .execute(&self.pool)
         .await?;
         Ok(())
+    }
+
+    // ── v0.4.18 role overrides (migrations/0004_role_overrides.sql) ──
+
+    /// Read a single role override. Returns `None` if the role has
+    /// never been set explicitly (the in-memory default applies).
+    pub async fn get_role_override(
+        &self,
+        role_id: &str,
+    ) -> Result<Option<RoleOverrideRow>, StorageError> {
+        let row: Option<(String, String, String, i64)> = sqlx::query_as(
+            "SELECT role_id, default_model, fallback_chain, updated_at
+             FROM role_overrides WHERE role_id = ?",
+        )
+        .bind(role_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        match row {
+            None => Ok(None),
+            Some((role_id, default_model, fallback_chain, updated_at)) => {
+                let chain: Vec<String> = serde_json::from_str(&fallback_chain)
+                    .unwrap_or_default();
+                Ok(Some(RoleOverrideRow {
+                    role_id,
+                    default_model,
+                    fallback_chain: chain,
+                    updated_at,
+                }))
+            }
+        }
+    }
+
+    /// Upsert a role override. Caller passes the canonical list
+    /// (already deduped); we re-serialize to JSON.
+    pub async fn upsert_role_override(
+        &self,
+        role_id: &str,
+        default_model: &str,
+        fallback_chain: &[String],
+    ) -> Result<(), StorageError> {
+        let chain_json = serde_json::to_string(fallback_chain).unwrap_or_else(|_| "[]".into());
+        sqlx::query(
+            "INSERT INTO role_overrides (role_id, default_model, fallback_chain, updated_at)
+             VALUES (?, ?, ?, strftime('%s','now'))
+             ON CONFLICT(role_id) DO UPDATE SET
+                default_model  = excluded.default_model,
+                fallback_chain = excluded.fallback_chain,
+                updated_at     = strftime('%s','now')",
+        )
+        .bind(role_id)
+        .bind(default_model)
+        .bind(chain_json)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Delete a role override (fall back to in-memory defaults).
+    pub async fn delete_role_override(&self, role_id: &str) -> Result<bool, StorageError> {
+        let n = sqlx::query("DELETE FROM role_overrides WHERE role_id = ?")
+            .bind(role_id)
+            .execute(&self.pool)
+            .await?
+            .rows_affected();
+        Ok(n > 0)
+    }
+
+    /// List every role override (used by GET /api/router/roles to
+    /// overlay the in-memory defaults).
+    pub async fn list_role_overrides(&self) -> Result<Vec<RoleOverrideRow>, StorageError> {
+        let rows: Vec<(String, String, String, i64)> = sqlx::query_as(
+            "SELECT role_id, default_model, fallback_chain, updated_at
+             FROM role_overrides",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        let mut out = Vec::with_capacity(rows.len());
+        for (role_id, default_model, fallback_chain, updated_at) in rows {
+            let chain: Vec<String> = serde_json::from_str(&fallback_chain).unwrap_or_default();
+            out.push(RoleOverrideRow {
+                role_id,
+                default_model,
+                fallback_chain: chain,
+                updated_at,
+            });
+        }
+        Ok(out)
     }
 }
 

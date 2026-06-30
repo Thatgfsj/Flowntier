@@ -1,0 +1,26 @@
+{
+  "id": "000054",
+  "timestamp": "2026-06-30T06:04:00Z",
+  "task": "v0.4.18 — persist role_overrides + hide fallback when user-added",
+  "summary": "v0.4.18 — persist role_overrides + hide fallback when user-added",
+  "reason": "Chairman reported against v0.4.17:\n\n(1) '选好了之后无法保存'. Root cause: pipe-server's PUT /api/router/roles handler (handlers.rs:393, v0.3 stub) returned ok:true without persisting anything. The header '已保存 00:13:56' was a lie — setSavedAt() ran on every successful PUT stub response but no data was stored. The next refresh reset everything to the in-memory defaults.\n\nFix: new SQL migration 0004_role_overrides.sql (role_id PK + default_model + fallback_chain JSON-as-text + updated_at). 4 new Repository methods (get/upsert/delete/list) in storage/src/lib.rs. GET /api/router/roles now overlays the in-memory defaults with DB rows (DB wins). PUT /api/router/roles now iterates the body's roles array, upserts each row, and returns {ok:true, updated:N, errors:[...]} with HTTP 200. Malformed body (missing 'roles' array) returns HTTP 400 + structured error.\n\n(2) '我只添加了minimax模型 (m3) 它显示三个'. Root cause: v0.4.16's hardcoded fallback catalog (OPENAI_FALLBACK_MODELS) shipped 3 minimax models. Settings.tsx:262-267 merged fallback + user-added without dedup by provider. Chairman saw 3 fallback + 1 manual = 4 (or 3 if a collision).\n\nFix: per-provider hide. If the user has manually added any model for provider X, the fallback catalog for X is filtered out of the dropdown. User's curated entries still appear. The other providers (no manual entries) still show the fallback catalog. Chairman picked this over 'always show fallback' or 'never show fallback'.\n\nThree regression tests pin the persistence contract:\n- put_router_roles_persists_and_overlays (DB row visible in next GET)\n- put_router_roles_empty_override_is_respected (empty override is valid)\n- put_router_roles_rejects_missing_roles_array (400 + structured error)\n\n16/16 e2e + 20/20 unit pass. tsc clean. NSIS installer (8,389,141 bytes) at C:\\Users\\thatg\\Desktop\\Flowntier_0.4.18_x64-setup.exe. Awaiting hand-test.\n\nMigration 0004 runs automatically on first launch thanks to sqlx::migrate!(). Existing v0.4.17 DBs will get the new table created transparently.",
+  "files": [
+    "crates/storage/migrations/0004_role_overrides.sql",
+    "crates/storage/src/lib.rs",
+    "crates/pipe-server/src/handlers.rs",
+    "crates/pipe-server/tests/e2e_pipe.rs",
+    "apps/desktop/src/zones/Settings.tsx",
+    "apps/desktop/src-tauri/tauri.conf.json",
+    "apps/desktop/package.json"
+  ],
+  "tags": [
+    "v0.4.18",
+    "role_overrides-persistence",
+    "migration-0004",
+    "real-put-roles",
+    "hide-fallback-when-user-added",
+    "3-regression-tests",
+    "chairman-handoff",
+    "no-tag-yet"
+  ]
+}

@@ -259,7 +259,14 @@ export function Settings({ open, onClose, workdir }: SettingsProps) {
             });
           }
         }
-        const merged = [...models.models];
+        // v0.4.18 (event 000054, chairman directive): if the user has
+        // manually added ANY model for a provider, hide the
+        // fallback catalog for that provider entirely. The user
+        // wants their curated list, not a union.
+        const userAddedProviders = new Set(userModels.map((m) => m.provider));
+        const merged = models.models.filter(
+          (m) => !userAddedProviders.has(m.provider),
+        );
         for (const um of userModels) {
           if (!merged.some((m) => m.provider === um.provider && m.model === um.model)) {
             merged.push(um);

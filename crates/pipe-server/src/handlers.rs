@@ -295,21 +295,55 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
     // v0.4.16 (event 000052): chairman rejected the v0.4.15 hard-coded
     // defaults of "anthropic:claude-opus-4-8" + ["anthropic:claude-sonnet-4-6"].
     // Every role now starts empty — the user picks what they actually have.
-    d.register("GET", "/api/router/roles", |_body| {
-        Box::pin(async {
-            Ok((
-                200,
-                json!({
-                    "roles": [
-                        { "role": "agent:chief",    "default_model": "", "fallback_chain": [] },
-                        { "role": "agent:worker",   "default_model": "", "fallback_chain": [] },
-                        { "role": "agent:planner",  "default_model": "", "fallback_chain": [] },
-                        { "role": "agent:critic:a", "default_model": "", "fallback_chain": [] },
-                        { "role": "agent:critic:b", "default_model": "", "fallback_chain": [] },
-                        { "role": "agent:reporter", "default_model": "", "fallback_chain": [] },
-                    ],
-                }),
-            ))
+    // v0.4.18 (event 000054): GET now overlays the in-memory defaults
+    // with any DB-stored role_overrides (see migrations/0004 and
+    // storage::Repository::list_role_overrides). DB rows win on
+    // match. The 6 in-memory defaults still appear for roles the
+    // chairman hasn't touched yet.
+    let get_roles_state = state.clone();
+    d.register("GET", "/api/router/roles", move |_body| {
+        let s = get_roles_state.clone();
+        Box::pin(async move {
+            // In-memory defaults.
+            let mut roles = serde_json::Map::new();
+            for role_id in [
+                "agent:chief",
+                "agent:worker",
+                "agent:planner",
+                "agent:critic:a",
+                "agent:critic:b",
+                "agent:reporter",
+            ] {
+                roles.insert(
+                    role_id.to_string(),
+                    json!({ "default_model": "", "fallback_chain": [] }),
+                );
+            }
+            // Overlay DB overrides.
+            let overrides = s.repo.list_role_overrides().await.unwrap_or_default();
+            for ov in overrides {
+                roles.insert(
+                    ov.role_id,
+                    json!({
+                        "default_model": ov.default_model,
+                        "fallback_chain": ov.fallback_chain,
+                    }),
+                );
+            }
+            let roles_array: Vec<Value> = roles.into_iter()
+                .map(|(role, body)| {
+                    let mut obj = json!({ "role": role });
+                    if let Some(obj_mut) = obj.as_object_mut() {
+                        if let Some(b) = body.as_object() {
+                            for (k, v) in b {
+                                obj_mut.insert(k.clone(), v.clone());
+                            }
+                        }
+                    }
+                    obj
+                })
+                .collect();
+            Ok((200, json!({ "roles": roles_array })))
         })
     });
 
@@ -390,20 +424,52 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
         let s = custom_del_state.clone();
         Box::pin(async move { delete_custom_provider(body, s).await })
     });
-    d.register("PUT", "/api/router/roles", |body| {
-        // PUT (update) variant — distinguished from GET above by
-        // the dispatcher key. We register on the same path so the
-        // last write wins; the GET handler above never sees the PUT
-        // body because Dispatcher only routes by method+path.
-        let _ = body;
-        Box::pin(async {
-            Ok((
-                200,
-                json!({
-                    "ok": true,
-                    "note": "router role update accepted (no-op stub); v0.5 will persist the role -> model mapping via a new role_model_override table.",
-                }),
-            ))
+    d.register("PUT", "/api/router/roles", move |body| {
+        // v0.4.18 (event 000054): real persistence. Body shape:
+        // { "roles": [
+        //     { "role": "agent:chief", "default_model": "...",
+        //       "fallback_chain": ["provider:model", ...] },
+        //     ...
+        // ] }
+        // We iterate and upsert each into role_overrides. Empty
+        // default_model / empty fallback_chain are valid
+        // overrides (user explicitly cleared the defaults).
+        let s = state.clone();
+        Box::pin(async move {
+            let Some(roles_arr) = body.get("roles").and_then(|v| v.as_array()) else {
+                return Ok((400, json!({
+                    "ok": false,
+                    "error": "missing 'roles' array in body",
+                })));
+            };
+            let mut updated = 0usize;
+            let mut bad: Vec<String> = Vec::new();
+            for role in roles_arr {
+                let Some(role_id) = role.get("role").and_then(|v| v.as_str()) else {
+                    bad.push("<missing role id>".to_string());
+                    continue;
+                };
+                let default_model = role
+                    .get("default_model").and_then(|v| v.as_str()).unwrap_or("");
+                let fallback_chain: Vec<String> = role
+                    .get("fallback_chain").and_then(|v| v.as_array())
+                    .map(|arr| arr.iter()
+                        .filter_map(|x| x.as_str().map(String::from))
+                        .collect())
+                    .unwrap_or_default();
+                if let Err(e) = s.repo.upsert_role_override(
+                    role_id, default_model, &fallback_chain,
+                ).await {
+                    bad.push(format!("{}: {}", role_id, e));
+                    continue;
+                }
+                updated += 1;
+            }
+            Ok((200, json!({
+                "ok": true,
+                "updated": updated,
+                "errors": bad,
+            })))
         })
     });
 
