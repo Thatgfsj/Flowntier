@@ -18,10 +18,12 @@ pub mod handlers;
 pub mod i_ching;
 pub mod protocol;
 pub mod providers;
+pub mod scheduler;
 pub mod secrets;
 pub mod server;
 
 pub use dispatcher::Dispatcher;
 pub use handlers::{register_all, ServerState};
 pub use protocol::{codes, RpcError, RpcParams, RpcRequest, RpcResponse, RpcResult, MAX_LINE};
+pub use scheduler::run_quota_scheduler;
 pub use server::{Server, ServerConfig};

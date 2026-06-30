@@ -11,6 +11,7 @@ use agent_core::{Agent, AgentConfig, AgentEvent};
 use serde_json::{json, Value};
 use std::sync::Arc;
 use tokio::sync::broadcast;
+use tracing::warn;
 use zeroize::Zeroizing;
 
 use crate::dispatcher::Dispatcher;
@@ -30,6 +31,13 @@ pub struct ServerState {
     /// v0.4: SQLite repository for provider / custom_provider /
     /// kv tables.
     pub repo: Arc<storage::Repository>,
+    /// v0.4.20 (event 000056, Phase-2): dispatcher handle so the
+    /// quota scheduler can dispatch internal retry requests
+    /// (`POST /api/run_task`). Populated by `register_all` after
+    /// all handlers are wired up. `Arc<Mutex<...>>` (not bare
+    /// `Mutex`) so `#[derive(Clone)]` on ServerState keeps
+    /// working.
+    dispatcher: Arc<std::sync::Mutex<Option<Arc<Dispatcher>>>>,
 }
 
 impl ServerState {
@@ -64,7 +72,21 @@ impl ServerState {
             workspace: Workspace::new(workspace_root, "flowntier"),
             secrets,
             repo,
+            dispatcher: Arc::new(std::sync::Mutex::new(None)),
         }
+    }
+
+    /// v0.4.20: install the dispatcher once `register_all` has
+    /// finished populating it.
+    pub fn set_dispatcher(&self, d: Arc<Dispatcher>) {
+        let mut g = self.dispatcher.lock().expect("dispatcher mutex poisoned");
+        *g = Some(d);
+    }
+
+    /// v0.4.20: clone the dispatcher handle. Used by the quota
+    /// scheduler (Phase-2) to dispatch internal retry requests.
+    pub fn dispatcher(&self) -> Option<Arc<Dispatcher>> {
+        self.dispatcher.lock().expect("dispatcher mutex poisoned").clone()
     }
 }
 
@@ -199,7 +221,103 @@ pub fn register_all(d: &mut Dispatcher, state: ServerState) {
         Box::pin(async move { Ok((200, sample_workflow(&name))) })
     });
 
+    // ── v0.4.20: GET /api/quota/status ────────────────────────
+    // Returns all quota_failures rows. Frontend (Settings →
+    // 角色额度状态) renders the union.
+    let s_qstatus = state.clone();
+    d.register("GET", "/api/quota/status", move |_body| {
+        let s = s_qstatus.clone();
+        Box::pin(async move {
+            let rows = match s.repo.list_all_quota_failures().await {
+                Ok(r) => r,
+                Err(e) => return Ok((500, json!({ "ok": false, "error": format!("list: {e}") }))),
+            };
+            let items: Vec<Value> = rows.into_iter().map(|r| json!({
+                "role_id": r.role_id,
+                "model_id": r.model_id,
+                "last_error_at": r.last_error_at,
+                "last_error_message": r.last_error_message,
+                "status": r.status,
+                "attempt_count": r.attempt_count,
+                "next_attempt_at": r.next_attempt_at,
+            })).collect();
+            Ok((200, json!({ "ok": true, "rows": items })))
+        })
+    });
+
+    // ── v0.4.20: POST /api/quota/reset ─────────────────────
+    // Body: { role: "agent:chief", model_id?: "minimax:MiniMax-Text-01" }
+    // model_id absent = clear every row for that role (chief's
+    // "forget history" button).
+    let s_qreset = state.clone();
+    d.register("POST", "/api/quota/reset", move |body| {
+        let s = s_qreset.clone();
+        Box::pin(async move {
+            let Some(role) = body.get("role").and_then(|v| v.as_str()) else {
+                return Ok((400, json!({ "ok": false, "error": "missing 'role'" })));
+            };
+            let model_id = body.get("model_id").and_then(|v| v.as_str());
+            match s.repo.clear_quota_failure(role, model_id).await {
+                Ok(n) => Ok((200, json!({ "ok": true, "cleared_rows": n }))),
+                Err(e) => Ok((500, json!({ "ok": false, "error": format!("reset: {e}") }))),
+            }
+        })
+    });
+
+    // ── v0.4.20: GET /api/router/roles/{role}/resolve ──────
+    // Returns {ok:true, role, provider_short, model_id, base_url,
+    // api_kind, has_key, fallback_chain, quota_status} on
+    // success or {ok:false, role, error, hint} on failure.
+    // Always HTTP 200 so the frontend can render inline without
+    // surfacing 5xx. quota_status embeds the per-(role, model)
+    // quota_failures row (or null) so Settings can show
+    // "上次失败 · 等 5h 刷新点" inline.
+    let s_resolve = state.clone();
+    d.register("GET", "/api/router/roles/{role}/resolve", move |body| {
+        let s = s_resolve.clone();
+        let role = body.get("role").and_then(|v| v.as_str())
+            .unwrap_or("").to_string();
+        Box::pin(async move {
+            let resolved = match resolve_role(&s, &role).await {
+                Ok(r) => r,
+                Err(e) => {
+                    return Ok((200, json!({
+                        "ok": false,
+                        "role": role,
+                        "error": e,
+                        "hint": "open Settings → 角色 → 模型 分配",
+                    })));
+                }
+            };
+            let quota_status = match s.repo.quota_status_for(&role, &resolved.model_id).await {
+                Ok(Some(row)) => Some(json!({
+                    "status": row.status,
+                    "attempt_count": row.attempt_count,
+                    "last_error_at": row.last_error_at,
+                    "last_error_message": row.last_error_message,
+                    "next_attempt_at": row.next_attempt_at,
+                })),
+                _ => None,
+            };
+            Ok((200, json!({
+                "ok": true,
+                "role": resolved.role,
+                "provider_short": resolved.provider_short,
+                "model_id": resolved.model_id,
+                "base_url": resolved.base_url,
+                "api_kind": resolved.api_kind,
+                "has_key": !resolved.api_key.is_empty(),
+                "fallback_chain": resolved.fallback_chain,
+                "quota_status": quota_status,
+            })))
+        })
+    });
+
     register_placeholder_handlers(d, state.clone());
+
+    // v0.4.20: stash dispatcher handle so the quota scheduler
+    // (Phase-2) can dispatch internal retry requests.
+    state.set_dispatcher(Arc::new(d.clone()));
 }
 
 fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
@@ -1293,6 +1411,10 @@ async fn run_task(body: Value, state: Arc<ServerState>) -> Result<(u16, Value), 
     };
 
     // ── Build provider ────────────────────────────────────────
+    // v0.4.20: keep a clone of `model` so the quota-tracking
+    // block below (line ~1490) can reference it after OpenAiProvider
+    // has moved it.
+    let model_for_quota = model.clone();
     let provider: Arc<dyn agent_core::Provider> = match provider_kind.as_str() {
         "openai" => Arc::new(OpenAiProvider::openai(model, api_key.to_string())),
         "openai_compat" => Arc::new(OpenAiProvider::compat(base_url, model, api_key.to_string())),
@@ -1333,6 +1455,48 @@ async fn run_task(body: Value, state: Arc<ServerState>) -> Result<(u16, Value), 
                 last_status = format!("{last_status} (wf={wf_id})");
             }
             break;
+        }
+    }
+
+    // ── v0.4.20: quota-failure recording ──────────────────
+    // Any non-DONE status counts as a quota-class failure
+    // (deliberately conservative — false positives just promote
+    // the row, never auto-block; per-provider error-code parsing
+    // is Phase-2/v0.4.21). On success: clear any prior row.
+    let status_clean = last_status
+        .split_whitespace().next().unwrap_or("UNKNOWN").to_string();
+    if status_clean != "DONE" {
+        let err_msg = summary.clone().unwrap_or_else(|| last_status.clone());
+        let err_msg: String = err_msg.chars().take(240).collect();
+        if let Err(e) = state.repo.record_quota_failure(
+            &role, &model_for_quota, &err_msg,
+        ).await {
+            warn!(error = %e, "v0.4.20: failed to record_quota_failure");
+        }
+        // Chief escalation: chief's own failure flips to
+        // pending_5h_wait so the scheduler retries at the next
+        // 5h boundary. Other (role, model) failures just record —
+        // chief's loop picks them up via the events bus on its
+        // next iteration.
+        if role == "agent:chief" {
+            if let Err(e) = state.repo.set_quota_pending_5h_wait(
+                &role, &model_for_quota,
+            ).await {
+                warn!(error = %e, "v0.4.20: failed to set_quota_pending_5h_wait for chief");
+            }
+        }
+    } else {
+        // Success path — clear any prior (chief, model) row so
+        // the StatusLine flips back to "正常" automatically. We
+        // also drop all chief rows when chief itself succeeds
+        // (cheap; lets the chairman see a clean slate).
+        if let Err(e) = state.repo.clear_quota_failure(
+            &role, Some(&model_for_quota),
+        ).await {
+            warn!(error = %e, "v0.4.20: failed to clear_quota_failure on success");
+        }
+        if role == "agent:chief" {
+            let _ = state.repo.clear_quota_failure(&role, None).await;
         }
     }
 

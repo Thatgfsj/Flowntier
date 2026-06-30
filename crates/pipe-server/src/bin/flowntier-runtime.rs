@@ -7,7 +7,7 @@
 
 use std::path::PathBuf;
 
-use pipe_server::{register_all, Dispatcher, Server, ServerConfig, ServerState};
+use pipe_server::{register_all, run_quota_scheduler, Dispatcher, Server, ServerConfig, ServerState};
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 4)]
 async fn main() -> std::io::Result<()> {
@@ -50,8 +50,14 @@ async fn main() -> std::io::Result<()> {
     );
 
     let mut d = Dispatcher::new();
-    let state = ServerState::new(workspace, data_dir).await;
-    register_all(&mut d, state.clone());
+    let state = std::sync::Arc::new(ServerState::new(workspace, data_dir).await);
+    register_all(&mut d, (*state).clone());
+
+    // v0.4.20 (event 000056): background quota scheduler.
+    // Spawned AFTER register_all so state.dispatcher() returns Some.
+    // Dies with the runtime process. Pending_5h_wait rows persist in
+    // SQLite and the next process restart will pick them up.
+    let _scheduler = tokio::spawn(run_quota_scheduler(state.clone()));
 
     let server = Server::new(cfg, d, state.events.clone());
     server.run().await
