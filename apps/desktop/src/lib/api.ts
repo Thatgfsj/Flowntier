@@ -108,6 +108,25 @@ export async function listRouterModels(): Promise<{ models: { provider: string; 
   return invoke('list_router_models');
 }
 
+// v0.4.19: resolve a role's default_model + keyring into a single
+// preview so the ChatZone status line can show "未配置: 在设置里先选
+// default_model" inline. Always returns ok:true/false + payload,
+// never throws.
+export interface RoleResolveStatus {
+  ok: boolean;
+  role?: string;
+  provider_short?: string;
+  model_id?: string;
+  base_url?: string;
+  api_kind?: string;
+  has_key?: boolean;
+  fallback_chain?: string[];
+  error?: string;
+}
+export async function getRoleResolveStatus(role: string): Promise<RoleResolveStatus> {
+  return invoke<RoleResolveStatus>('get_role_resolve_status', { role });
+}
+
 export async function updateRouterRoles(roles: RoleInfo[]): Promise<void> {
   return invoke('update_router_roles', { roles });
 }

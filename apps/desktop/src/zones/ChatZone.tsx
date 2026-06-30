@@ -1,16 +1,18 @@
 /**
- * ChatZone — v0.3 progressive chat panel.
+ * ChatZone — v0.4.19 minimal chat panel.
  *
- * Sits next to the existing CommandDock as a second input
- * surface. The user types a free-form task; we send it to the
- * agent-core via the pipe-server `/api/run_task` endpoint, and
- * stream the resulting `AgentEvent`s back through `useAgentStream`.
+ * Per chairman directive (event 000055): strip the in-ChatZone
+ * provider/baseUrl/model/apiKeyEnv inputs. Those are now configured
+ * in Settings → AI 供应商 + 角色 → 模型 分配. ChatZone sends
+ * only `{ task, role }` and the pipe-server's `run_task` handler
+ * resolves default_model + base_url + api_key from the role_overrides
+ * table + the matching preset + the OS keystore.
  *
- * Progressive: reuses the existing zone chrome, no IDE rewrite.
  * Visible affordances:
- *   - role picker (主理 / 实施 / 找茬 / 审查 / 计划 / 汇报)
- *   - provider picker (OpenAI / Anthropic-compatible / 自定义)
- *   - multiline input
+ *   - role picker (主理 / 实施 / 策划 / 审核 A / 审核 B / 汇报)
+ *   - resolve status line (under role picker; shows "ok" / "no key"
+ *     / "unconfigured" with the resolved model name and provider)
+ *   - multiline task input
  *   - send button (also Ctrl/Cmd+Enter)
  *   - streaming assistant transcript
  *   - tool timeline (with command preview)
@@ -19,8 +21,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
-import { useAgentStream, type AgentEvent } from '../hooks/useAgentStream.js';
-import { revealSecret } from '../lib/api.js';
+import { useAgentStream } from '../hooks/useAgentStream.js';
+import { getRoleResolveStatus, type RoleResolveStatus } from '../lib/api.js';
 
 interface RoleSpec {
   id: string;
@@ -36,48 +38,23 @@ interface RoleSpec {
 const ROLE_DEFS: RoleSpec[] = [
   { id: 'agent:chief',    i18nKey: 'chief' },
   { id: 'agent:worker',   i18nKey: 'worker' },
+  { id: 'agent:planner',  i18nKey: 'planner' },
   { id: 'agent:critic:a', i18nKey: 'criticA' },
   { id: 'agent:critic:b', i18nKey: 'criticB' },
-  { id: 'agent:planner',  i18nKey: 'planner' },
   { id: 'agent:reporter', i18nKey: 'reporter' },
 ];
 
-interface ProviderSpec {
-  id: string;
-  label: string;
-  base_url: string;
-}
-
-const PROVIDERS: ProviderSpec[] = [
-  { id: 'openai_compat', label: 'OpenAI 兼容', base_url: 'https://api.openai.com/v1' },
-  { id: 'openai_compat', label: 'DeepSeek',    base_url: 'https://api.deepseek.com/v1' },
-  { id: 'openai_compat', label: 'Moonshot',    base_url: 'https://api.moonshot.cn/v1' },
-  { id: 'openai_compat', label: '自定义 relay', base_url: '' },
-];
-
-const DEFAULT_PROVIDER: ProviderSpec =
-  PROVIDERS[0] ?? { id: 'openai_compat', label: 'OpenAI 兼容', base_url: 'https://api.openai.com/v1' };
-
 export interface ChatZoneProps {
-  /** Optional default provider key (env var name) to use for the API key. */
-  defaultKeyEnvVar?: string;
-  /** Optional default model id. */
-  defaultModel?: string;
+  /** No props now — provider/model/api_key are server-resolved. */
 }
 
-export function ChatZone({
-  defaultKeyEnvVar = 'OPENAI_API_KEY',
-  defaultModel = 'gpt-4o-mini',
-}: ChatZoneProps) {
+export function ChatZone(_: ChatZoneProps = {}) {
   const { t } = useTranslation();
   const [task, setTask] = useState('');
   const [role, setRole] = useState<string>('agent:chief');
-  const [provider, setProvider] = useState<ProviderSpec>(DEFAULT_PROVIDER);
-  const [baseUrl, setBaseUrl] = useState(DEFAULT_PROVIDER.base_url);
-  const [model, setModel] = useState(defaultModel);
-  const [keyEnvVar, setKeyEnvVar] = useState(defaultKeyEnvVar);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [resolve, setResolve] = useState<RoleResolveStatus | null>(null);
 
   const { events, text, done, status, reset } = useAgentStream();
   const transcriptRef = useRef<HTMLDivElement>(null);
@@ -100,6 +77,27 @@ export function ChatZone({
     }
   }, [text, events.length]);
 
+  // v0.4.19: poll the role resolve status whenever the role
+  // changes so the user can see "默认: minimax:MiniMax-Text-01" /
+  // "未配置 API 密钥" / "未配置 default_model" inline.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await getRoleResolveStatus(role);
+        if (!cancelled) setResolve(r);
+      } catch (e) {
+        if (!cancelled) {
+          setResolve({
+            ok: false,
+            error: typeof e === 'string' ? e : (e as Error)?.message ?? 'resolve failed',
+          });
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [role]);
+
   const send = useCallback(async () => {
     const trimmed = task.trim();
     if (!trimmed || sending) return;
@@ -107,58 +105,32 @@ export function ChatZone({
     reset();
     setSending(true);
     try {
-      // The Tauri shell doesn't yet expose /api/run_task directly
-      // as a command; once the v0.3 backend wires this in, we
-      // call `run_agent_task` here. Until then, fall through to
-      // a JSON-RPC call via the pipe if the backend adds a
-      // `pipe_rpc` command.
-      // v0.4.12 (event 000048): resolve the API key from the OS
-      // credential store (DPAPI via keyring) at call-time, then
-      // pass the plaintext to run_agent_task in body.api_key.
-      // We no longer send api_key_env: pipe-server's env-var
-      // fallback path is removed.
-      let apiKey = '';
-      try {
-        apiKey = await revealSecret(keyEnvVar);
-      } catch (e) {
-        setError(
-          typeof e === 'string'
-            ? e
-            : (e as Error)?.message ?? `cannot reveal ${keyEnvVar}`,
-        );
-        setSending(false);
-        return;
-      }
-      if (!apiKey) {
-        setError(`API key "${keyEnvVar}" not set — add it in Settings`);
-        setSending(false);
-        return;
-      }
-
-      const ok = await invoke<{ ok: boolean; error?: string }>('run_agent_task', {
-        body: {
-          task: trimmed,
-          role,
-          provider_kind: provider.id,
-          base_url: baseUrl,
-          model,
-          api_key: apiKey,
-        },
-      });
-      // v0.4.13: drop the plaintext from this closure's scope as
-      // soon as the IPC round-trip finishes. We can't actually
-      // zeroize JS strings (V8 owns the heap), but reassigning
-      // removes the reference so it can be GC'd promptly.
-      apiKey = '';
+      // v0.4.19: send only { task, role } — server resolves the
+      // rest from role_overrides + preset + OS keystore.
+      const ok = await invoke<{ ok: boolean; error?: string; role?: string; hint?: string; status?: string }>(
+        'run_agent_task',
+        { body: { task: trimmed, role } },
+      );
       if (!ok?.ok) {
-        setError(ok?.error ?? '运行时未确认成功');
+        // The backend may return either 5xx-shaped envelope
+        // (status: 503, ok:false, error) or a thrown Err (Promise
+        // reject — caught by the catch below). Show the most
+        // informative line available.
+        const tail = ok?.error
+          ? `${ok.error}${ok.hint ? ` — ${ok.hint}` : ''}`
+          : ok?.status ?? '运行时未确认成功';
+        setError(tail);
       }
     } catch (e) {
-      setError(typeof e === 'string' ? e : (e as Error).message);
+      // Async pipe failure (server not reachable, panic, etc.).
+      const msg = typeof e === 'string' ? e : (e as Error).message;
+      // 'HTTP 500: {...}' style — strip the JSON noise.
+      const trimmed2 = msg?.replace(/^HTTP \d+:\s*/, '').slice(0, 240);
+      setError(trimmed2 ?? 'unknown error');
     } finally {
       setSending(false);
     }
-  }, [task, sending, reset, role, provider.id, baseUrl, model, keyEnvVar]);
+  }, [task, sending, reset, role]);
 
   const onSubmit = useCallback(
     (e: FormEvent) => {
@@ -187,21 +159,22 @@ export function ChatZone({
       <header className="flex shrink-0 items-center justify-between gap-3 border-b border-border bg-surface-2 px-4 py-2">
         <div className="flex items-center gap-2">
           <span className="font-mono text-xs text-text-secondary">ChatZone ▸</span>
-          <span className="text-sm text-text-secondary">v0.3 渐进式 · 直接驱动 agent-core</span>
+          <span className="text-sm text-text-secondary">{t('chatZone.subtitle', { defaultValue: '由设置中的角色分配配置驱动' })}</span>
         </div>
         <button
           type="button"
           onClick={reset}
           className="rounded border border-border px-2 py-0.5 text-xs text-text-secondary hover:bg-surface-1"
         >
-          清空
+          {t('chatZone.clear', { defaultValue: '清空' })}
         </button>
       </header>
 
-      {/* Controls */}
+      {/* Controls — only the role picker remains; everything else
+          moved to Settings. */}
       <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border bg-surface-2/60 px-4 py-2 text-xs">
         <label className="flex items-center gap-1">
-          <span className="text-text-secondary">角色</span>
+          <span className="text-text-secondary">{t('chatZone.role', { defaultValue: '角色' })}</span>
           <select
             value={role}
             onChange={(e) => setRole(e.target.value)}
@@ -215,82 +188,57 @@ export function ChatZone({
             ))}
           </select>
         </label>
-        <label className="flex items-center gap-1">
-          <span className="text-text-secondary">Provider</span>
-          <select
-            value={provider.label}
-            onChange={(e) => {
-              const next = PROVIDERS.find((p) => p.label === e.target.value);
-              if (next !== undefined) {
-                setProvider(next);
-                setBaseUrl(next.base_url);
-              }
-            }}
-            disabled={sending}
-            className="rounded border border-border bg-surface-1 px-2 py-1 disabled:opacity-50"
+        {/* Resolve status: shows what default_model + which preset +
+           whether the API key is configured. Chairman previously had
+           to type all of this manually; now it appears inline. */}
+        {resolve && (
+          <span
+            className={
+              resolve.ok
+                ? 'text-[10px] text-text-tertiary'
+                : 'text-[10px] text-status-warn'
+            }
+            title={
+              resolve.ok
+                ? `${resolve.provider_short ?? '?'}: ${resolve.model_id ?? '?'}`
+                : (resolve.error ?? '')
+            }
           >
-            {PROVIDERS.map((p, i) => (
-              <option key={`${p.label}-${i}`} value={p.label}>
-                {p.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="flex items-center gap-1">
-          <span className="text-text-secondary">Base URL</span>
-          <input
-            type="text"
-            value={baseUrl}
-            onChange={(e) => setBaseUrl(e.target.value)}
-            disabled={sending}
-            className="w-72 rounded border border-border bg-surface-1 px-2 py-1 font-mono text-xs disabled:opacity-50"
-            placeholder="https://api.openai.com/v1"
-          />
-        </label>
-        <label className="flex items-center gap-1">
-          <span className="text-text-secondary">Model</span>
-          <input
-            type="text"
-            value={model}
-            onChange={(e) => setModel(e.target.value)}
-            disabled={sending}
-            className="w-32 rounded border border-border bg-surface-1 px-2 py-1 font-mono text-xs disabled:opacity-50"
-          />
-        </label>
-        <label className="flex items-center gap-1">
-          <span className="text-text-secondary">API Key env</span>
-          <input
-            type="text"
-            value={keyEnvVar}
-            onChange={(e) => setKeyEnvVar(e.target.value)}
-            disabled={sending}
-            className="w-40 rounded border border-border bg-surface-1 px-2 py-1 font-mono text-xs disabled:opacity-50"
-            placeholder="OPENAI_API_KEY"
-          />
-        </label>
+            {resolve.ok
+              ? `${t('chatZone.resolve.ok', { defaultValue: '默认' })}: ${resolve.provider_short}:${resolve.model_id} (${resolve.api_kind ?? 'openai-compat'})`
+              : (resolve.error ?? t('chatZone.resolve.unconfigured', { defaultValue: '未配置' }))}
+          </span>
+        )}
       </div>
 
-      {/* Input */}
+      {/* Input — single textarea, no surrounding controls blocking
+           focus. */}
       <form onSubmit={onSubmit} className="flex shrink-0 flex-col gap-2 px-4 py-2">
         <textarea
           value={task}
           onChange={(e) => setTask(e.target.value)}
           onKeyDown={onKeyDown}
           disabled={sending}
-          rows={3}
-          placeholder="跟角色说点什么…（Ctrl+Enter 发送）  例如：给 main.rs 加一个 --verbose flag，把 println 改成 eprintln"
-          className="w-full resize-y rounded border border-border bg-surface-2 px-3 py-2 font-mono text-sm placeholder:text-text-secondary focus:border-chief focus:outline-none disabled:opacity-50"
+          rows={4}
+          placeholder={t('chatZone.taskPlaceholder', { defaultValue: '跟角色说点什么…（Ctrl+Enter 发送）' })}
+          className="w-full resize-y rounded border border-border bg-surface-2 px-3 py-2 font-mono text-sm placeholder:text-text-secondary focus:border-chief focus:outline-none focus:ring-2 focus:ring-chief/50 disabled:opacity-50"
         />
         <div className="flex items-center justify-between gap-2">
           <span className="text-xs text-text-secondary">
-            {sending ? '运行中…' : done ? `已结束：${status ?? '?'}` : '准备就绪'}
+            {sending
+              ? t('chatZone.running', { defaultValue: '运行中…' })
+              : done
+                ? `${t('chatZone.done', { defaultValue: '已结束：' })}${status ?? '?'}`
+                : t('chatZone.ready', { defaultValue: '准备就绪' })}
           </span>
           <button
             type="submit"
             disabled={sending || task.trim().length === 0}
             className="rounded bg-chief px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-chief/90 disabled:pointer-events-none disabled:opacity-50"
           >
-            {sending ? '发送中…' : '发送'}
+            {sending
+              ? t('chatZone.sending', { defaultValue: '发送中…' })
+              : t('chatZone.send', { defaultValue: '发送' })}
           </button>
         </div>
         {error && (
@@ -309,9 +257,7 @@ export function ChatZone({
           aria-live="polite"
         >
           {text.length === 0 && !sending && (
-            <p className="text-xs text-text-secondary">
-              等待输入…（输出会在这里流式显示）
-            </p>
+            <p className="text-xs text-text-secondary">{t('chatZone.waiting', { defaultValue: '等待输入…（输出会在这里流式显示）' })}</p>
           )}
           {text && (
             <pre className="whitespace-pre-wrap break-words font-sans text-sm leading-relaxed text-text-primary">
@@ -319,65 +265,47 @@ export function ChatZone({
             </pre>
           )}
           {sending && text.length === 0 && (
-            <p className="text-xs italic text-text-secondary">… 正在等待模型响应</p>
+            <p className="text-xs italic text-text-secondary">{t('chatZone.waitingModel', { defaultValue: '… 正在等待模型响应' })}</p>
           )}
         </div>
 
         {/* Tool timeline */}
-        <aside
-          className="flex min-h-0 flex-col gap-1 overflow-y-auto rounded border border-border bg-surface-2 p-3 text-xs"
-          aria-label="工具调用时间线"
-        >
-          <h3 className="mb-1 font-mono text-[10px] uppercase tracking-wider text-text-secondary">
-            工具
-          </h3>
-          {toolEvents.length === 0 && (
-            <p className="text-text-secondary">（暂无工具调用）</p>
+        <div className="flex min-h-0 flex-col gap-1 overflow-y-auto rounded border border-border bg-surface-2 p-3" aria-label="工具">
+          <div className="mb-1 text-[10px] uppercase tracking-wide text-text-secondary">
+            {t('chatZone.tools', { defaultValue: '工具' })} ({toolEvents.length === 0
+              ? t('chatZone.toolsEmpty', { defaultValue: '（暂无工具调用）' })
+              : ''}
+          </div>
+          {toolEvents.length === 0 ? null : (
+            <ol className="space-y-1 text-xs">
+              {toolEvents.map((ev, i) => (
+                <li key={i} className="rounded border border-border bg-surface-1 px-2 py-1 font-mono">
+                  {ev.kind === 'tool_started' && (
+                    <span>
+                      ▶ {String(ev.call.name)} {String((ev.call.args as Record<string, unknown>)?.['command'] ?? '').slice(0, 80)}
+                    </span>
+                  )}
+                  {ev.kind === 'tool_finished' && (
+                    <span>
+                      ✓ {String(ev.preview)} ({String(ev.elapsed_ms)}ms)
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ol>
           )}
-          {toolEvents.map((e, i) => (
-            <ToolTimelineRow key={i} ev={e} />
-          ))}
-        </aside>
+        </div>
       </div>
+
+      {/* Error log toggled out for brevity; if event stream yields an
+          error-level tool call, the controller is via the error
+          banner above. */}
+      <details className="border-t border-border bg-surface-2/60 px-4 py-2 text-xs">
+        <summary className="cursor-pointer text-text-secondary">{t('chatZone.logs', { defaultValue: '日志' })}</summary>
+        <pre className="mt-2 max-h-32 overflow-y-auto whitespace-pre-wrap break-words font-mono text-text-primary">
+          {events.length === 0 ? t('chatZone.noLogs', { defaultValue: '没有日志。' }) : null}
+        </pre>
+      </details>
     </section>
   );
-}
-
-function ToolTimelineRow({ ev }: { ev: AgentEvent }) {
-  if (ev.kind === 'tool_started') {
-    return (
-      <div className="flex items-start gap-1.5 font-mono">
-        <span className="text-text-secondary">▸</span>
-        <span className="shrink-0 text-chief">{ev.call.name}</span>
-        <span className="truncate text-text-secondary">
-          {summarizeArgs(ev.call.args)}
-        </span>
-      </div>
-    );
-  }
-  if (ev.kind === 'tool_finished') {
-    return (
-      <div className="flex items-start gap-1.5 font-mono">
-        <span className={ev.is_error ? 'text-red-400' : 'text-green-400'}>
-          {ev.is_error ? '✗' : '✓'}
-        </span>
-        <span className="shrink-0 text-text-secondary">{ev.elapsed_ms}ms</span>
-        <span className="truncate text-text-primary" title={ev.preview}>
-          {ev.preview}
-        </span>
-      </div>
-    );
-  }
-  return null;
-}
-
-function summarizeArgs(args: unknown): string {
-  if (args === null || args === undefined) return '';
-  if (typeof args === 'string') return args;
-  try {
-    const s = JSON.stringify(args);
-    return s.length > 80 ? s.slice(0, 77) + '…' : s;
-  } catch {
-    return '';
-  }
 }

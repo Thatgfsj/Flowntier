@@ -1,0 +1,28 @@
+{
+  "id": "000055",
+  "timestamp": "2026-06-30T15:11:00Z",
+  "task": "v0.4.19 — strip ChatZone config, server resolves from role_overrides",
+  "summary": "v0.4.19 — strip ChatZone config, server resolves from role_overrides",
+  "reason": "Three demands from the chairman:\n\n(1) 'ChatZone 还是让我输入 provider/baseUrl/model/apiKey — 为什么? 我在设置里已经设了'. Reason: ChatZone (apps/desktop/src/zones/ChatZone.tsx) had 5 redundant config inputs (role/Provider/Base URL/Model/API Key env). The Settings → AI 供应商 flow that handles all of these was put in place across v0.4.10–v0.4.18 but ChatZone never wired up to it — every call from ChatZone hardcoded `provider.id='openai_compat' baseUrl='https://api.openai.com/v1' model='gpt-4o-mini'`.\n\n(2) '我连chat输入框都打不了字符'. Reason: the 5 input rows squeezed the chat panel inside the h-[420px] shell. Stripping the 4 stale inputs gives back enough vertical space for the textarea to actually receive focus + keystrokes.\n\n(3) '用设置里的角色分配配置, 不再用 chat 里的. 给chat配置的删掉, 只用设置里的. 接口串通'. Three-part fix.\n\nWhat changed:\n- (Backend) handlers.rs 'run_task' was rewritten to accept the minimal body `{task, role}` and resolve model + base_url + api_key from role_overrides (v0.4.18) + the matching preset + the OS keystore. The 5-field legacy path (explicit base_url/model/api_key) still works for debug/scripted use. Added a `resolve_role()` helper that's also reused by the new GET endpoint.\n- (Backend) New endpoint `GET /api/router/roles/{role}/resolve` returns `{ok:true, provider_short, model_id, base_url, api_kind, has_key, fallback_chain}` or `{ok:false, error}`. Always HTTP 200 so the frontend can render inline without surfacing 5xx exceptions.\n- (Tauri) New command `get_role_resolve_status(role)` wraps the GET endpoint with body-shape compatibility.\n- (Frontend) ChatZone.tsx stripped down to ~190 lines: role select + resolve status line + textarea + send button + transcript + tool timeline + collapsible logs. Removed PROVIDERS constant, removed all 5 useState hooks for provider state, removed revealSecret import.\n- (Frontend) useEffect polls getRoleResolveStatus whenever the role changes — the status line shows \"默认: minimax:MiniMax-Text-01 (openai-compat)\" when configured, or \"未配置: 在设置 → 角色 → 模型 分配里选个默认模型\" when not.\n- (Tests) 3 new regression tests: get_role_resolve_returns_no_key_error_when_keychain_empty, get_role_resolve_reports_unconfigured_role, run_task_with_minimal_body_reports_unconfigured_role.\n\n19/19 e2e + 20/20 unit pass. tsc clean. NSIS installer (8,397,889 bytes) at C:\\Users\\thatg\\Desktop\\Flowntier_0.4.19_x64-setup.exe.\n\nNotes for v0.4.20 (deferred):\n- Chairman's quota-refresh nudge request — at 00:01, 05:01, 10:01, etc. send 'ai 之前疑似到达上限, 目前已经刷新, 检查工作进度并且继续工作' to the chief. Tracked but not in this commit.\n- The 'cant type in chat' UI bug may not be fully fixed; if chairman still reports it, follow-up v0.4.20 inspects the textarea overlay stack.",
+  "files": [
+    "crates/pipe-server/src/handlers.rs",
+    "crates/pipe-server/tests/e2e_pipe.rs",
+    "apps/desktop/src-tauri/src/lib.rs",
+    "apps/desktop/src/lib/api.ts",
+    "apps/desktop/src/zones/ChatZone.tsx",
+    "apps/desktop/src/i18n/zh-CN.ts",
+    "apps/desktop/src/i18n/en-US.ts",
+    "apps/desktop/src-tauri/tauri.conf.json",
+    "apps/desktop/package.json"
+  ],
+  "tags": [
+    "v0.4.19",
+    "chatzone-strip",
+    "server-resolves-role",
+    "resolve_role_helper",
+    "GET-resolve-endpoint",
+    "3-regression-tests",
+    "chairman-handoff",
+    "no-tag-yet"
+  ]
+}

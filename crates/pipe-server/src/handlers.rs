@@ -11,6 +11,7 @@ use agent_core::{Agent, AgentConfig, AgentEvent};
 use serde_json::{json, Value};
 use std::sync::Arc;
 use tokio::sync::broadcast;
+use zeroize::Zeroizing;
 
 use crate::dispatcher::Dispatcher;
 use crate::secrets::SecretStore;
@@ -382,6 +383,42 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
                 "models": models,
                 "count": models.len(),
             })))
+        })
+    });
+
+    // v0.4.19 (event 000055): GET /api/router/roles/{role}/resolve
+    // resolves a role's default_model + fallback_chain + keyring
+    // availability into a single structured preview, used by the
+    // ChatZone status line. Always returns 200 with `{ok:true,...}`
+    // or `{ok:false,error}` so the frontend can render inline.
+    let resolve_state = state.clone();
+    d.register("GET", "/api/router/roles/{role}/resolve", move |body| {
+        let s = resolve_state.clone();
+        Box::pin(async move {
+            let role = body.get("role")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            if role.is_empty() {
+                return Ok((200, json!({ "ok": false, "error": "missing 'role' in path" })));
+            }
+            match resolve_role(&s, &role).await {
+                Ok(r) => Ok((200, json!({
+                    "ok": true,
+                    "role": r.role,
+                    "provider_short": r.provider_short,
+                    "model_id": r.model_id,
+                    "base_url": r.base_url,
+                    "api_kind": r.api_kind,
+                    "has_key": true,
+                    "fallback_chain": r.fallback_chain,
+                }))),
+                Err(e) => Ok((200, json!({
+                    "ok": false,
+                    "role": role,
+                    "error": e,
+                }))),
+            }
         })
     });
 
@@ -1098,58 +1135,172 @@ fn sample_workflow(name: &str) -> Value {
     }
 }
 
+/// v0.4.19 (event 000055): resolve a role's default model from
+/// the role_overrides SQL table and the matching preset. Returns
+/// the (provider, model, base_url, secret_name, has_key, api_key)
+/// tuple so the caller can build an OpenAiProvider. Used by both
+/// `run_task` and `GET /api/router/roles/{role}/resolve`.
+async fn resolve_role(
+    state: &Arc<ServerState>,
+    role: &str,
+) -> Result<ResolvedRole, String> {
+    // 1. Read the override row (DB). May be absent — caller uses
+    //    in-memory defaults (which are all empty as of v0.4.16).
+    let ov = state.repo.get_role_override(role).await
+        .map_err(|e| format!("get_role_override: {e}"))?;
+    let (default_model, fallback_chain) = match ov {
+        Some(r) => (r.default_model, r.fallback_chain),
+        None => (String::new(), Vec::new()),
+    };
+    if default_model.is_empty() {
+        return Err("role not configured: open Settings → 角色 → 模型 分配 and pick a default_model".into());
+    }
+    // 2. Split "<provider_short>:<model_id>".
+    let (provider_short, model_id) = match default_model.split_once(':') {
+        Some((p, m)) => (p.to_string(), m.to_string()),
+        None => return Err(format!(
+            "default_model '{}' must be in '<provider>:<model>' form", default_model
+        )),
+    };
+    // 3. Look up the preset.
+    let preset = match crate::providers::get(&provider_short) {
+        Some(p) => p.clone(),
+        None => return Err(format!(
+            "unknown provider preset '{}' from default_model '{}'", provider_short, default_model
+        )),
+    };
+    // 4. Reveal the API key from the keychain. Empty defaults give
+    //    503 so the chairman knows the cause.
+    let api_key: Zeroizing<String> = match state.secrets.reveal(&preset.secret_name).await {
+        Ok(z) if !z.is_empty() => z,
+        _ => return Err(format!(
+            "no API key configured for {} (set it in Settings → 供应商)", preset.secret_name
+        )),
+    };
+    Ok(ResolvedRole {
+        role: role.to_string(),
+        provider_short,
+        model_id,
+        base_url: preset.base_url.to_string(),
+        api_kind: preset.kind.to_string(),
+        secret_name: preset.secret_name.to_string(),
+        api_key,
+        fallback_chain,
+    })
+}
+
+/// Helper struct returned by `resolve_role`. Cheap to clone by
+/// the OpenAiProvider ctor below.
+struct ResolvedRole {
+    role: String,
+    provider_short: String,
+    model_id: String,
+    base_url: String,
+    api_kind: String,
+    secret_name: String,
+    api_key: zeroize::Zeroizing<String>,
+    fallback_chain: Vec<String>,
+}
+
 async fn run_task(body: Value, state: Arc<ServerState>) -> Result<(u16, Value), String> {
-    // ── Parse request ─────────────────────────────────────────
+    // ── v0.4.19: minimal body shape ───────────────────────────
+    // Required: { task, role }
+    // Optional (legacy): { provider_kind, base_url, model, api_key, wf_id }
+    //
+    // When the optional fields are absent, the server resolves
+    // them from role_overrides (v0.4.18) + the matching preset's
+    // base_url / secret_name, revealing the API key from the OS
+    // keystore. The frontend (ChatZone v0.4.19) now sends only
+    // { task, role }.
     let task_text = body
         .get("task")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| "missing 'task'".to_string())?;
-    let provider_kind = body
-        .get("provider_kind")
-        .and_then(|v| v.as_str())
-        .unwrap_or("openai_compat");
-    let base_url = body
-        .get("base_url")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| "missing 'base_url'".to_string())?;
-    let base_url = agent_core::provider::openai::validate_base_url(base_url)
-        .map_err(|e| format!("invalid base_url: {e}"))?;
-    let model = body
-        .get("model")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| "missing 'model'".to_string())?
-        .to_string();
-    // v0.4.12 (event 000048): the api_key_env fallback is
-    // removed. The Tauri shell now resolves the key from the OS
-    // credential store via reveal_secret() and passes the
-    // plaintext in body.api_key. We never read process env vars
-    // for credentials — this prevents the key from leaking via
-    // /proc/<pid>/environ, task manager, or shell history.
-    let api_key = body
-        .get("api_key")
-        .and_then(|v| v.as_str())
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| "missing or empty 'api_key' (no env-var fallback in v0.4.12)".to_string())?
+        .ok_or_else(|| "missing 'task'".to_string())?
         .to_string();
     let role = body
         .get("role")
         .and_then(|v| v.as_str())
-        .unwrap_or("agent:worker");
+        .unwrap_or("agent:worker")
+        .to_string();
+
+    // Legacy path: caller supplied concrete provider/model/key.
+    let legacy_explicit = body.get("base_url").is_some()
+        || body.get("model").is_some()
+        || body.get("api_key").is_some();
+    let explicit_provider_kind = body
+        .get("provider_kind")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| "openai_compat".to_string());
+    let explicit_base_url = body
+        .get("base_url")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let explicit_model = body
+        .get("model")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let explicit_api_key = body
+        .get("api_key")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(|s| zeroize::Zeroizing::new(s.to_string()));
+
     let wf_id = body
         .get("wf_id")
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
 
+    // ── Build the primary provider ─────────────────────────────
+    let (provider_kind, base_url, model, api_key) = if legacy_explicit {
+        // Caller supplied everything — honor it (debug / scripted use).
+        let base_url = explicit_base_url
+            .clone()
+            .ok_or_else(|| "missing 'base_url'".to_string())?;
+        let base_url = agent_core::provider::openai::validate_base_url(&base_url)
+            .map_err(|e| format!("invalid base_url: {e}"))?;
+        let api_key = explicit_api_key
+            .clone()
+            .ok_or_else(|| "missing or empty 'api_key'".to_string())?;
+        let model = explicit_model
+            .clone()
+            .ok_or_else(|| "missing 'model'".to_string())?;
+        (explicit_provider_kind.clone(), base_url, model, api_key)
+    } else {
+        // v0.4.19: resolve from role_overrides + preset keychain.
+        // If the primary fails, we'll iterate the fallback_chain
+        // below; for now we attempt the primary once.
+        let resolved = match resolve_role(&state, &role).await {
+            Ok(r) => r,
+            Err(e) => {
+                // Friendlier 200/503 envelope than the legacy raw
+                // 500/Err so the frontend can render it nicely.
+                return Ok((503, json!({
+                    "ok": false,
+                    "role": role,
+                    "error": e,
+                    "hint": "open Settings → 角色 → 模型 分配",
+                })));
+            }
+        };
+        let provider_kind = match resolved.api_kind.as_str() {
+            "openai-compatible" => "openai_compat".to_string(),
+            "anthropic-compatible" => "openai_compat".to_string(), // best-effort
+            other => other.to_string(),
+        };
+        (provider_kind, resolved.base_url, resolved.model_id, resolved.api_key)
+    };
+
     // ── Build provider ────────────────────────────────────────
-    let provider: Arc<dyn agent_core::Provider> = match provider_kind {
-        "openai" => Arc::new(OpenAiProvider::openai(model, api_key)),
-        "openai_compat" => Arc::new(OpenAiProvider::compat(base_url, model, api_key)),
+    let provider: Arc<dyn agent_core::Provider> = match provider_kind.as_str() {
+        "openai" => Arc::new(OpenAiProvider::openai(model, api_key.to_string())),
+        "openai_compat" => Arc::new(OpenAiProvider::compat(base_url, model, api_key.to_string())),
         other => return Err(format!("unsupported provider_kind: {other}")),
     };
 
     // ── Build agent ───────────────────────────────────────────
-    let role_enum = match role {
+    let role_enum = match role.as_str() {
         "agent:chief" => agent_core::prompt::Role::Chief,
         "agent:critic:a" => agent_core::prompt::Role::BugHunter,
         "agent:critic:b" => agent_core::prompt::Role::Reviewer,

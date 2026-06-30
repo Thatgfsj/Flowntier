@@ -455,6 +455,16 @@ async fn list_router_models() -> Result<serde_json::Value, String> {
 }
 
 #[tauri::command]
+async fn get_role_resolve_status(role: String) -> Result<serde_json::Value, String> {
+    pipe_request(
+        "GET",
+        &format!("/api/router/roles/{role}/resolve"),
+        Some(serde_json::json!({ "role": role })),
+    )
+    .await
+}
+
+#[tauri::command]
 async fn toggle_provider(id: String, enabled: bool) -> Result<(), String> {
     // PATCH /api/providers/{id} body {"enabled": bool}
     pipe_request(
@@ -1458,7 +1468,7 @@ pub fn run() {
             health_check,
             list_secrets, save_secret, delete_secret, reveal_secret, seed_secrets,
             list_providers, toggle_provider,
-            list_router_roles, list_router_models, update_router_roles,
+            list_router_roles, list_router_models, update_router_roles, get_role_resolve_status,
             list_plugins, invoke_plugin, fetch_provider_models,
             add_custom_provider, remove_custom_provider,
             start_workflow_cmd, get_workflow, cancel_workflow,

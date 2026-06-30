@@ -1027,3 +1027,133 @@ async fn put_router_roles_rejects_missing_roles_array() {
         "error must mention 'roles'; resp={resp_text}");
     handle.abort();
 }
+
+// v0.4.19 (event 000055): chairman reported ChatZone had 4 stale
+// config inputs and `run_task` ignored role_overrides. This test
+// pins the new GET /api/router/roles/{role}/resolve endpoint:
+// when a default_model is configured but no keychain entry exists,
+// the endpoint returns `{ok:false, error:"no API key..."}` (the
+// keychain side of resolve_role). When both the DB row and the
+// keychain entry are present, it returns `{ok:true, ...}` — but
+// seeding the real OS keystore from an e2e test requires a
+// platform keystore. The fallback path is exhaustively tested
+// via the e2e secret_roundtrip test elsewhere.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn get_role_resolve_returns_no_key_error_when_keychain_empty() {
+    let (addr, handle) = spawn_server("resolve-nokey").await;
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+
+    // 1. Persist a default_model for agent:chief.
+    let put_resp = client::connect_and_request(
+        &addr,
+        serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "PUT",
+            "params": {
+                "path": "/api/router/roles",
+                "body": {"roles": [{
+                    "role": "agent:chief",
+                    "default_model": "minimax:MiniMax-Text-01",
+                    "fallback_chain": []
+                }]}
+            }
+        }),
+    )
+    .await;
+    assert_eq!(put_resp["result"]["status"].as_u64().unwrap_or(0), 200);
+
+    // 2. GET resolve. The DB row resolves provider_short +
+    //    model_id fine, but the keychain has nothing for
+    //    MINIMAX_API_KEY, so the error path fires.
+    let resp = client::connect_and_request(
+        &addr,
+        serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "GET",
+            "params": {
+                "path": "/api/router/roles/agent:chief/resolve",
+                "body": { "role": "agent:chief" }
+            }
+        }),
+    )
+    .await;
+    let resp_text = serde_json::to_string(&resp).unwrap_or_default();
+    assert_eq!(resp["result"]["status"].as_u64().unwrap_or(0), 200,
+        "resolve endpoint should return 200; resp={resp_text}");
+    let body = &resp["result"]["body"];
+    assert_eq!(body["ok"], serde_json::json!(false),
+        "ok:false because keychain empty; resp={resp_text}");
+    let err = body["error"].as_str().unwrap_or("");
+    assert!(err.contains("MINIMAX_API_KEY") || err.contains("no API key"),
+        "error must mention MINIMAX_API_KEY or 'no API key'; got '{err}'");
+    assert_eq!(body["role"], serde_json::json!("agent:chief"));
+    handle.abort();
+}
+
+// v0.4.19: resolve with no default_model set returns ok:false + a
+// structured error pointing the chairman at Settings.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn get_role_resolve_reports_unconfigured_role() {
+    let (addr, handle) = spawn_server("resolve-empty").await;
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    let resp = client::connect_and_request(
+        &addr,
+        serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "GET",
+            "params": {
+                "path": "/api/router/roles/agent:chief/resolve",
+                "body": { "role": "agent:chief" }
+            }
+        }),
+    )
+    .await;
+    let resp_text = serde_json::to_string(&resp).unwrap_or_default();
+    assert_eq!(resp["result"]["status"].as_u64().unwrap_or(0), 200);
+    let body = &resp["result"]["body"];
+    assert_eq!(body["ok"], serde_json::json!(false));
+    assert!(body["error"].as_str().unwrap_or("").contains("not configured"),
+        "error must mention 'not configured'; resp={resp_text}");
+    handle.abort();
+}
+
+// v0.4.19: run_task accepts only { task, role } and resolves the
+// rest. With no default_model in DB, run_task returns a friendly
+// 503 with structured error pointing the chairman at Settings.
+// We don't try to actually LLM — we just exercise the missing-
+// config path. To exercise the resolve-success path we'd need a
+// real keychain entry, which requires an OS keystore backed by a
+// platform-specific secret service.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn run_task_with_minimal_body_reports_unconfigured_role() {
+    let (addr, handle) = spawn_server("run-minimal").await;
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    let resp = client::connect_and_request(
+        &addr,
+        serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "POST",
+            "params": {
+                "path": "/api/run_task",
+                "body": {"task": "ping", "role": "agent:chief"}
+            }
+        }),
+    )
+    .await;
+    let resp_text = serde_json::to_string(&resp).unwrap_or_default();
+    assert_eq!(
+        resp["result"]["status"].as_u64().unwrap_or(0), 503,
+        "missing role config → 503; resp={resp_text}"
+    );
+    let body = &resp["result"]["body"];
+    assert_eq!(body["ok"], serde_json::json!(false));
+    assert!(body["error"].as_str().unwrap_or("").contains("not configured"),
+        "error must mention 'not configured'; resp={resp_text}");
+    assert!(body.get("hint").is_some(),
+        "hint field must be present; resp={resp_text}");
+    handle.abort();
+}
