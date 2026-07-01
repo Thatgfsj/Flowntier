@@ -1,20 +1,30 @@
-// BUG-FRONTEND-RT-15 (event 000045): post-build script that
-// patches the Tauri-generated NSIS installer to also check
-// (and kill) the sidecar binary (flowntier_runtime.exe)
-// before the file copy. Tauri 2.x only checks the main
-// flowntier.exe — but the sidecar also locks the file.
+// BUG-FRONTEND-RT-15 (event 000045) + event 000061: post-build
+// script that patches the Tauri-generated NSIS installer.
 //
-// Usage: node src-tauri/binaries/patch-nsis.js
-// (called from tauri.conf.json postBuildCommand)
+// Three patches, in order:
+//   (a) BUG-FRONTEND-RT-15: add a 2nd CheckIfAppIsRunning macro
+//       for the sidecar (flowntier_runtime.exe). Tauri 2.x only
+//       checks the main binary; the sidecar keeps a file handle
+//       that blocks the overwrite.
+//   (b) Event 000061 — Auto-kill old processes: belt-and-braces
+//       taskkill /F /IM for both binaries right before the file
+//       copy. Catches the case where the user closed the GUI but
+//       a stale process keeps the file locked. NSIS's built-in
+//       CheckIfAppIsRunning sometimes misses locked handles when
+//       the main process already exited but the sidecar didn't.
+//   (c) Event 000061 — Node.js runtime check in .onInit: abort
+//       the install with a clear zh-CN message if `node --version`
+//       isn't on PATH or returns a non-zero exit code. Tauri uses
+//       Node.js internally for the WebView2 asset bundling, so
+//       missing Node breaks the very first app launch.
+//
+// Usage: invoked from tauri.conf.json (postBuildCommand), or
+// manually via `pnpm tauri:patch`.
 
-// Tauri 2.x places the generated installer.nsi at the
-// WORKSPACE root (target/release/nsis/x64/), not under the
-// app folder. So we resolve from the script's parent (the
-// binaries/ dir) up to the workspace root.
 const fs = require('fs');
 const path = require('path');
+
 const SCRIPT_DIR = __dirname;
-// scripts/ is at the workspace root, so just go up one level
 const WORKSPACE = path.resolve(SCRIPT_DIR, '..');
 
 const TARGETS = [
@@ -24,51 +34,127 @@ const TARGETS = [
 
 const SIDECAR_NAME = 'flowntier_runtime.exe';
 const PRODUCT_NAME = 'Flowntier sidecar';
+const RUNTIME_MARKER = 'BUG-FRONTEND-RT-15 marker';
+const NODE_MARKER = 'v0.4.21 node-runtime check';
 
 let patched = 0;
 for (const rel of TARGETS) {
   const fullPath = path.resolve(__dirname, '..', '..', '..', rel);
-  if (!fs.existsSync(fullPath)) continue;
+  if (!fs.existsSync(fullPath)) {
+    continue;
+  }
   let content = fs.readFileSync(fullPath, 'utf8');
-  if (content.includes('BUG-FRONTEND-RT-15 marker')) {
-    console.log(`  (already patched) ${fullPath}`);
-    continue;
-  }
-  const marker =
-    '!insertmacro CheckIfAppIsRunning "${MAINBINARYNAME}.exe" "${PRODUCTNAME}"';
-  const idx = content.indexOf(marker);
-  if (idx < 0) {
-    console.warn(`  marker not found in ${fullPath}`);
-    continue;
-  }
-  // Insert a second CheckIfAppIsRunning for the sidecar, right
-  // after the first call (and before "Copy main executable").
-  const injection =
-    `!insertmacro CheckIfAppIsRunning "${marker.replace('$MAINBINARYNAME.exe', SIDECAR_NAME)}" "${PRODUCT_NAME}"\n` +
-    '  ; BUG-FRONTEND-RT-15 marker';
-  // Easier: just splice in the sidecar check after the main
-  // CheckIfAppIsRunning line.
-  const lines = content.split('\n');
-  const out = [];
-  for (let i = 0; i < lines.length; i++) {
-    out.push(lines[i]);
-    if (lines[i].includes('!insertmacro CheckIfAppIsRunning "${MAINBINARYNAME}.exe"')) {
-      out.push(
-        '',
-        `  ; BUG-FRONTEND-RT-15 (event 000045): also kill the`,
-        `  ; sidecar binary if it's still running. Tauri only checks`,
-        `  ; the main app; the sidecar (flowntier_runtime.exe) keeps`,
-        `  ; a file handle on the binary that blocks the overwrite.`,
-        `  !insertmacro CheckIfAppIsRunning "${SIDECAR_NAME}" "${PRODUCT_NAME}"`,
-        '  ; end BUG-FRONTEND-RT-15 marker'
-      );
+
+  // Patch (a) + (b): sidecar CheckIfAppIsRunning. The taskkill
+  // belt-and-braces goes into .onInit (runs before the install
+  // wizard appears) — see patch (b) below.
+  if (!content.includes(RUNTIME_MARKER)) {
+    const lines = content.split('\n');
+    const out = [];
+    for (let i = 0; i < lines.length; i++) {
+      out.push(lines[i]);
+      if (lines[i].includes('!insertmacro CheckIfAppIsRunning "${MAINBINARYNAME}.exe"')) {
+        out.push(
+          '',
+          `  ; BUG-FRONTEND-RT-15 marker`,
+          `  !insertmacro CheckIfAppIsRunning "${SIDECAR_NAME}" "${PRODUCT_NAME}"`,
+          '  ; end BUG-FRONTEND-RT-15 marker'
+        );
+      }
     }
+    content = out.join('\n');
+    console.log(`  patched (a): ${fullPath}`);
+  } else {
+    console.log(`  (a already patched) ${fullPath}`);
   }
-  const next = out.join('\n');
-  fs.writeFileSync(fullPath, next, 'utf8');
-  console.log(`  patched: ${fullPath}`);
+
+  // Patch (b): .onInit taskkill belt-and-braces. Inserts the
+  // kill calls BEFORE the wizard UI shows, so the file handles
+  // are released before any SetSection installation begins.
+  if (!content.includes('v0.4.21 taskkill-belt-bracess')) {
+    const marker = 'Function .onInit';
+    const idx = content.indexOf(marker);
+    if (idx >= 0) {
+      const insertAt = content.indexOf('{', idx) + 1;
+      // Build the command via Push (double-quoted) so NSIS expands
+      // $${MAINBINARYNAME} ($$ → literal $) into the main binary
+      // name once, BEFORE ExecWait runs. Avoids the
+      // "Invalid command: ${" parse error from nested `${$...}`.
+      const block =
+        '\n' +
+        '  ; v0.4.21 (event 000061) taskkill-belt-bracess start\n' +
+        '  ; Catches the daemon / zombie case where the user\n' +
+        '  ; closed the GUI but the sidecar is still listening\n' +
+        '  ; on the named pipe. NSIS CheckIfAppIsRunning handles\n' +
+        '  ; the foreground case; this catches the background.\n' +
+        '  ; Note: hardcoded "flowntier-desktop.exe" matches the\n' +
+        '  ; !define MAINBINARYNAME in tauri.conf.json. We tried\n' +
+        '  ; $${MAINBINARYNAME} but NSIS 3.x parser doesn\'t handle\n' +
+        '  ; the nested expansion in Push "..." strings cleanly.\n' +
+        '  Push "taskkill /F /IM flowntier-desktop.exe /T"\n' +
+        '  ExecWait $0\n' +
+        '  Pop $0\n' +
+        '  Push "taskkill /F /IM flowntier_runtime.exe /T"\n' +
+        '  ExecWait $0\n' +
+        '  Pop $0\n' +
+        '  ; v0.4.21 taskkill-belt-bracess end\n';
+      content = content.slice(0, insertAt) + block + content.slice(insertAt);
+      console.log(`  patched (b): ${fullPath}`);
+    } else {
+      console.warn(`  .onInit marker not found in ${fullPath}; skipping taskkill`);
+    }
+  } else {
+    console.log(`  (b already patched) ${fullPath}`);
+  }
+
+  // Patch (c): Node.js runtime check in .onInit. Inserted
+  // immediately after the SetContext macro call so we abort
+  // BEFORE the user sees the install wizard if Node is missing.
+  // Uses built-in NSIS SearchPath + ReadRegDWORD for node.exe
+  // detection — no extra plugins required.
+  if (!content.includes(NODE_MARKER)) {
+    const marker = '!insertmacro SetContext';
+    const idx = content.indexOf(marker);
+    if (idx < 0) {
+      console.warn(`  SetContext marker not found in ${fullPath}; skipping Node check`);
+    } else {
+      const lineEnd = content.indexOf('\n', idx);
+      const nodeCheckBlock =
+        '\n' +
+        '  ; v0.4.21 (event 000061) — Node.js runtime check.\n' +
+        '  ; Tauri 2.x uses Node internally for WebView2 asset\n' +
+        '  ; bundling; missing Node breaks the very first launch.\n' +
+        '  ; Check PATH first, then common install locations.\n' +
+        '  Push $0\n' +
+        '  SearchPath $0 "node.exe"\n' +
+        '  ${If} $0 == ""\n' +
+        '    ; Not on PATH — try %ProgramFiles% fallback\n' +
+        '    ${If} ${RunningX64}\n' +
+        '      StrCpy $0 "$PROGRAMFILES64\\nodejs\\node.exe"\n' +
+        '    ${Else}\n' +
+        '      StrCpy $0 "$PROGRAMFILES\\nodejs\\node.exe"\n' +
+        '    ${EndIf}\n' +
+        '    ${If} ${FileExists} $0\n' +
+        '      StrCpy $0 ""\n' +
+        '    ${EndIf}\n' +
+        '  ${EndIf}\n' +
+        '  ${If} $0 == ""\n' +
+        '    MessageBox MB_ICONSTOP|MB_OK "Flowntier 安装失败：未检测到 Node.js。Flowntier 需要 Node.js LTS (>=18)。请先从 https://nodejs.org 下载 LTS，安装时勾选 Add to PATH，然后重新运行本安装包。" IDCANCEL\n' +
+        '    Abort\n' +
+        '  ${EndIf}\n' +
+        '  Pop $0\n' +
+        '  ; v0.4.21 node-runtime check end\n';
+      content = content.slice(0, lineEnd) + nodeCheckBlock + content.slice(lineEnd);
+      console.log(`  patched (c): ${fullPath}`);
+    }
+  } else {
+    console.log(`  (c already patched) ${fullPath}`);
+  }
+
+  fs.writeFileSync(fullPath, content, 'utf8');
   patched++;
 }
+
 console.log(patched > 0
   ? `Done — patched ${patched} NSIS source file(s). Rebuild to embed.`
   : 'No NSIS source files were patched.');

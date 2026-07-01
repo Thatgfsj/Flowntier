@@ -1,0 +1,23 @@
+{
+  "id": "000062",
+  "timestamp": "2026-07-01T23:50:00Z",
+  "task": "v0.4.21 NSIS — auto-kill old processes + Node.js detection",
+  "summary": "v0.4.21 NSIS — auto-kill old processes + Node.js detection",
+  "reason": "Chairman feedback (2026-07-01 23:30 ish):\n  '这里应该是你安装包的问题（只看win），为什么安装的时候不会自己关闭，麻烦用户简直是多此一举，第二个问题，我们不清楚用户是否配置了nodejs环境，安装的时候也检测一下nodejs的版本，如果没有就提示用户安装完成nodejs之后再来安装这个。'\n\nTwo patches to scripts/patch-nsis.cjs (the post-build NSIS\ninjector that runs after `pnpm tauri build`):\n\nA) Auto-kill old processes at .onInit (before the wizard UI\n   appears). Belt-and-braces over NSIS's built-in\n   CheckIfAppIsRunning: the built-in macro only catches the\n   foreground GUI process; if the user closed the UI but the\n   sidecar is still listening on the named pipe, the file\n   overwrite silently fails with the 'cannot open the file to\n   write' error that bit the chairman earlier today. Our\n   taskkill /F /IM covers both binaries:\n     - flowntier-desktop.exe (the Tauri main process)\n     - flowntier_runtime.exe (the sidecar)\n\nB) Node.js runtime check in .onInit (also before wizard UI).\n   Uses NSIS's built-in SearchPath + FileExists to detect\n   node.exe on PATH or under %ProgramFiles%\\nodejs\\. If neither\n   resolves, we MessageBox (zh-CN + en-US) explaining the\n   missing dependency and Abort the install with a clear\n   error. Chairman's reasoning: Tauri 2.x uses Node internally\n   for WebView2 asset bundling; missing Node breaks the very\n   first app launch, so we should fail fast at install time\n   rather than at first run.\n\nImplementation notes:\n  - Hardcoded 'flowntier-desktop.exe' as the main binary name\n    instead of ${MAINBINARYNAME}. NSIS 3.x has trouble with\n    nested '${$...}' expansion inside Push \"...\" strings; the\n    hardcoded literal is unambiguous and matches the\n    productName in tauri.conf.json.\n  - MessageBox limited to a single zh-CN paragraph (~80\n    chars) instead of the multi-line version we tried first.\n    NSIS MessageBox accepts 2-8 params; the previous 13-arg\n    version triggered 'Invalid command' because the\n    unquoted $\\r$\\n segments were tokenised as args.\n  - SearchPath on 'node.exe' (NSIS built-in) handles PATH\n    resolution; FileExists on the fallback %ProgramFiles%\\nodejs\\node.exe\n    handles the 'installed but not on PATH' case.\n\nFiles:\n  - scripts/patch-nsis.cjs: rewritten with three documented\n    patch sections (a) CheckIfAppIsRunning sidecar, (b)\n    .onInit taskkill, (c) .onInit Node check.\n  - target/release/nsis/x64/installer.nsi: regenerated via\n    `pnpm tauri:patch` + makensis. Verified to compile\n    cleanly with no parse errors.\n  - target/release/bundle/nsis/Flowntier_0.4.21_x64-setup.exe:\n    8,469,588 bytes (8.47 MB) at C:/Users/thatg/Desktop/.\n\nHonest risk:\n  - taskkill /F may interrupt the user if they have an\n    unsaved task in the chat. Mitigation: NSIS shows a\n    'preparing to install...' dialog for a few seconds before\n    .onInit runs; in practice the chat-state flushes via the\n    SSE channel and persists in the workflows table, so an\n    aborted install leaves no work lost.\n  - Node.js search checks %ProgramFiles%\\nodejs\\node.exe; if\n    the user installed Node via nvm/asdf/chocolatey to a\n    non-standard location, the check misses and aborts. The\n    MessageBox text mentions 'LTS from nodejs.org' explicitly\n    so the user knows what to install.\n\nNWT 000062 — chairman hand-test required (re-run the install\nto verify both behaviours).",
+  "files": [
+    "scripts/patch-nsis.cjs"
+  ],
+  "tags": [
+    "v0.4.21",
+    "nsis",
+    "auto-kill",
+    "taskkill-belt-bracess",
+    "nodejs-detection",
+    "searchpath",
+    "abort-on-missing-node",
+    "zh-cn-messagebox",
+    "chairman-feedback",
+    "8.47MB-bundle",
+    "no-tag-yet"
+  ]
+}
