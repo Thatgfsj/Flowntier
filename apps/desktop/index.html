@@ -5,6 +5,58 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Flowntier</title>
+    <script>
+      // v0.4.21 diagnostic bridge (event 000063): forward every
+      // webview console message to the Rust shell via the
+      // `log_webview_console` Tauri command. Critical for
+      // diagnosing "首页打不开" — Tauri 2.x does NOT forward
+      // webview console to the Rust log by default in production
+      // builds, and `WebviewWindow::eval` is fire-and-forget (no
+      // return value), so we use the existing Tauri IPC channel
+      // instead. The Rust handler in lib.rs logs each line under
+      // the `flowntier_webview_console` target.
+      (function () {
+        try {
+          // Tauri 2.x injects __TAURI_INTERNALS__ before any other
+          // script runs. We use it to call our Rust command.
+          // If the global isn't there yet (e.g. on a plain
+          // browser host), we silently no-op.
+          function send(level, args) {
+            try {
+              var parts = [];
+              for (var i = 0; i < args.length; i++) {
+                var v = args[i];
+                try {
+                  if (v instanceof Error) parts.push(v.message);
+                  else if (typeof v === 'object') parts.push(JSON.stringify(v));
+                  else parts.push(String(v));
+                } catch (e) { parts.push('[unserializable]'); }
+              }
+              var line = level + ' ' + new Date().toISOString() + ' ' + parts.join(' ');
+              if (window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.invoke) {
+                window.__TAURI_INTERNALS__.invoke('log_webview_console', { line: line })
+                  .catch(function () {});
+              } else {
+                // Browser host: surface to F12 devtools.
+                (window.__flowntier_console_log = window.__flowntier_console_log || []).push(line);
+              }
+            } catch (e) { /* ignore */ }
+          }
+          var origLog = console.log;
+          var origErr = console.error;
+          var origWarn = console.warn;
+          console.log = function () { send('log', arguments); origLog.apply(console, arguments); };
+          console.error = function () { send('err', arguments); origErr.apply(console, arguments); };
+          console.warn = function () { send('warn', arguments); origWarn.apply(console, arguments); };
+          window.addEventListener('error', function (e) {
+            send('uncaught', [e.message + ' at ' + e.filename + ':' + e.lineno]);
+          });
+          window.addEventListener('unhandledrejection', function (e) {
+            send('unhandledrejection', [String(e.reason)]);
+          });
+        } catch (e) { /* ignore — diagnostics should never break the app */ }
+      })();
+    </script>
   </head>
   <body class="bg-surface-1 text-primary">
     <div id="root"></div>

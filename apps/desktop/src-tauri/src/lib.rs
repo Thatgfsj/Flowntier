@@ -321,6 +321,22 @@ async fn log_frontend_error(
     Ok(())
 }
 
+// v0.4.21 (event 000063): webview console forward. The webview
+// side has an inline script in apps/desktop/index.html that
+// intercepts console.log / console.error / console.warn /
+// window.onerror / unhandledrejection and invokes this command
+// with one line at a time. We log each line under the
+// `flowntier_webview_console` target so it lands in
+// %APPDATA%\flowntier\logs\flowntier.log.<date>. Critical for
+// diagnosing "首页打不开" reports in production builds where
+// devtools are off and Tauri 2.x does NOT forward webview
+// console to the Rust log by default.
+#[tauri::command]
+async fn log_webview_console(line: String) -> Result<(), String> {
+    tracing::info!(target: "flowntier_webview_console", "{}", line);
+    Ok(())
+}
+
 /// Read a key from the persistent kv store. Used by the frontend
 /// to check first-run flags, the last-opened tab, etc.
 ///
@@ -1523,6 +1539,7 @@ pub fn run() {
             run_agent_task,
             draw_i_ching,
             log_frontend_error,
+            log_webview_console,
             kv_get, kv_set,
             load_sample_workflow, first_run_complete,
             rpc_version,
