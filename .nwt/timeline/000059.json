@@ -1,0 +1,25 @@
+{
+  "id": "000059",
+  "timestamp": "2026-07-01T22:50:00Z",
+  "task": "v0.4.21 NSIS ship + chairman task-submit crash investigation",
+  "summary": "v0.4.21 NSIS ship + chairman task-submit crash investigation",
+  "reason": "Chairman directive (2026-07-01 22:22): 'win 的安装包也搞，win跟网站版本要一起的'. Plus crash report: 'v0.4.20 win 的应用端无法跑任务啊，我设置了一个任务点击提交之后没法用啊 ... 我一点击它就跳出来了，它都没做好怎么检查？'\n\nTwo parts in this commit:\n\nA) NSIS ship:\n   1. Rebuilt runtime with hotfix (5a55280) — dropped BufReader\n      that hung writes on Windows.\n   2. cp target/release/flowntier-runtime.exe →\n      apps/desktop/src-tauri/binaries/flowntier_runtime-x86_64-pc-windows-msvc.exe\n      (so the next NSIS bundle ships the v0.4.21 runtime).\n   3. Bumped version: 0.4.20 → 0.4.21 in tauri.conf.json +\n      package.json (NSIS picks this up at bundle time).\n   4. pnpm tauri build --bundles nsis → initial NSIS bundle.\n   5. pnpm tauri:patch → adds 2nd CheckIfAppIsRunning macro for\n      flowntier_runtime.exe (BUG-FRONTEND-RT-15).\n   6. C:/Users/thatg/AppData/Local/tauri/NSIS/makensis.exe\n      target/release/nsis/x64/installer.nsi → rebuild with patch.\n   7. cp target/release/bundle/nsis/Flowntier_0.4.21_x64-setup.exe\n      → C:/Users/thatg/Desktop/ (8,471,418 bytes).\n\n   NSIS file metadata:\n     size: 8,471,418 bytes\n     runtime bundled: 8,540,672 bytes (8.4 MB stripped)\n     CRC: 0x667F65FB\n     wire side: 2× CheckIfAppIsRunning (main + sidecar)\n\nB) Chairman task-submit crash investigation plan:\n   - '跳出' (pop-up) likely refers to: (1) an error toast / dialog\n     appearing after task submit; (2) the WorkdirSetup modal\n     blocking first-launch task submit; (3) a runtime IPC\n     exception in the Tauri shell.\n   - v0.4.20 runtime had no HTTP bridge, but task submit on the\n     Tauri shell used the named-pipe IPC (not the bridge). So\n     the bridge absence isn't directly the cause.\n   - Likely cause: the user's role_overrides table doesn't\n     have a default_model for the role being submitted. The\n     run_task handler returns 503 + 'role not configured: open\n     Settings → Roles → Model'. ChatZone renders this as a\n     visible inline error (possibly mistaken for a pop-up).\n   - To diagnose without chairman hand-test: chair-side log\n     lives at %APPDATA%/flowntier/flowntier.log (Tauri shell\n     log). Runtime stderr captured by Tauri sidecar spawner\n     surfaces in dev console too.\n   - Fix path: open Settings → 角色 → 模型 分配, set a\n     default_model for each role the chairman wants to chat\n     with. Then resubmit. v0.4.21 NSIS preserves ~/AppData/\n     Roaming/flowntier/ so prior settings carry over.\n\nC) What this commit DOES NOT include:\n   - The deferred v0.4.20 items (per-provider HTTP error-code\n     parsing, textarea overlay, HTML frontend Settings pane).\n     These remain on the v0.4.22 roadmap.\n   - A NSIS re-installer for the v0.4.21 runtime only (no full\n     desktop rebuild). The full installer rebuilds BOTH\n     flowntier-desktop.exe + flowntier_runtime.exe so the\n     chairman gets a consistent upgrade.\n\nHonest risk:\n- If chairman's task was previously working and now fails,\n  something on the v0.4.20 patch regressed. Most likely the\n  role_overrides table got corrupted by the v0.4.18\n  migration when chairman upgraded across multiple minor\n  versions. Re-set the default_model in Settings should\n  recover.\n- If '跳出' literally means a JS exception (red box or React\n  error overlay), the chairman should reproduce with the\n  Tauri devtools open (right-click → Inspect Element) and\n  paste the console error to me. The NSIS build strips\n  devtools in production, but the log file at\n  %APPDATA%/flowntier/flowntier.log captures uncaught errors.\n- The NSIS install will NOT migrate the user's data if\n  chairman installs to a different AppData location.\n  Default is %APPDATA% (Roaming) so this should be\n  transparent.",
+  "files": [
+    "apps/desktop/src-tauri/tauri.conf.json",
+    "apps/desktop/package.json",
+    "target/release/bundle/nsis/Flowntier_0.4.21_x64-setup.exe"
+  ],
+  "tags": [
+    "v0.4.21",
+    "nsis-ship",
+    "version-bump",
+    "sidecar-patch",
+    "task-submit-crash",
+    "investigation-plan",
+    "settings-may-need-reset",
+    "8.47MB-bundle",
+    "appdata-preserves-user-data",
+    "chairman-hand-test",
+    "no-tag-yet"
+  ]
+}
