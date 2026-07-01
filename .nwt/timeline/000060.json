@@ -1,0 +1,25 @@
+{
+  "id": "000060",
+  "timestamp": "2026-07-01T23:25:00Z",
+  "task": "v0.4.21 hotfix — AgentEvent forwarding + workflow cleanup",
+  "summary": "v0.4.21 hotfix — AgentEvent forwarding + workflow cleanup",
+  "reason": "Chairman directive (2026-07-01 22:50): '我需要前后端都可以完成任务，Win系统是方便即装即用，网站是方便移植到Linux跟mac，所以需要你修复问题，给之前的任务清理一下，别让它跑，然后继续修'.\n\nThree changes in this commit:\n\nA) Cleared 4 stuck workflows in chairman's data_dir\n   (~\\AppData\\Roaming\\flowntier\\storage.sqlite):\n     - 01KW9SCMKG7WAJ9J03JG7Z8JCD (old '234324' test, REQ_RECEIVED)\n     - 01KWCF0BH9VKNKNTFEQC8BTVQY (old 'auth_login' test, REQ_RECEIVED)\n     - 01KWF14456N06W4HXF112XPKCT (taro #1, REQ_RECEIVED)\n     - 01KWF2PR71PC126WF26A71TYZY (taro #2, REQ_RECEIVED)\n   All set state='FAILED', phase='aborted', with workflow_log\n   entry crediting 'cleanup_stuck_workflows'. The tasks table had\n   0 rows for these workflows — chief never even spawned the\n   planner phase. Pure SQL cleanup; chairman's settings,\n   role_overrides, provider rows, and secrets untouched.\n\nB) Found and fixed the root cause of chairman's '跳出'\n   (event 000060):\n\n   apps/desktop/src-tauri/src/lib.rs events_bridge() was\n   forwarding only WfEvent payloads to the webview:\n\n     if let Some(ev) = v.get('event') {           // WfEvent shape\n         app.emit('wf:event', ev.clone())\n     }\n\n   But agent_core's broadcast::Sender<AgentEvent> is a\n   SEPARATE channel — its events serialise to\n   {kind:'done', wf_id, status, summary} or\n   {kind:'text_delta', agent_id, delta} etc. None of these\n   have an .event field, so every AgentEvent was silently\n   dropped on the floor. Chief ran the task to completion\n   (status=DONE, summary returned via run_task HTTP) but\n   the webview's useAgentStream hook never received any\n   text_delta / done events. ChatZone transcript stayed\n   empty; chairman saw a 'stuck' spinner (workflow stuck in\n   REQ_RECEIVED for several minutes).\n\n   Fix: forward every parsed line as-is on the wf:event\n   channel. Frontend useAgentStream filters by .kind field\n   (AGENT_KINDS = {text_delta, tool_started, tool_finished,\n   phase_transition, token_usage, done}). WfEvent payloads\n   lack .kind and get filtered at JS layer. Two event types\n   now coexist on one channel.\n\nC) tauri-shim.js fanoutEvent rewrite: dispatch by eventName\n   'wf:event' (matches Tauri shell channel name) instead of\n   filtering by payload.kind. Now HTML frontend receives\n   every AgentEvent the same way the Tauri shell does.\n\n   Verified: SSE stream from v0.4.21 bridge shows full\n   text_delta chunks + done event after a chief\n   run_task. Browser tab subscribed via the SSE channel\n   receives them through the shim's transformCallback\n   wrapper.\n\nD) Shipped to chairman:\n   - C:\\Users\\thatg\\Desktop\\Flowntier_0.4.21_x64-setup.exe\n     (8,469,588 bytes, full NSIS installer, includes the\n     patched Tauri shell)\n   - C:\\Users\\thatg\\Desktop\\flowntier-runtime-v0.4.21.exe\n     (8,540,672 bytes, standalone runtime for manual\n     launch)\n\nE) force-add apps/html-frontend/dist/{index.html,\n   tauri-shim.js} so chairman's git pull picks up the\n   fixed shim. (dist/ is in .gitignore, but the html-\n   frontend bundle needs to be in git for chairman to\n   access it via the repo path.)\n\nHonest risk:\n- 'wf:event' channel now carries two event types without a\n  wire-level discriminator. If a future WfEvent grows a .kind\n  field it would be misrouted. Mitigation: future cleanup\n  should add a discriminator tag.\n- The cleared workflows were stuck in REQ_RECEIVED because\n  chief's run_task returns summary= in Chinese — the\n  chairman may want to inspect why chief never progressed.\n  Likely cause: chief returned a clarifying question\n  (web/桌面/CLI) that the now-fixed UI will surface. v0.4.22\n  follow-up: add a 'restart from REQ_RECEIVED' button in\n  the Settings panel for the chairman to retry without\n  losing the original user_request.\n- NSIS install will overwrite chairman's existing runtime\n  + desktop binary. ~/AppData/Roaming/flowntier/ is preserved\n  across the install (so prior settings, secrets, workflow\n  history carry over).\n\nHonest risk to chairman's workflow cleanup:\n- The 4 FAILED workflows remain in the workflows table\n  (state='FAILED' now, not deleted). Chairman will see them\n  as 'aborted' in the workflow history panel. v0.4.22 will\n  add a 'delete failed workflow' button.",
+  "files": [
+    "apps/desktop/src-tauri/src/lib.rs",
+    "apps/html-frontend/dist/index.html",
+    "apps/html-frontend/dist/tauri-shim.js"
+  ],
+  "tags": [
+    "v0.4.21",
+    "hotfix",
+    "agent-event-forwarding",
+    "events_bridge-bug",
+    "transcript-not-rendering",
+    "stuck-workflow-cleanup",
+    "force-add-shim",
+    "nsis-ship-8.46MB",
+    "runtime-ship-8.54MB",
+    "chairman-hand-test",
+    "no-tag-yet"
+  ]
+}

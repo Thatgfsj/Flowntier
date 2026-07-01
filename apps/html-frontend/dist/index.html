@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Flowntier</title>
+<!--
+  Browser-host for the **same** desktop bundle (apps/desktop/dist).
+  This file injects a `__TAURI_INTERNALS__` shim BEFORE the
+  bundle loads. The shim translates every Tauri 2.x IPC call
+  (`invoke`, `transformCallback`, `unregisterCallback`) into a
+  POST /rpc + Server-Sent Events roundtrip against the
+  pipe-server's HTTP bridge on 127.0.0.1:8765. As a result the
+  entire React/Settings/ChatZone/WorkdirSetup UI from the
+  Tauri shell renders unchanged inside any browser.
+
+  The chairman's single requirement is "跟应用端一模一样的前端
+  Flowntier" — this file is the answer. No framework, no
+  bundler, no separate code path: it's the desktop bundle
+  wrapped in a 30-line IPC shim.
+-->
+<script src="./tauri-shim.js"></script>
+<script type="module" crossorigin src="./assets/index-B4g6M-ob.js"></script>
+<link rel="stylesheet" crossorigin href="./assets/index-Bebu4tMB.css">
+</head>
+<body class="bg-surface-1 text-primary">
+  <div id="root"></div>
+</body>
+</html>
