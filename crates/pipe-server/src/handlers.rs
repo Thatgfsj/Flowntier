@@ -1142,6 +1142,86 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
         })
     });
 
+    // ── v0.4.22 (event 000074): Tarot random oracle ──────
+    // Used by the Flwntier Android chief client (apps/ChiefApp).
+    // The chairman's spec (NWT 000073): the Android client
+    // looks like iching-oracle but the data path runs
+    // through this Flwntier runtime endpoint, not a local
+    // 64-gua JSON. Two modes:
+    //   GET  /api/tarot/draw           → single card
+    //   GET  /api/tarot/draw?spread=3  → past/present/future
+    //   GET  /api/tarot/list           → 78-card deck metadata
+    // The card payload is JSON with id, arcana, suit, rank,
+    // name_zh, name_pinyin, name_en, symbol_svg
+    // (100x140 inline SVG the Android app renders as
+    // 翻牌 / 正逆位 image), upright_meaning, reversed_meaning.
+    d.register("GET", "/api/tarot/draw", |body| {
+        // Pull `spread` out of the body BEFORE the async move
+        // so the closure doesn't borrow body across the await
+        // boundary (E0515).
+        let spread = body
+            .get("spread")
+            .and_then(|v| v.as_str())
+            .unwrap_or("1")
+            .to_string();
+        Box::pin(async move {
+            let spread = spread.as_str();
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0);
+            let drawn: Vec<crate::tarot::DrawnCard> = match spread {
+                "3" | "three" | "past-present-future" => {
+                    crate::tarot::draw_three_card_spread()
+                }
+                _ => vec![crate::tarot::draw_single("抽卡")],
+            };
+            let items: Vec<Value> = drawn.iter().map(|d| json!({
+                "position": d.position,
+                "reversed": d.reversed,
+                "meaning": d.meaning,
+                "card": {
+                    "id": d.card.id,
+                    "arcana": d.card.arcana,
+                    "suit": d.card.suit,
+                    "rank": d.card.rank,
+                    "name_zh": d.card.name_zh,
+                    "name_pinyin": d.card.name_pinyin,
+                    "name_en": d.card.name_en,
+                    "symbol_svg": d.card.symbol_svg,
+                    "upright_meaning": d.card.upright_meaning,
+                    "reversed_meaning": d.card.reversed_meaning,
+                },
+            })).collect();
+            Ok((200, json!({
+                "ok": true,
+                "spread": spread,
+                "count": items.len(),
+                "drawn_at_ms": now,
+                "items": items,
+            })))
+        })
+    });
+
+    d.register("GET", "/api/tarot/list", |_body| {
+        Box::pin(async {
+            let cards: Vec<Value> = crate::tarot::deck().iter().map(|c| json!({
+                "id": c.id,
+                "arcana": c.arcana,
+                "suit": c.suit,
+                "rank": c.rank,
+                "name_zh": c.name_zh,
+                "name_pinyin": c.name_pinyin,
+                "name_en": c.name_en,
+            })).collect();
+            Ok((200, json!({
+                "ok": true,
+                "count": cards.len(),
+                "cards": cards,
+            })))
+        })
+    });
+
     // Workflow control. The end-to-end workflow loop is not
     // yet wired up; start_workflow_cmd is exposed but the
     // actual run is gated on v0.4 work.

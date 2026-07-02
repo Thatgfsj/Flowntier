@@ -22,6 +22,7 @@ pub mod providers;
 pub mod scheduler;
 pub mod secrets;
 pub mod server;
+pub mod tarot;
 pub mod ws_bridge;
 
 pub use dispatcher::Dispatcher;
