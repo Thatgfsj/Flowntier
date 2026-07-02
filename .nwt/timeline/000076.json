@@ -10,6 +10,9 @@
     "apps/ChiefApp/app/src/main/java/com/thatgfsj/chief/ui/oracle/TarotScreen.kt",
     "apps/ChiefApp/app/src/main/java/com/thatgfsj/chief/share/DeepSeekShare.kt"
   ],
+  "followups": [
+    "000076b: home page still sat too close to the top because the previous layout wrapped the whole screen in a verticalScroll Column (verticalScroll always pins children to the top of the viewport, so verticalArrangement=Center had no effect). Fix: drop the verticalScroll, restructure as outer Box(fillMaxSize) > inner Column(Top) > Header at top + Box(weight 1f, contentAlignment=Center) wrapping the state content. Home page buttons now sit in the middle of the screen."
+  ],
   "tags": [
     "event-000076",
     "manual-flip",
