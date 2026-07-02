@@ -16,6 +16,7 @@
 pub mod dispatcher;
 pub mod handlers;
 pub mod i_ching;
+pub mod orchestrator;
 pub mod protocol;
 pub mod providers;
 pub mod scheduler;

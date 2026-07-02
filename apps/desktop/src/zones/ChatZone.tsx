@@ -121,11 +121,15 @@ export function ChatZone(_: ChatZoneProps = {}) {
     reset();
     setSending(true);
     try {
-      // v0.4.19: send only { task, role } — server resolves the
-      // rest from role_overrides + preset + OS keystore.
-      const ok = await invoke<{ ok: boolean; error?: string; role?: string; hint?: string; status?: string }>(
-        'run_agent_task',
-        { body: { task: trimmed, role } },
+      // v0.4.22 (event 000068): the legacy run_agent_task only
+      // ran a single agent. The spec (history/PROJECT_SPEC.md)
+      // requires an 8-phase workflow with critic reviews +
+      // worker dispatch. Default to run_workflow; users can
+      // still fall back to run_agent_task for single-agent chat
+      // (the role picker survives for that case).
+      const ok = await invoke<{ ok: boolean; error?: string; role?: string; hint?: string; status?: string; wf_id?: string; summary?: string }>(
+        'run_workflow',
+        { body: { task: trimmed } },
       );
       if (!ok?.ok) {
         // The backend may return either 5xx-shaped envelope

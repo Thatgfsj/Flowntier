@@ -896,6 +896,58 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
         let s = custom_del_state.clone();
         Box::pin(async move { delete_custom_provider(body, s).await })
     });
+
+    // ── v0.4.22 (event 000068): POST /api/run_workflow ────
+    // Body: { task: "<user_request>" }
+    //
+    // Spawns an Orchestrator that runs the 8-phase workflow
+    // from history/PROJECT_SPEC.md:
+    //   1-requirement (chief) -> 2-plan (chief) ->
+    //   3-plan-review (critic:a + critic:b parallel) ->
+    //   4-dispatch (chief) -> 5-develop (workers parallel) ->
+    //   6-final-review (critic:a + critic:b parallel) ->
+    //   7-repair (chief decides) -> 8-delivery (chief summary)
+    //
+    // The handler awaits the full 8 phases synchronously so
+    // the JSON-RPC response is "everything done" — but every
+    // phase transition is broadcast on the events pipe in
+    // real-time, so the UI's PhaseTimeline animates as the
+    // workflow progresses instead of waiting 10 minutes for
+    // one big response. Each per-agent 5-min timeout caps the
+    // worst case at ~30-40 minutes total (acceptable for a
+    // desktop app where the chairman is waiting).
+    let s_wf = state.clone();
+    d.register("POST", "/api/run_workflow", move |body| {
+        let s = s_wf.clone();
+        Box::pin(async move {
+            let Some(task) = body.get("task").and_then(|v| v.as_str()) else {
+                return Ok((400, json!({
+                    "ok": false,
+                    "error": "missing 'task'",
+                })));
+            };
+            if task.trim().is_empty() {
+                return Ok((400, json!({
+                    "ok": false,
+                    "error": "'task' is empty",
+                })));
+            }
+            let orch = crate::orchestrator::Orchestrator::new(
+                s.clone(),
+                s.events.clone(),
+                task.to_string(),
+            );
+            let wf_id = orch.wf_id.clone();
+            let summary = orch.run().await;
+            Ok((200, json!({
+                "ok": true,
+                "wf_id": wf_id,
+                "summary": summary,
+                "note": "phases emit PhaseTransition events on the events pipe; tasks rows under each wf_id",
+            })))
+        })
+    });
+
     d.register("PUT", "/api/router/roles", move |body| {
         // v0.4.18 (event 000054): real persistence. Body shape:
         // { "roles": [
@@ -1575,6 +1627,13 @@ fn sample_workflow(name: &str) -> Value {
 /// the (provider, model, base_url, secret_name, has_key, api_key)
 /// tuple so the caller can build an OpenAiProvider. Used by both
 /// `run_task` and `GET /api/router/roles/{role}/resolve`.
+pub async fn resolve_role_for_orchestrator(
+    state: &Arc<ServerState>,
+    role: &str,
+) -> Result<ResolvedRole, String> {
+    resolve_role(state, role).await
+}
+
 async fn resolve_role(
     state: &Arc<ServerState>,
     role: &str,
@@ -1626,15 +1685,15 @@ async fn resolve_role(
 
 /// Helper struct returned by `resolve_role`. Cheap to clone by
 /// the OpenAiProvider ctor below.
-struct ResolvedRole {
-    role: String,
-    provider_short: String,
-    model_id: String,
-    base_url: String,
-    api_kind: String,
-    secret_name: String,
-    api_key: zeroize::Zeroizing<String>,
-    fallback_chain: Vec<String>,
+pub struct ResolvedRole {
+    pub role: String,
+    pub provider_short: String,
+    pub model_id: String,
+    pub base_url: String,
+    pub api_kind: String,
+    pub secret_name: String,
+    pub api_key: zeroize::Zeroizing<String>,
+    pub fallback_chain: Vec<String>,
 }
 
 async fn run_task(body: Value, state: Arc<ServerState>) -> Result<(u16, Value), String> {

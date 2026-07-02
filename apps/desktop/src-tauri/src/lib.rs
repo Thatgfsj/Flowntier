@@ -290,6 +290,20 @@ async fn run_agent_task(body: serde_json::Value) -> Result<serde_json::Value, St
     pipe_request("POST", "/api/run_task", Some(body)).await
 }
 
+/// v0.4.22 (event 000068): kick off the 8-phase workflow
+/// described in history/PROJECT_SPEC.md. The orchestrator runs
+/// chief → plan → critic review → dispatch workers → final
+/// review → repair → delivery, emitting a `PhaseTransition`
+/// event on each step so the UI's PhaseTimeline animates.
+///
+/// Body: { task: "<user_request>" }. Optional `mode` field
+/// selects "single" (legacy run_task) vs "workflow" (this
+/// orchestrator) — for now we only support workflow.
+#[tauri::command]
+async fn run_workflow(body: serde_json::Value) -> Result<serde_json::Value, String> {
+    pipe_request("POST", "/api/run_workflow", Some(body)).await
+}
+
 /// Draw one hexagram at random from the 64-entry I Ching dataset.
 /// Stateless; safe to spam-click from the oracle UI.
 #[tauri::command]
@@ -1630,7 +1644,7 @@ pub fn run() {
             list_plugins, invoke_plugin, fetch_provider_models,
             add_custom_provider, remove_custom_provider,
             start_workflow_cmd, get_workflow, cancel_workflow,
-            run_agent_task,
+            run_agent_task, run_workflow,
             draw_i_ching,
             log_frontend_error,
             log_webview_console,

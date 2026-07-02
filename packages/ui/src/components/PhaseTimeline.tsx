@@ -1,12 +1,17 @@
 import { cn } from '../lib/cn.js';
 
+// v0.4.22 (event 000068): names match the orchestrator's
+// 8-phase state machine (history/PROJECT_SPEC.md). Kept in
+// sync with crates/pipe-server/src/orchestrator.rs::PHASES
+// and apps/desktop/src/App.tsx::PHASES — any change must be
+// applied to all three.
 export type PhaseName =
   | 'requirement'
-  | 'planning'
-  | 'plan_review'
+  | 'plan'
+  | 'plan-review'
   | 'dispatch'
-  | 'development'
-  | 'review'
+  | 'develop'
+  | 'final-review'
   | 'repair'
   | 'delivery';
 

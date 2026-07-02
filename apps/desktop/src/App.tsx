@@ -22,37 +22,45 @@ import { useEventStream } from './hooks/useEventStream.js';
 import { invoke } from '@tauri-apps/api/core';
 import { ChatZone } from './zones/ChatZone.js';
 
+// v0.4.22 (event 000068): Phase names match the orchestrator's
+// 8-phase state machine (history/PROJECT_SPEC.md). Names must
+// stay in sync with `crates/pipe-server/src/orchestrator.rs
+// ::PHASES` — the events pipe matches on these strings.
 interface Phase {
   name:
     | 'requirement'
-    | 'planning'
-    | 'plan_review'
+    | 'plan'
+    | 'plan-review'
     | 'dispatch'
-    | 'development'
-    | 'review'
+    | 'develop'
+    | 'final-review'
     | 'repair'
     | 'delivery';
   label: string;
 }
 
+// v0.4.22 (event 000068): PHASES names match the orchestrator's
+// 8-phase state machine (history/PROJECT_SPEC.md). The unprefixed
+// names are what the PhaseTransition events use (orchestrator.rs
+// PHASES const); the labels are i18n'd.
 const PHASES: ReadonlyArray<Phase> = [
-  { name: 'requirement', label: '需求' },
-  { name: 'planning', label: '规划' },
-  { name: 'plan_review', label: '计划审核' },
-  { name: 'dispatch', label: '派发' },
-  { name: 'development', label: '开发' },
-  { name: 'review', label: '评审' },
-  { name: 'repair', label: '修复' },
-  { name: 'delivery', label: '交付' },
+  { name: 'requirement', label: '1-需求' },
+  { name: 'plan', label: '2-规划' },
+  { name: 'plan-review', label: '3-计划审核' },
+  { name: 'dispatch', label: '4-派发' },
+  { name: 'develop', label: '5-开发' },
+  { name: 'final-review', label: '6-终审' },
+  { name: 'repair', label: '7-修复' },
+  { name: 'delivery', label: '8-交付' },
 ];
 
 const PHASE_STATE: Record<Phase['name'], PhaseState> = {
   requirement: 'pending',
-  planning: 'pending',
-  plan_review: 'pending',
+  plan: 'pending',
+  'plan-review': 'pending',
   dispatch: 'pending',
-  development: 'pending',
-  review: 'pending',
+  develop: 'pending',
+  'final-review': 'pending',
   repair: 'pending',
   delivery: 'pending',
 };
@@ -444,8 +452,9 @@ export function App() {
       setCompleted(true);
       setReviewVerdict({ verdict: 'PASS', summary: t('workflow.verdict.pass') });
     }
-    if (event.kind === 'transition' && event.to) {
-      const idx = PHASES.findIndex((p) => p.name === event.to);
+    if ((event.kind === 'transition' || (event as { kind?: string }).kind === 'phase_transition') && (event as { to?: string }).to) {
+      const to = (event as { to: string }).to;
+      const idx = PHASES.findIndex((p) => p.name === to);
       if (idx >= 0) {
         setActivePhase(idx);
         setPhaseStates((prev) => {
@@ -454,7 +463,7 @@ export function App() {
             const phaseName = PHASES[i]?.name;
             if (phaseName) next[phaseName] = 'done';
           }
-          const toName = event.to as Phase['name'];
+          const toName = to as Phase['name'];
           next[toName] = 'active';
           return next;
         });
