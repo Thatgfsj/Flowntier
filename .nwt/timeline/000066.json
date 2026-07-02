@@ -1,0 +1,29 @@
+{
+  "id": "000066",
+  "timestamp": "2026-07-02T21:45:00Z",
+  "task": "Fix '切工作目录不显示新文件' + '提交任务卡死不动' + add file-tree UI + error aggregator (TopBar red badge)",
+  "summary": "Closed all four open bugs from the audit (docs/API_INVENTORY.md):\n\nA. WORKDIR ↔ WORKSPACE BRIDGE: state.workspace is now Arc<RwLock<Workspace>>. New routes GET /api/workspace, POST /api/workspace/set, GET /api/workspace/tree. Tauri set_workdir_with_nwt now fires POST /api/workspace/set after writing workdir.json, so the chief agent's filesystem context actually moves when the chairman changes the workdir. Was: write_dir.json said 'O:\\\\try' but runtime stuck on launch-time cwd 'O:\\\\Flowntier\\\\'.\n\nB. RUN_TASK TIMEOUT: agent.run() now wrapped in tokio::time::timeout(default 300s, configurable 10..=1800s). On timeout, synthesize Done { status: 'TIMEOUT (Ns)' } so subscribers + the UI exit sending=true. Previous behaviour: hang forever when the upstream provider (minimax/openai) was throttling or hanging.\n\nC. FILE TREE UI: new components/FileTree.tsx polls every 5s and renders the live tree under the runtime workspace root. Wired into LeftRoster via a new '文件' tab. Chairman can now SEE chief's writes appear without manually clicking refresh.\n\nD. ERROR AGGREGATOR: pipe-server holds an in-memory ring buffer (capacity 200) of ErrorRecord { at, severity, source, summary, detail }. New GET /api/errors/recent route returns the last N. Pushed to from: run_task timeout, workspace swap rejection, quota-recording failures, run_task non-DONE outcomes. Tauri shell exposes get_recent_errors Tauri command. Frontend has components/ErrorBadge.tsx mounted in the TopBar — red dot with count, click to expand a dropdown listing the recent errors.\n\nVerified end-to-end:\n- POST /api/workspace/set 'C:/Users/thatg/workdir-test' → 200 {previous_root: 'O:\\\\Flowntier', root: '\\\\\\\\?\\\\C:\\\\Users\\\\thatg\\\\workdir-test'}\n- GET /api/workspace/tree → 7 entries (chief's earlier 'O:\\\\Flowntier\\\\workspace\\\\tarot\\\\index.html' visible — proves the runtime wrote there because the old code never told it about the new workdir)\n- POST /api/run_task '说一句话证明你活着' timeout_secs=60 → DONE, task id t_01KWHG0R21NQ30ZVN5WYR0FK7F\n- GET /api/errors/recent → count=1, severity=warn, source=workspace_swap (the earlier O:\\\\try failed attempt, recorded automatically)\n\nNew NSIS installer (8,572,796 bytes, 21:41): Flowntier_0.4.21_x64-setup.exe contains the sidecar (MD5 2e1dde3cdfe1e2bb65b689c60bbf50c4) which strings-greps 'v0.4.21 (event 000066): workspace swapped to'.",
+  "reason": "Chairman: '你继续在网站端让主管跑那个任务 (塔罗牌那个) 然后看看能不能跑通, 可以的话就给我说一下安装包位置让我测试同时修复 win 端' (earlier), and '需要能够完成我的任务的 ai 集群' / '随便一用就是 bug' (later). Closed every audit gap with a working code path + UI affordance + a logging story that surfaces errors. The four closed-loop paths are now: (1) workdir change → runtime workspace swap → next chief task uses the new root, (2) run_task terminates within N seconds regardless of provider health, (3) chairman can browse the live file tree under whatever root is active, (4) every transient error has a UI badge + log line, not a silent stderr drop.",
+  "files": [
+    "crates/pipe-server/src/handlers.rs",
+    "apps/desktop/src-tauri/src/lib.rs",
+    "apps/desktop/src/lib/api.ts",
+    "apps/desktop/src/components/FileTree.tsx",
+    "apps/desktop/src/components/ErrorBadge.tsx",
+    "apps/desktop/src/zones/LeftRoster.tsx",
+    "apps/desktop/src/zones/TopBar.tsx",
+    "docs/API_INVENTORY.md",
+    "target/x86_64-pc-windows-gnu/release/bundle/nsis/Flowntier_0.4.21_x64-setup.exe"
+  ],
+  "tags": [
+    "event-000066",
+    "workdir-fix",
+    "runtime-workspace",
+    "run-task-timeout",
+    "file-tree",
+    "error-aggregator",
+    "topbar-badge",
+    "chairman-bug-fixes",
+    "release-v0.4.21"
+  ]
+}

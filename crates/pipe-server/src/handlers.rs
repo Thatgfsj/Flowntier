@@ -17,6 +17,27 @@ use zeroize::Zeroizing;
 use crate::dispatcher::Dispatcher;
 use crate::secrets::SecretStore;
 
+/// v0.4.21 (event 000066): one error surfaced by the pipe-server
+/// to the desktop TopBar red-dot badge. Kept in-memory only —
+/// persistence belongs in `quota_failures` (provider-level) or
+/// in the user's project log (`workflow_log`). This struct is
+/// the transient, "something interesting just happened, the
+/// chairman should know" channel.
+///
+/// `severity` is one of: `error`, `warn`, `info`. `source`
+/// identifies which subsystem emitted it (`run_task`,
+/// `workspace_swap`, `quota`, `agent_loop`, `events_pipe`,
+/// `init`). `detail` is a free-text payload — usually the
+/// error message itself.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ErrorRecord {
+    pub at: i64,
+    pub severity: String,
+    pub source: String,
+    pub summary: String,
+    pub detail: Option<String>,
+}
+
 /// Shared state held by the pipe server.
 #[derive(Clone)]
 pub struct ServerState {
@@ -24,8 +45,26 @@ pub struct ServerState {
     pub events: broadcast::Sender<AgentEvent>,
     /// Default tool registry.
     pub tools: Arc<ToolRegistry>,
-    /// CWD-style workspace root for the current pipe server run.
-    pub workspace: Workspace,
+    /// v0.4.21 (event 000066): in-memory ring buffer of the
+    /// 200 most-recent error records. Surfaces to the desktop
+    /// TopBar via `GET /api/errors/recent`. Avoids hammering
+    /// SQLite for transient errors that don't deserve a
+    /// persisted row but DO deserve user attention.
+    /// `Arc<Mutex<…>>` so the ServerState `#[derive(Clone)]`
+    /// keeps working (Mutex isn't Clone on its own).
+    pub errors: Arc<std::sync::Mutex<std::collections::VecDeque<ErrorRecord>>>,
+    /// v0.4.21 (event 000066): workspace root for the current
+    /// pipe-server run. Wrapped in `Arc<RwLock<…>>` so the
+    /// `POST /api/workspace/set` handler can swap it mid-process
+    /// when the chairman changes the workdir via the desktop UI
+    /// (`About > Change workdir`). Prior to this the workspace
+    /// was the runtime's launch-time cwd — whatever it was when
+    /// flowntier-runtime.exe started — so a chief agent writing
+    /// files always landed them under `O:\Flowntier\workspace\…`
+    /// regardless of what workdir.json said. Event 000066
+    /// fixes that by routing `set_workdir_with_nwt` through a
+    /// new pipe-server route that updates this field in place.
+    pub workspace: Arc<std::sync::RwLock<Workspace>>,
     /// v0.4: persistent secret store (OS keystore + AES-GCM).
     pub secrets: Arc<SecretStore>,
     /// v0.4: SQLite repository for provider / custom_provider /
@@ -69,11 +108,69 @@ impl ServerState {
         Self {
             events,
             tools: Arc::new(ToolRegistry::with_builtins()),
-            workspace: Workspace::new(workspace_root, "flowntier"),
+            workspace: Arc::new(std::sync::RwLock::new(
+                Workspace::new(workspace_root, "flowntier"),
+            )),
+            errors: Arc::new(std::sync::Mutex::new(
+                std::collections::VecDeque::with_capacity(200),
+            )),
             secrets,
             repo,
             dispatcher: Arc::new(std::sync::Mutex::new(None)),
         }
+    }
+
+    /// v0.4.21 (event 000066): swap the workspace root at runtime.
+    /// Called by `POST /api/workspace/set`. In-flight agent runs
+    /// that already cloned the workspace via `state.workspace.read()`
+    /// will keep their old root (that's the agent-loop contract)
+    /// — only subsequent reads pick up the new path. The Tauri
+    /// shell ensures this is called *before* the next
+    /// `POST /api/run_task` lands, so in practice the swap is
+    /// observed by every new task.
+    pub fn set_workspace(&self, root: std::path::PathBuf) {
+        let mut g = self
+            .workspace
+            .write()
+            .expect("workspace rwlock poisoned");
+        *g = Workspace::new(root, "flowntier");
+        tracing::info!(
+            target: "pipe_server",
+            "v0.4.21 (event 000066): workspace swapped to {}",
+            g.root.display()
+        );
+    }
+
+    /// v0.4.21 (event 000066): snapshot the current workspace
+    /// root. Cheap (just a clone of the Arc), used by handlers
+    /// that need a stable Workspace reference for the duration
+    /// of a single request (e.g. run_task builds an Agent with
+    /// this snapshot).
+    pub fn workspace_snapshot(&self) -> Workspace {
+        self.workspace
+            .read()
+            .expect("workspace rwlock poisoned")
+            .clone()
+    }
+
+    /// v0.4.21 (event 000066): push an error record onto the
+    /// in-memory ring buffer. Returns immediately; never blocks.
+    /// Called from key failure sites: `run_task` timeout,
+    /// workspace swap rejection, quota-recording failures, and
+    /// the pipe pipe-error reporter. The Tauri shell polls
+    /// `GET /api/errors/recent` and lights up the TopBar red
+    /// badge when count > 0.
+    pub fn push_error(&self, rec: ErrorRecord) {
+        if let Ok(mut g) = self.errors.lock() {
+            if g.len() >= 200 { g.pop_front(); }
+            g.push_back(rec);
+        }
+    }
+
+    /// Snapshot the most-recent N error records (newest first).
+    pub fn recent_errors(&self, n: usize) -> Vec<ErrorRecord> {
+        let g = self.errors.lock().expect("errors mutex poisoned");
+        g.iter().rev().take(n).cloned().collect()
     }
 
     /// v0.4.20: install the dispatcher once `register_all` has
@@ -315,6 +412,172 @@ pub fn register_all(d: &mut Dispatcher, state: ServerState) {
                     "error": format!("list_tasks: {e}"),
                 }))),
             }
+        })
+    });
+
+    // ── v0.4.21 (event 000066): GET /api/workspace ────────
+    // Returns the current workspace root + display name. Cheap
+    // snapshot — used by the Tauri shell's "is the workdir the
+    // same as what runtime thinks it is?" diagnostic and by the
+    // new FileTree component to anchor its root before
+    // `GET /api/workspace/tree`.
+    let s_wsget = state.clone();
+    d.register("GET", "/api/workspace", move |_body| {
+        let s = s_wsget.clone();
+        Box::pin(async move {
+            let ws = s.workspace_snapshot();
+            Ok((200, json!({
+                "ok": true,
+                "root": ws.root.to_string_lossy(),
+                "name": ws.name,
+            })))
+        })
+    });
+
+    // ── v0.4.21 (event 000066): POST /api/workspace/set ────
+    // Body: { path: "C:\\path\\to\\workdir" } or { path: "/abs/path" }
+    // Swaps the runtime's workspace root in place. Idempotent —
+    // calling with the same path is a no-op (just rewrites the
+    // RwLock with the same value). This is the bridge between
+    // Tauri `set_workdir_with_nwt` (which only writes
+    // workdir.json) and the actual chief agent's filesystem
+    // context. Without this, the chairman's "切工作目录" UX
+    // changed workdir.json but chief kept writing to the
+    // launch-time cwd — silently diverging.
+    let s_wsset = state.clone();
+    d.register("POST", "/api/workspace/set", move |body| {
+        let s = s_wsset.clone();
+        Box::pin(async move {
+            let Some(path) = body.get("path").and_then(|v| v.as_str()) else {
+                let rec = ErrorRecord {
+                    at: chrono::Utc::now().timestamp(),
+                    severity: "warn".into(),
+                    source: "workspace_swap".into(),
+                    summary: "POST /api/workspace/set missing 'path'".into(),
+                    detail: None,
+                };
+                s.push_error(rec);
+                return Ok((400, json!({
+                    "ok": false,
+                    "error": "missing 'path'",
+                })));
+            };
+            let p = std::path::PathBuf::from(path);
+            if !p.exists() {
+                let rec = ErrorRecord {
+                    at: chrono::Utc::now().timestamp(),
+                    severity: "warn".into(),
+                    source: "workspace_swap".into(),
+                    summary: format!("workdir path does not exist: {path}"),
+                    detail: None,
+                };
+                s.push_error(rec);
+                return Ok((400, json!({
+                    "ok": false,
+                    "error": format!("path does not exist: {}", p.display()),
+                })));
+            }
+            if !p.is_dir() {
+                let rec = ErrorRecord {
+                    at: chrono::Utc::now().timestamp(),
+                    severity: "warn".into(),
+                    source: "workspace_swap".into(),
+                    summary: format!("workdir not a directory: {path}"),
+                    detail: None,
+                };
+                s.push_error(rec);
+                return Ok((400, json!({
+                    "ok": false,
+                    "error": format!("not a directory: {}", p.display()),
+                })));
+            }
+            let abs = match p.canonicalize() {
+                Ok(a) => a,
+                Err(e) => return Ok((500, json!({
+                    "ok": false,
+                    "error": format!("canonicalize: {e}"),
+                }))),
+            };
+            s.set_workspace(abs.clone());
+            Ok((200, json!({
+                "ok": true,
+                "root": abs.to_string_lossy(),
+                "previous_root": s.workspace_snapshot().root.to_string_lossy(),
+            })))
+        })
+    });
+
+    // ── v0.4.21 (event 000066): GET /api/workspace/tree ──
+    // Body: { path?: "<relative>", depth?: 2, max_entries?: 200 }
+    // Lists directory entries under the current workspace root.
+    // Used by the FileTree component. Hidden files are filtered
+    // out by default. Result is depth-limited and entry-limited
+    // to keep the payload small.
+    let s_wstree = state.clone();
+    d.register("GET", "/api/workspace/tree", move |body| {
+        let s = s_wstree.clone();
+        let rel = body.get("path").and_then(|v| v.as_str())
+            .unwrap_or("").to_string();
+        let depth = body.get("depth").and_then(|v| v.as_u64())
+            .unwrap_or(2).min(8) as usize;
+        let max_entries = body.get("max_entries").and_then(|v| v.as_u64())
+            .unwrap_or(200).min(2000) as usize;
+        Box::pin(async move {
+            let ws = s.workspace_snapshot();
+            let target = if rel.is_empty() {
+                ws.root.clone()
+            } else {
+                let candidate = ws.resolve(&rel);
+                // Safety: refuse paths that escape the workspace.
+                if !ws.contains(&candidate) {
+                    return Ok((403, json!({
+                        "ok": false,
+                        "error": format!("path escapes workspace: {}", candidate.display()),
+                    })));
+                }
+                candidate
+            };
+            if !target.exists() {
+                return Ok((404, json!({
+                    "ok": false,
+                    "error": format!("path does not exist: {}", target.display()),
+                })));
+            }
+            let mut entries: Vec<Value> = Vec::new();
+            let mut truncated = false;
+            walk_tree(&target, depth, max_entries, &mut entries, &mut truncated);
+            Ok((200, json!({
+                "ok": true,
+                "root": ws.root.to_string_lossy(),
+                "path": ws.relativize(&target).to_string_lossy(),
+                "entries": entries,
+                "truncated": truncated,
+                "count": entries.len(),
+            })))
+        })
+    });
+
+    // ── v0.4.21 (event 000066): GET /api/errors/recent ──
+    // Returns the last N error rows captured by the pipe-server
+    // (quota failures, run_task timeouts, workspace swap
+    // rejections, agent errors). Backed by an in-memory
+    // `Arc<Mutex<VecDeque<ErrorRecord>>>` so the TopBar red-dot
+    // badge can poll without hammering SQLite. Capacity 200;
+    // oldest entries evicted FIFO.
+    //
+    // Query: ?limit=N (default 10, capped at 200).
+    let s_errors = state.clone();
+    d.register("GET", "/api/errors/recent", move |body| {
+        let s = s_errors.clone();
+        let limit = body.get("limit").and_then(|v| v.as_u64())
+            .unwrap_or(10).min(200) as usize;
+        Box::pin(async move {
+            let rows = s.recent_errors(limit);
+            Ok((200, json!({
+                "ok": true,
+                "count": rows.len(),
+                "rows": rows,
+            })))
         })
     });
 
@@ -1488,7 +1751,7 @@ async fn run_task(body: Value, state: Arc<ServerState>) -> Result<(u16, Value), 
         role_enum,
         provider,
         state.tools.clone(),
-        state.workspace.clone(),
+        state.workspace_snapshot(),
         AgentConfig::default(),
     );
 
@@ -1496,23 +1759,74 @@ async fn run_task(body: Value, state: Arc<ServerState>) -> Result<(u16, Value), 
     // Keep a copy of the task_text so we can write it into the
     // tasks row at the end (v0.4.21 event 000064).
     let task_text_for_record = task_text.clone();
+
+    // v0.4.21 (event 000066): outer timeout wraps the whole
+    // agent.run() loop. Default 5 min — chief tasks with the
+    // current provider set rarely exceed 2 min for tool-heavy
+    // runs, and we'd rather the chairman see a clean TIMEOUT
+    // status than stare at a spinner for an hour because
+    // api.minimaxi.com is throttling. Caller can override via
+    // body.timeout_secs; cap at 30 min so a buggy client can't
+    // DoS the runtime with a 24-hour task.
+    let timeout_secs: u64 = body
+        .get("timeout_secs")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(300)
+        .clamp(10, 1800);
+
     let mut rx = agent.run(task_text);
     let mut last_status = "UNKNOWN".to_string();
     let mut summary: Option<String> = None;
-    while let Some(ev) = rx.recv().await {
-        // Best-effort fan-out; if no subscribers, that's fine.
-        let _ = state.events.send(ev.clone());
-        if let AgentEvent::Done { status, summary: s, .. } = ev {
-            last_status = status;
-            summary = s;
-        }
-        if matches!(last_status.as_str(), "DONE" | "FAILED" | "ABORTED" | "ABORTED_REPEAT") {
-            // If the wf_id was provided, replace the empty one.
-            if !wf_id.is_empty() {
-                last_status = format!("{last_status} (wf={wf_id})");
+    let timed_out = tokio::time::timeout(
+        std::time::Duration::from_secs(timeout_secs),
+        async {
+            while let Some(ev) = rx.recv().await {
+                // Best-effort fan-out; if no subscribers, that's fine.
+                let _ = state.events.send(ev.clone());
+                if let AgentEvent::Done { status, summary: s, .. } = ev {
+                    last_status = status;
+                    summary = s;
+                }
+                if matches!(last_status.as_str(), "DONE" | "FAILED" | "ABORTED" | "ABORTED_REPEAT") {
+                    // If the wf_id was provided, replace the empty one.
+                    if !wf_id.is_empty() {
+                        last_status = format!("{last_status} (wf={wf_id})");
+                    }
+                    return false; // not a timeout
+                }
             }
-            break;
-        }
+            true // channel closed without Done — treat as timeout-shaped
+        },
+    )
+    .await
+    .unwrap_or(true);
+    if timed_out && !matches!(last_status.as_str(), "DONE" | "FAILED" | "ABORTED" | "ABORTED_REPEAT") {
+        // Synthesize a Done event so subscribers see the
+        // terminal state, and stamp the status the frontend
+        // can grep on (event 000066 introduces "TIMEOUT" as a
+        // new terminal status; before this the UI would have
+        // hung in 'sending=true' indefinitely).
+        last_status = format!("TIMEOUT ({timeout_secs}s)");
+        summary = Some(format!(
+            "agent.run() exceeded the {timeout_secs}s outer timeout. \
+             This usually means the upstream provider (e.g. minimax, \
+             openai) is hanging, throttling, or returning malformed \
+             streaming responses. Inspect /api/errors/recent and \
+             consider lowering the per-task timeout_secs."
+        ));
+        let _ = state.events.send(AgentEvent::Done {
+            wf_id: wf_id.clone(),
+            status: last_status.clone(),
+            summary: summary.clone(),
+        });
+        // v0.4.21 (event 000066): surface to TopBar badge.
+        state.push_error(ErrorRecord {
+            at: chrono::Utc::now().timestamp(),
+            severity: "error".into(),
+            source: "run_task".into(),
+            summary: format!("run_task timed out after {timeout_secs}s"),
+            detail: Some(format!("role={role} model={model_for_quota}")),
+        });
     }
 
     // ── v0.4.20: quota-failure recording ──────────────────
@@ -1525,6 +1839,16 @@ async fn run_task(body: Value, state: Arc<ServerState>) -> Result<(u16, Value), 
     if status_clean != "DONE" {
         let err_msg = summary.clone().unwrap_or_else(|| last_status.clone());
         let err_msg: String = err_msg.chars().take(240).collect();
+        // v0.4.21 (event 000066): surface quota-class failures
+        // to the TopBar badge so the chairman sees them without
+        // having to dig through Settings.
+        state.push_error(ErrorRecord {
+            at: chrono::Utc::now().timestamp(),
+            severity: "error".into(),
+            source: "quota".into(),
+            summary: format!("{role} run failed: {status_clean}"),
+            detail: Some(err_msg.clone()),
+        });
         if let Err(e) = state.repo.record_quota_failure(
             &role, &model_for_quota, &err_msg,
         ).await {
@@ -1646,4 +1970,74 @@ async fn run_task(body: Value, state: Arc<ServerState>) -> Result<(u16, Value), 
             "wf_id": wf_id_for_task,
         }),
     ))
+}
+
+/// v0.4.21 (event 000066): depth-limited recursive directory
+/// walker for `GET /api/workspace/tree`. Filters hidden files
+/// (`.` prefix on Unix, also `node_modules` / `.git` / `target`
+/// on all platforms — these are noise for the chairman's
+/// project browser). Caps the result at `max_entries` and
+/// flips `truncated = true` when the cap kicks in so the UI
+/// can show a "…more" footer.
+fn walk_tree(
+    dir: &std::path::Path,
+    depth: usize,
+    max_entries: usize,
+    out: &mut Vec<serde_json::Value>,
+    truncated: &mut bool,
+) {
+    if depth == 0 || out.len() >= max_entries {
+        if out.len() >= max_entries { *truncated = true; }
+        return;
+    }
+    let read = match std::fs::read_dir(dir) {
+        Ok(r) => r,
+        Err(_) => return, // unreadable — skip silently
+    };
+    let mut entries: Vec<_> = read
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            let name = e.file_name().to_string_lossy().to_string();
+            // Skip hidden + known-noisy dirs.
+            !(name.starts_with('.')
+                || name == "node_modules"
+                || name == "target"
+                || name == "dist")
+        })
+        .collect();
+    entries.sort_by_key(|e| {
+        let name = e.file_name().to_string_lossy().to_string();
+        // Directories first, then alphabetical.
+        (e.file_type().map(|t| !t.is_dir()).unwrap_or(false), name)
+    });
+    for entry in entries {
+        if out.len() >= max_entries {
+            *truncated = true;
+            return;
+        }
+        let name = entry.file_name().to_string_lossy().to_string();
+        let ft = entry.file_type().ok();
+        let is_dir = ft.as_ref().map(|t| t.is_dir()).unwrap_or(false);
+        let is_file = ft.as_ref().map(|t| t.is_file()).unwrap_or(false);
+        let size = if is_file {
+            entry.metadata().ok().map(|m| m.len())
+        } else {
+            None
+        };
+        let mut node = json!({
+            "name": name,
+            "path": entry.path().to_string_lossy(),
+            "is_dir": is_dir,
+            "is_file": is_file,
+        });
+        if let Some(s) = size { node["size"] = json!(s); }
+        if is_dir && depth > 1 {
+            let mut children = Vec::new();
+            let mut sub_truncated = false;
+            walk_tree(&entry.path(), depth - 1, max_entries - out.len() - 1, &mut children, &mut sub_truncated);
+            node["children"] = json!(children);
+            if sub_truncated { *truncated = true; }
+        }
+        out.push(node);
+    }
 }

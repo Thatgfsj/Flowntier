@@ -1378,6 +1378,34 @@ async fn set_workdir_with_nwt(path: String) -> Result<String, String> {
         }
     }
 
+    // v0.4.21 (event 000066): notify the pipe-server sidecar so
+    // its in-process `Workspace` (used as the agent's fs root)
+    // actually points at the new workdir. Until this call the
+    // runtime was stuck on whatever cwd the sidecar was launched
+    // from — chief would write to e.g. O:\Flowntier\workspace\
+    // while the chairman's UI said O:\try, so the
+    // "切工作目录不显示新文件" bug shipped. Best-effort: if the
+    // pipe-server is unreachable we still return success because
+    // the workdir.json write itself is what the on-disk logic
+    // needs; the agent will just write to the stale root until
+    // the runtime is restarted. The Tauri shell logs a warning
+    // so the chairman can spot it.
+    let abs = root.canonicalize().unwrap_or_else(|_| root.clone());
+    match pipe_request(
+        "POST",
+        "/api/workspace/set",
+        Some(serde_json::json!({ "path": abs.to_string_lossy() })),
+    )
+    .await
+    {
+        Ok(v) => tracing::info!(target: "tauri_runtime", response = %v, "v0.4.21 (event 000066): pipe-server workspace updated"),
+        Err(e) => tracing::warn!(
+            target: "tauri_runtime",
+            error = %e,
+            "v0.4.21 (event 000066): pipe-server workspace swap failed; runtime will keep its launch-time cwd until restarted"
+        ),
+    }
+
     Ok(nwt_dir.to_string_lossy().into_owned())
 }
 
@@ -1397,6 +1425,72 @@ async fn get_workdir() -> Result<Option<String>, String> {
     let v: serde_json::Value = serde_json::from_str(&raw)
         .map_err(|e| format!("parse {}: {e}", p.display()))?;
     Ok(v.get("workdir").and_then(|v| v.as_str()).map(|s| s.to_string()))
+}
+
+/// v0.4.21 (event 000066): read the pipe-server's *actual*
+/// workspace root (the path the agent loop will use as the
+/// chief's filesystem context). Distinct from `get_workdir`,
+/// which reads the `workdir.json` on disk — they should agree
+/// after a successful `set_workdir_with_nwt`, but in transient
+/// states (sidecar just restarted, sidecar unreachable) they
+/// can disagree. Both surfaces matter for diagnostics.
+#[tauri::command]
+async fn get_runtime_workspace() -> Result<serde_json::Value, String> {
+    pipe_request("GET", "/api/workspace", None).await
+}
+
+/// v0.4.21 (event 000066): list a directory tree under the
+/// runtime workspace root. Body shape: `{ path?: string,
+/// depth?: number, max_entries?: number }`. Used by the
+/// `FileTree` component to render the chairman's project view.
+#[tauri::command]
+async fn get_workspace_tree(body: serde_json::Value) -> Result<serde_json::Value, String> {
+    // GET-with-body: encode the body into query params so the
+    // pipe-server side's dispatcher pattern match still hits
+    // `/api/workspace/tree` (the dispatcher strips query before
+    // matching; see event 000064 follow-up).
+    let mut q = Vec::<String>::new();
+    if let Some(p) = body.get("path").and_then(|v| v.as_str()) {
+        if !p.is_empty() { q.push(format!("path={}", url_encode(p))); }
+    }
+    if let Some(d) = body.get("depth").and_then(|v| v.as_u64()) {
+        q.push(format!("depth={d}"));
+    }
+    if let Some(m) = body.get("max_entries").and_then(|v| v.as_u64()) {
+        q.push(format!("max_entries={m}"));
+    }
+    let path = if q.is_empty() {
+        "/api/workspace/tree".to_string()
+    } else {
+        format!("/api/workspace/tree?{}", q.join("&"))
+    };
+    pipe_request("GET", &path, None).await
+}
+
+/// v0.4.21 (event 000066): minimal percent-encoder for the
+/// query-string fields above. Keeps this command self-contained
+/// — `urlencoding` crate is not pulled in.
+fn url_encode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.as_bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9'
+            | b'-' | b'_' | b'.' | b'~' | b'/' | b':' => out.push(*b as char),
+            _ => out.push_str(&format!("%{:02X}", b)),
+        }
+    }
+    out
+}
+
+/// v0.4.21 (event 000066): read recent errors captured by the
+/// pipe-server for the TopBar red-dot badge. Returns at most
+/// `limit` entries (default 10). Used by the ErrorAggregator
+/// polling job in App.tsx.
+#[tauri::command]
+async fn get_recent_errors(body: serde_json::Value) -> Result<serde_json::Value, String> {
+    let limit = body.get("limit").and_then(|v| v.as_u64()).unwrap_or(10);
+    let path = format!("/api/errors/recent?limit={limit}");
+    pipe_request("GET", &path, None).await
 }
 
 /// Convert a `SystemTime` to an ISO 8601 UTC string with second
@@ -1547,6 +1641,7 @@ pub fn run() {
             search_log,
             get_workdir, set_workdir, set_workdir_with_nwt, clear_workdir,
             get_diagnostics,
+            get_runtime_workspace, get_workspace_tree, get_recent_errors,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

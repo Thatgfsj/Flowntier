@@ -1,10 +1,17 @@
 /**
  * Z1 — top bar. Title + update banner + user menu.
  * The command input was moved to the bottom (CommandDock) in v0.2.
+ *
+ * v0.4.21 (event 000066): added the <ErrorBadge /> to the right
+ * of the chat/settings buttons. Polls /api/errors/recent every
+ * 10s and lights up red/yellow when the runtime emits any.
+ * Chairman's directive: "日志弄详细一点" — this gives the
+ * transient errors a UI affordance so they aren't lost.
  */
 import { useTranslation } from 'react-i18next';
 import type { UpdateBanner } from '../lib/updater';
 import { SUPPORTED } from '../i18n/index.js';
+import { ErrorBadge } from '../components/ErrorBadge.js';
 
 export interface TopBarProps {
   projectName: string;
@@ -68,6 +75,7 @@ export function TopBar({
           {t('topbar.chat')}
         </button>
       )}
+      <ErrorBadge />
       <button
         type="button"
         onClick={onSettingsClick}

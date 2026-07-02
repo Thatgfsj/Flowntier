@@ -314,3 +314,75 @@ export async function loadSampleWorkflow(): Promise<SampleWorkflow> {
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
+
+// ── v0.4.21 (event 000066): workspace + file tree ───────────────
+// These wrap the pipe-server endpoints added by event 000066 so
+// the chairman can see what files exist in the active workdir
+// and so the runtime's filesystem context actually moves when
+// the workdir changes (the underlying bug the chairman reported
+// as "切工作目录不显示新文件").
+
+export interface WorkspaceInfo {
+  ok: boolean;
+  root: string;
+  name: string;
+}
+
+export async function getRuntimeWorkspace(): Promise<WorkspaceInfo> {
+  return invoke<WorkspaceInfo>('get_runtime_workspace');
+}
+
+export interface FileTreeEntry {
+  name: string;
+  path: string;
+  is_dir: boolean;
+  is_file: boolean;
+  size?: number;
+  children?: FileTreeEntry[];
+}
+
+export interface FileTreeResponse {
+  ok: boolean;
+  root: string;
+  path: string;
+  entries: FileTreeEntry[];
+  truncated: boolean;
+  count: number;
+}
+
+export async function getWorkspaceTree(
+  body: { path?: string; depth?: number; max_entries?: number } = {},
+): Promise<FileTreeResponse> {
+  return invoke<FileTreeResponse>('get_workspace_tree', { body });
+}
+
+export async function setRuntimeWorkspace(path: string): Promise<{ ok: boolean; root: string }> {
+  // Re-use the existing `set_workdir_with_nwt` Tauri command
+  // (which writes workdir.json + .nwt scaffolding AND now
+  // notifies the pipe-server via /api/workspace/set — see
+  // event 000066 patch in lib.rs:1280). Returns the absolute
+  // .nwt path; for just-the-root the caller can call
+  // getRuntimeWorkspace().
+  const nwt = await invoke<string>('set_workdir_with_nwt', { path });
+  return { ok: true, root: nwt };
+}
+
+// ── v0.4.21 (event 000066): recent errors (TopBar red badge) ────
+
+export interface ErrorRecord {
+  at: number;
+  severity: 'error' | 'warn' | 'info';
+  source: string;
+  summary: string;
+  detail?: string | null;
+}
+
+export interface RecentErrorsResponse {
+  ok: boolean;
+  count: number;
+  rows: ErrorRecord[];
+}
+
+export async function getRecentErrors(limit = 10): Promise<RecentErrorsResponse> {
+  return invoke<RecentErrorsResponse>('get_recent_errors', { body: { limit } });
+}
