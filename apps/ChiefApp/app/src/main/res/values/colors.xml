@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+        Adaptive launcher icon background. Deep teal echoes the
+        primary palette in `ui/theme/Theme.kt` (matches
+        IChingOracle for visual consistency across Flowntier
+        Android apps).
+    -->
+    <color name="ic_launcher_background">#00897B</color>
+</resources>

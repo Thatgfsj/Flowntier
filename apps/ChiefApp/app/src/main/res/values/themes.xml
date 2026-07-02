@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <!--
+        Base activity theme for the ChiefApp. Compose draws
+        everything; this XML theme only governs the splash and
+        the brief moment between Activity start and the first
+        setContent {} frame. We use Material 3 DayNight with no
+        action bar; the real visual theme lives in
+        ui/theme/Theme.kt.
+    -->
+    <style name="Theme.ChiefApp" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">true</item>
+    </style>
+
+</resources>
