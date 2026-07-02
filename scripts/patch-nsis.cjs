@@ -30,6 +30,11 @@ const WORKSPACE = path.resolve(SCRIPT_DIR, '..');
 const TARGETS = [
   path.join(WORKSPACE, 'target/release/nsis/x64/installer.nsi'),
   path.join(WORKSPACE, 'target/release/bundle/nsis/x64/installer.nsi'),
+  // v0.4.21 (event 000064): `pnpm tauri:build --target
+  // x86_64-pc-windows-gnu` puts the NSI under the triple'd
+  // target dir. Cover it so the patch runs whether the
+  // chairman builds with or without an explicit --target.
+  path.join(WORKSPACE, 'target/x86_64-pc-windows-gnu/release/nsis/x64/installer.nsi'),
 ];
 
 const SIDECAR_NAME = 'flowntier_runtime.exe';
@@ -75,7 +80,20 @@ for (const rel of TARGETS) {
     const marker = 'Function .onInit';
     const idx = content.indexOf(marker);
     if (idx >= 0) {
-      const insertAt = content.indexOf('{', idx) + 1;
+      // Tauri-generated NSIS uses the C-style brace-less form:
+      //   Function .onInit
+      //     ${GetOptions} ...
+      //     ...
+      //   FunctionEnd
+      // So there is NO standalone `{` line after `Function .onInit`
+      // — the function body starts immediately on the next line.
+      // We insert the block right after the `Function .onInit\n`
+      // header. The previous bug tried to find a `{` brace and
+      // either matched the first `{` in the file (returning
+      // insertAt=1 → block at file top) or split `${GetOptions}`
+      // apart (returning insertAt in the middle of the macro).
+      const eol = content.indexOf('\n', idx);
+      const insertAt = eol + 1;
       // Build the command via Push (double-quoted) so NSIS expands
       // $${MAINBINARYNAME} ($$ → literal $) into the main binary
       // name once, BEFORE ExecWait runs. Avoids the
