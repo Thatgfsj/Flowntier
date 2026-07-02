@@ -88,6 +88,10 @@ scripts/local/
 dist/
 build/
 out/
+.gradle/
+**/.gradle/
+**/build/
+**/local.properties
 *.zip
 *.tar.gz
 *.tgz
