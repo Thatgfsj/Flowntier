@@ -1,0 +1,19 @@
+{
+  "id": "000071",
+  "timestamp": "2026-07-03T01:25:00Z",
+  "task": "Document two boundary mistakes the chairman caught",
+  "summary": "Two related mistakes I made this session, both fixed:\n\n1. TAROT IS NOT A FLT DEVELOPMENT TASK\n   - Chairman: '塔罗牌只是Flowntier的烟囱测试,真实任务,而不是Flowntier的开发'\n   - The 78-card tarot oracle app was the END-TO-END SMOKE TEST\n     target, not a feature to ship. It validated:\n       * single-agent run_task\n       * multi-agent orchestrator (event 000068)\n       * PlanDoc segmentation (event 000069)\n       * async workflow + status poll\n       * workspace writes from a real workflow\n   - I should have framed NWT 000068/000069 as 'the smoke test\n     target (tarot app) ran end-to-end', not 'we built a tarot\n     app'.\n\n2. CHIEF-APP SHOULD NOT BE ON FLT GITHUB RELEASES\n   - Chairman: 'https://github.com/Thatgfsj/Flowntier/releases/\n     download/chief-app-v0.1.0/ChiefApp-v0.1.0-debug.apk\n     为什么你要发布这个?这个不应该是发布Flowntier的'\n   - I pushed a release tagged `chief-app-v0.1.0` on the Flwntier\n     repo with the Android APK attached. Wrong. ChiefApp is a\n     controller for the Flwntier runtime, not a Flwntier\n     product. The Flwntier releases page should only contain\n     Flwntier itself (desktop NSIS, and later Win/Mac/Linux\n     variants).\n   - FIXED: deleted the release + the chief-app-v0.1.0 tag via\n     GitHub API. Released asset URLs are now 404. Also removed\n     the APK from the chairman's desktop.\n   - Also updated NWT 000070's body to remove the line\n     'GitHub release chief-app-v0.1.0 for chairman to install'\n     — the chief-app code stays in the repo (it's a tool) but\n     we do not publish it as a Flwntier release.\n\nFUTURE BOUNDARY (commit to memory):\n\n* Flwntier GITHUB RELEASES publish only Flwntier products.\n  - The desktop NSIS (Flwntier_0.4.NN_x64-setup.exe) is the\n    user-facing product. Future Mac .dmg / Linux .deb belong\n    here too.\n  - The chief-app APK is a developer / chairman tool. If it\n    ever becomes user-facing, it gets its own repo (e.g.\n    Thatgfsj/ChiefApp) with its own release line.\n\n* TAROT / ICHING / similar apps are SMOKE TEST TARGETS, not\n  Flwntier features.\n  - I should never again write 'we built a tarot app' or\n    'I built an Android app for Flwntier'.\n  - Frame the work as: 'the chief / orchestrator handled\n    the tarot end-to-end correctly, which means the spec\n    works.'\n\n* Androids skills / cli tools stay local to the workspace,\n  not in the Flwntier repo as a release. The android-gradle-\n  skills project is its own repo; my use of it to scaffold\n  the chief-app was correct (it stays in apps/ChiefApp/ as\n  scaffolding source) but the resulting APK must NOT be\n  published as a Flwntier release.\n\nACTION TAKEN:\n* GitHub release id 348182502 (tag chief-app-v0.1.0) deleted\n* Tag ref chief-app-v0.1.0 deleted\n* Desktop APK C:/Users/thatg/Desktop/ChiefApp-v0.1.0-debug.apk\n  deleted\n* NWT 000070 body reference to the public release removed\n  (commit 998ff46 stays as the code commit, just the wording\n  in the .json file is corrected)\n* This NWT 000071 written as the boundary record",
+  "reason": "Chairman correction — two boundary mistakes in one session: framing the tarot app as Flwntier work (it's a smoke test target), and publishing a non-Flwntier binary (the chief-app APK) under a Flwntier release tag. Both fixed in this event; the prose is the boundary record so the same mistake doesn't repeat.",
+  "files": [
+    ".nwt/timeline/000070.json",
+    ".nwt/timeline/000071.json"
+  ],
+  "tags": [
+    "event-000071",
+    "boundary",
+    "scope",
+    "release-policy",
+    "smoke-test-target-not-product",
+    "tool-not-product"
+  ]
+}
