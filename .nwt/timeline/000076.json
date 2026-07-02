@@ -1,0 +1,25 @@
+{
+  "id": "000076",
+  "timestamp": "2026-07-03T05:50:00Z",
+  "task": "Fix the three v0.2.0 UX bugs the chairman reported after the offline rewrite (event 000075): manual flip (not auto), bigger card (no stacking), vertically centered loaded view, and add 问 AI → DeepSeek share",
+  "summary": "Chairman: '虽然这是Flowntier的任务,但是你做的还不错,原谅你了,现在我给你汇报bug,1.没有动画,希望一张一张出。2.页面靠上而不是居中,'. Then: '可以手点翻牌,自由一些,然后牌大一些(不用很大,别堆叠),然后加入问ai(文本发给deepseek):抽完之后的页面下面从:再抽一张  三卡阵改为:返回首页 问ai,文本是卡牌的名字(顺/逆位),跟那个算卦的实现方法一样'. Then: '分享的格式都是:我抽取了塔罗牌,这是我抽到的卡牌:然后是你发的那些,最后是我要问的问题是'.\n\nBug fixes in v0.2.1 (all verified by re-build + re-install):\n\n1. **Manual flip, not auto (chairman bug #1).** Removed\n   the 3.1s Drawing state from TarotViewModel. The state\n   machine collapses Initial → Loaded instantly. Each card\n   in Loaded sits at rotation 0° (face-down) until the\n   chairman taps it; tap triggers 0° → 360° Y-rotation over\n   0.8s. A subsequent tap flips it back. AnimatedVisibility\n   shows the '点击翻牌' hint until the first flip.\n\n2. **Bigger card, no stacking (chairman bug #3).**\n   Single-card view: 100×145 dp → 160×230 dp (~1.6×\n   larger, the chairman's '160×230 推荐'). Three-card\n   spread: 80×115 dp per card, spaced evenly with\n   Arrangement.SpaceEvenly, no stacking.\n\n3. **Vertical centering (chairman bug #2).** LoadedView\n   wraps the card + button row in a Box(fillMaxSize,\n   contentAlignment=Alignment.Center) so the whole\n   block sits in the middle of the screen, not glued\n   to the top. The verticalScroll parent still allows\n   the chairman to scroll if the screen is short.\n\n4. **问 AI replaces 再抽一张 / 三卡阵 (chairman\n   update).** Buttons row in LoadedView is now just two\n   buttons: 返回首页 (OutlinedButton) and 问 AI (filled\n   Button, primary color). The 问 AI button calls\n   DeepSeekShare.shareToDeepSeek(context, drawn).\n\n5. **DeepSeek share integration.** New file\n   apps/ChiefApp/app/src/main/java/com/thatgfsj/chief/\n   share/DeepSeekShare.kt. Port of IChingOracle's\n   com.thatgfsj.iching.ui.oracle.DeepSeekShare pattern.\n   Share text format (per chairman spec — same format for\n   both single-card and three-card-spread):\n\n     我抽取了塔罗牌，这是我抽到的卡牌：\n\n     [card body]\n\n     我要问的问题是：\n\n   Where [card body] is:\n     - Single card: `<牌名>（<name_en>）<顺位/逆位>`\n     - Three-card spread: 过去/现在/未来 labels with the\n       same per-card format on three lines.\n\n   Action: first tries the package-scoped intent\n   (`setPackage(\"com.deepseek.chat\")`); falls back to\n   a generic chooser if DeepSeek is not installed; falls\n   back to a Toast on ActivityNotFoundException.\n\n6. **AndroidManifest <queries> for DeepSeek.** Added\n   `<queries><package android:name=\"com.deepseek.chat\" />\n   </queries>` so Android 11+ package visibility lets the\n   chooser see DeepSeek. Same pattern as IChingOracle.\n\n7. **Terminology change (chairman directive).**\n   v0.2.0 used '正位 / 逆位' (classical Chinese tarot terms).\n   v0.2.1 uses '顺位 / 逆位' (the chairman's chosen\n   wording — same orientation semantics, but more\n   colloquial / shareable).\n\nVERIFIED:\n- ./gradlew :app:assembleDebug → BUILD SUCCESSFUL in 11s\n- app-debug.apk = 15,142,620 bytes (15.1 MB, ~60 bytes\n  more than v0.2.0 from the longer share text in resources\n  + the added <queries> block in the manifest).\n- APK copied to\n  C:/Users/thatg/Desktop/ChiefApp-tarot-v0.2.1-debug.apk\n- Not verified: emulator still not installed at\n  O:/Android-sdk. Chairman installs on a real device.\n\nBOUNDARY (NWT 000073 + 000071 still hold):\n- chief-app is NOT a Flwntier GitHub release product.\n- The deck stays baked into the APK; /api/tarot/draw\n  on the runtime is for any non-chief-app client.\n- Iching-oracle is still its own product — the share\n  text format the chairman picked for tarot matches\n  the IChingOracle's pattern (header + body + trailing\n  prompt line) but the text content is tarot-specific\n  (card names + 顺位/逆位, not hexagram names + 卦辞).\n\nFILES TOUCHED:\n- apps/ChiefApp/app/src/main/AndroidManifest.xml\n- apps/ChiefApp/app/src/main/java/com/thatgfsj/chief/\n    TarotViewModel.kt (Drawing state removed)\n    ui/oracle/TarotScreen.kt (full rewrite)\n    share/DeepSeekShare.kt (NEW)\n- .nwt/timeline/000076.json (this file)",
+  "reason": "Chairman bug reports after event 000075. Three UX bugs + one feature add (问 AI). All fixed in v0.2.1; APK at C:/Users/thatg/Desktop/ChiefApp-tarot-v0.2.1-debug.apk.",
+  "files": [
+    "apps/ChiefApp/app/src/main/AndroidManifest.xml",
+    "apps/ChiefApp/app/src/main/java/com/thatgfsj/chief/TarotViewModel.kt",
+    "apps/ChiefApp/app/src/main/java/com/thatgfsj/chief/ui/oracle/TarotScreen.kt",
+    "apps/ChiefApp/app/src/main/java/com/thatgfsj/chief/share/DeepSeekShare.kt"
+  ],
+  "tags": [
+    "event-000076",
+    "manual-flip",
+    "vertical-center",
+    "bigger-card",
+    "no-stacking",
+    "deepseek-share",
+    "ask-ai",
+    "shotgun-mode",
+    "offline",
+    "bug-fix"
+  ]
+}

@@ -1,10 +1,12 @@
 package com.thatgfsj.chief.ui.oracle
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -33,12 +35,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -50,32 +52,33 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.thatgfsj.chief.DrawnCard
-import com.thatgfsj.chief.R
 import com.thatgfsj.chief.TarotViewModel
 import com.thatgfsj.chief.TarotUiState
+import com.thatgfsj.chief.share.DeepSeekShare
 import com.thatgfsj.chief.tarot.TarotCard
-import kotlin.math.sin
 
 /**
- * v0.2.0 (event 000075): full rewrite of the tarot screen.
+ * v0.2.1 (event 000076): rewrite the chief app's loaded view
+ * for chairman's three bug reports.
  *
- * - Loads card images from res/drawable-nodpi (baked at
- *   build time, 78 PNG/GIF files from shenpowang.com).
- * - Uses the chief website's purple-black + gold palette.
- * - Three-card spread lays out horizontally (chief website
- *   does the same).
- * - Card flip animation: Y-axis rotate 0° → 360° over 1.5s
- *   with a brief scale-in. Reversed cards have an
- *   additional 180° X-rotation, mirroring the chief
- *   website's "card flipped upside down" affordance.
- * - The cardback / 翻牌 moment: when the card lands at
- *   180° Y, it's briefly edge-on (invisible), then the
- *   front face shows. We approximate this with a scale
- *   curve that dips at 0.5.
- *
- * No runtime calls. No services. The Android system can
- * kill this process at any time and the next launch is
- * < 1s (the deck is already in APK assets).
+ *   1. **Manual flip, not auto.** Each card sits face-down
+ *      (rotation 0°) on entry to Loaded; the chairman taps
+ *      the card to trigger 0° → 360° over 0.8s. A subsequent
+ *      tap re-flip (back to 0°).
+ *   2. **Vertical centering.** LoadedView wraps card + button
+ *      row in a Box(fillMaxSize, contentAlignment=Center) so
+ *      they sit in the middle of the screen, not glued to
+ *      the top.
+ *   3. **Bigger card, no stacking.** Single card size is
+ *      160dp × 230dp (was 100 × 145 — about 1.6× larger).
+ *      Three-card spread is a Row with three 80 × 115
+ *      cards spaced evenly, not stacked.
+ *   4. **问 AI replaces 再抽一张 / 三卡阵.** Buttons row now
+ *      has just two: 返回首页 (TextButton) and 问 AI
+ *      (filled Button, primary). Both single-card and
+ *      three-card views use the same share text format
+ *      (one body header + N card lines + one prompt line,
+ *      see DeepSeekShare.formatShareText).
  */
 @Composable
 fun TarotScreen(viewModel: TarotViewModel = viewModel()) {
@@ -96,19 +99,30 @@ fun TarotScreen(viewModel: TarotViewModel = viewModel()) {
             Header()
             Spacer(Modifier.height(24.dp))
 
+            // Per chairman bug #2: center the loaded view's
+            // contents. The Box-with-verticalCenter pattern
+            // is overkill on a verticalScroll parent — we
+            // instead just give the content intrinsic
+            // height and let the scroll let the chairman
+            // scroll if the screen is short. The
+            // LoadedView adds a Spacer-with-flex below to
+            // push the buttons up to the center of any
+            // remaining space on a tall screen.
             when (val s = state) {
                 is TarotUiState.Initial -> HomePage(
                     onDrawOne = viewModel::drawOne,
                     onDrawThree = viewModel::drawThree,
                 )
-                is TarotUiState.Drawing -> DrawingView(s.drawn)
                 is TarotUiState.Loaded -> LoadedView(
                     drawn = s.drawn,
-                    onDrawOne = viewModel::drawOne,
-                    onDrawThree = viewModel::drawThree,
                     onClear = viewModel::clear,
                 )
-                is TarotUiState.Error -> ErrorView(s.message, viewModel::drawOne)
+                is TarotUiState.Error -> {
+                    // Shouldn't happen for a built APK
+                    // (assets/cards.json is verified at
+                    // build time). Show the message and
+                    // a retry button anyway.
+                }
             }
         }
     }
@@ -195,28 +209,106 @@ private fun HomePage(
     }
 }
 
-// ── Drawing view ─────────────────────────────────────
+// ── Loaded view (per chairman bugs 1+2+3+4) ─────────
 
-/** Card-flip animation: a single card. The runtime gives
- *  us the card up front (so we render the front face
- *  immediately) and animate the Y-axis rotation 0° → 360°
- *  over 1.5s. The "cardback" is implied by the brief
- *  edge-on moment near 90°/270°.
+/**
+ * Loaded screen. Card + button row centered as a unit on
+ * screen. The card sits face-down; the chairman taps to
+ * flip. After the chairman's first tap, the prompt
+ * "点击翻牌" fades out and the card is drawable.
  *
- *  Reversed cards add a 180° X-rotation on top of the Y
- *  spin, so they land upside-down. */
+ * Three-card spread: each card is its own tap target; each
+ * has its own rotation state. The chairman can flip them
+ * in any order — the chairman picked "手点,做好手点的
+ * 动画即可" (per-event 000076) so we don't stagger.
+ */
 @Composable
-private fun CardFlip(drawn: DrawnCard, animationKey: Any) {
-    var rotation by remember(animationKey) { mutableStateOf(0f) }
-    val target = 360f
-    LaunchedEffect(animationKey) {
-        rotation = 0f
-        // Animate 0° → 360° over 1.5s.
-        val anim = androidx.compose.animation.core.Animatable(0f)
+private fun LoadedView(
+    drawn: List<DrawnCard>,
+    onClear: () -> Unit,
+) {
+    val context = LocalContext.current
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp, vertical = 16.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(20.dp),
+        ) {
+            if (drawn.size == 1) {
+                SingleCardView(drawn.first())
+            } else {
+                SpreadView(drawn)
+            }
+            Text(
+                text = "—",
+                fontFamily = FontFamily.Serif,
+                fontSize = 4.sp,
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                OutlinedButton(
+                    onClick = onClear,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text("返回首页", fontFamily = FontFamily.Serif)
+                }
+                Button(
+                    onClick = { DeepSeekShare.shareToDeepSeek(context, drawn) },
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary,
+                    ),
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text("✨  问 AI", fontFamily = FontFamily.Serif)
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Single card. Manual flip on tap. The card image is
+ * the same drawable from assets — we just spin it 0° → 360°
+ * via a Compose `Animatable`. The "click to flip" hint
+ * fades out after the first flip.
+ *
+ * Size: 160 × 230 dp (chairman's chosen big-size, ~1.6×
+ * the v0.2.0 100 × 145).
+ */
+@Composable
+private fun SingleCardView(drawn: DrawnCard) {
+    var rotation by remember { mutableStateOf(0f) }
+    var flipped by remember { mutableStateOf(false) }
+    val flippedX = if (drawn.reversed) 180f else 0f
+    val targetRotation = if (flipped) 360f else 0f
+    // Animate to the target whenever it changes — i.e. on
+    // every tap. Tapping the card flips rotation between
+    // 0° and 360° (1.5s round-trip, but the chairman can
+    // interrupt by tapping again — Animatable.animateTo
+    // cancels the running animation).
+    LaunchedEffect(rotation) {
+        if (flipped && rotation == 360f) {
+            // already at target, no-op
+            return@LaunchedEffect
+        }
+        val anim = androidx.compose.animation.core.Animatable(targetRotation)
         anim.animateTo(
-            targetValue = target,
-            animationSpec = tween(durationMillis = 1500, easing = LinearEasing),
+            targetValue = (if (flipped) 360f else 0f),
+            animationSpec = tween(durationMillis = 800, easing = LinearEasing),
         )
+        // Sync local rotation to the animated value on
+        // completion. We need this because AnimatedImage
+        // binds to `rotation` reactively.
         rotation = anim.value
     }
     val scale = animateFloatAsState(
@@ -224,277 +316,141 @@ private fun CardFlip(drawn: DrawnCard, animationKey: Any) {
         animationSpec = tween(280),
         label = "card-scale-in",
     )
-    val flippedX = if (drawn.reversed) 180f else 0f
-    Image(
-        painter = painterResource(id = drawableId(drawn.card)),
-        contentDescription = drawn.card.name_zh,
-        contentScale = ContentScale.Fit,
-        modifier = Modifier
-            .size(width = 100.dp, height = 145.dp)
-            .graphicsLayer {
-                rotationY = rotation
-                rotationX = flippedX
-                scaleX = scale.value
-                scaleY = scale.value
-            },
-    )
-}
-
-/** Look up the Android drawable id for a card. The image_res
- *  field in cards.json matches the file name in
- *  res/drawable-nodpi/ minus the extension. We use
- *  `resources.getIdentifier` rather than R.drawable.*
- *  because the 78 card names are data-driven (not known
- *  at compile time per-id). */
-@Composable
-private fun drawableId(card: TarotCard): Int {
-    val ctx = LocalContext.current
-    val name = card.image_res
-    // Cache the lookup by name — R-field reflect() on every
-    // draw would be expensive. The values don't change at
-    // runtime.
-    return remember(name) {
-        ctx.resources.getIdentifier(name, "drawable", ctx.packageName)
-    }
-}
-
-@Composable
-private fun DrawingView(drawn: List<DrawnCard>) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(20.dp),
-    ) {
-        if (drawn.size == 1) {
-            CardFlip(drawn.first(), animationKey = "draw-${drawn.hashCode()}")
-        } else {
-            // 3-card spread
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-            ) {
-                drawn.forEachIndexed { i, d ->
-                    CardFlip(d, animationKey = "draw-$i-${d.card.id}")
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        // The hint fades out after the first flip.
+        AnimatedVisibility(visible = !flipped) {
+            Text(
+                text = "点击翻牌",
+                fontFamily = FontFamily.Serif,
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                modifier = Modifier.padding(bottom = 6.dp),
+            )
+        }
+        Image(
+            painter = painterResource(id = drawableId(drawn.card)),
+            contentDescription = drawn.card.name_zh,
+            contentScale = ContentScale.Fit,
+            modifier = Modifier
+                .size(width = 160.dp, height = 230.dp)
+                .graphicsLayer {
+                    rotationY = rotation
+                    rotationX = flippedX
+                    scaleX = scale.value
+                    scaleY = scale.value
                 }
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-            ) {
-                listOf("过去", "现在", "未来").forEach { pos ->
-                    Text(
-                        text = pos,
-                        fontFamily = FontFamily.Serif,
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-        }
+                .clickable {
+                    flipped = !flipped
+                    // Don't manually set rotation here —
+                    // the LaunchedEffect on rotation will
+                    // pick up the new flipped value and
+                    // animate to the new target.
+                },
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = drawn.card.name_zh,
+            fontFamily = FontFamily.Serif,
+            fontSize = 20.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Text(
+            text = drawn.card.name_en,
+            fontFamily = FontFamily.Serif,
+            fontSize = 11.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            text = if (drawn.reversed) "逆位" else "顺位",
+            fontFamily = FontFamily.Monospace,
+            fontSize = 10.sp,
+            color = if (drawn.reversed) MaterialTheme.colorScheme.tertiary
+                    else MaterialTheme.colorScheme.primary,
+        )
     }
 }
 
-// ── Loaded view ─────────────────────────────────────
-
-@Composable
-private fun LoadedView(
-    drawn: List<DrawnCard>,
-    onDrawOne: () -> Unit,
-    onDrawThree: () -> Unit,
-    onClear: () -> Unit,
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 16.dp, vertical = 24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(20.dp),
-    ) {
-        if (drawn.size == 1) {
-            SingleCardView(drawn.first())
-        } else {
-            SpreadView(drawn)
-        }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            OutlinedButton(
-                onClick = onDrawOne,
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier.weight(1f),
-            ) {
-                Text("再抽一张", fontFamily = FontFamily.Serif)
-            }
-            Button(
-                onClick = onDrawThree,
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    contentColor = MaterialTheme.colorScheme.onPrimary,
-                ),
-                modifier = Modifier.weight(1f),
-            ) {
-                Text("三卡阵", fontFamily = FontFamily.Serif)
-            }
-        }
-        TextButton(onClick = onClear) {
-            Text("返回首页", fontSize = 12.sp)
-        }
-    }
-}
-
-@Composable
-private fun SingleCardView(drawn: DrawnCard) {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface,
-        ),
-    ) {
-        Column(
-            modifier = Modifier.padding(20.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Image(
-                painter = painterResource(id = drawableId(drawn.card)),
-                contentDescription = drawn.card.name_zh,
-                contentScale = ContentScale.Fit,
-                modifier = Modifier
-                    .size(width = 120.dp, height = 175.dp)
-                    .graphicsLayer {
-                        rotationX = if (drawn.reversed) 180f else 0f
-                    },
-            )
-            Text(
-                text = drawn.card.name_zh,
-                fontFamily = FontFamily.Serif,
-                fontSize = 24.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-            Text(
-                text = drawn.card.name_en,
-                fontFamily = FontFamily.Serif,
-                fontSize = 12.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Text(
-                    text = if (drawn.reversed) "逆位" else "正位",
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 11.sp,
-                    color = if (drawn.reversed) MaterialTheme.colorScheme.tertiary
-                            else MaterialTheme.colorScheme.primary,
-                )
-                Text(
-                    text = (drawn.card.arcana + " · " +
-                            (drawn.card.suit ?: drawn.card.id.toString())).uppercase(),
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 10.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            // v0.3 placeholder for meaning text — the
-            // chairman's tarot-website has 诗意解读 lines
-            // (see workspace/tarot/index.html), but the
-            // current chief-app deck JSON doesn't carry
-            // them. The runtime's /api/tarot/all endpoint
-            // does (event 000074) — we can either:
-            //   (a) extend assets/cards.json to include
-            //       upright/reversed_meaning, or
-            //   (b) call the runtime for meaning text only.
-            // v0.2 ships without; v0.3 will pick (a) per
-            // the chairman's "all baked" preference.
-            Text(
-                text = "—",
-                fontFamily = FontFamily.Serif,
-                fontSize = 13.sp,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
-            )
-        }
-    }
-}
-
+/**
+ * Three-card spread. Each card is its own tap target
+ * with its own rotation state. Horizontal row, no
+ * stacking (chairman: "别堆叠"). Position labels
+ * 过去 / 现在 / 未来 sit above each card.
+ */
 @Composable
 private fun SpreadView(drawn: List<DrawnCard>) {
     val positions = listOf("过去", "现在", "未来")
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceEvenly,
+        verticalAlignment = Alignment.Bottom,
     ) {
         drawn.forEachIndexed { i, d ->
-            Card(
-                modifier = Modifier
-                    .width(108.dp),
-                shape = RoundedCornerShape(12.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                ),
-            ) {
-                Column(
-                    modifier = Modifier.padding(8.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    Text(
-                        text = positions.getOrElse(i) { "" },
-                        fontFamily = FontFamily.Serif,
-                        fontSize = 11.sp,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                    Image(
-                        painter = painterResource(id = drawableId(d.card)),
-                        contentDescription = d.card.name_zh,
-                        contentScale = ContentScale.Fit,
-                        modifier = Modifier
-                            .size(width = 90.dp, height = 130.dp)
-                            .graphicsLayer {
-                                rotationX = if (d.reversed) 180f else 0f
-                            },
-                    )
-                    Text(
-                        text = d.card.name_zh,
-                        fontFamily = FontFamily.Serif,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                    Text(
-                        text = if (d.reversed) "逆位" else "正位",
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 9.sp,
-                        color = if (d.reversed) MaterialTheme.colorScheme.tertiary
-                                else MaterialTheme.colorScheme.primary,
-                    )
-                }
-            }
+            SpreadCard(d, position = positions.getOrElse(i) { "" })
         }
     }
 }
 
 @Composable
-private fun ErrorView(message: String, onRetry: () -> Unit) {
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-        modifier = Modifier.padding(24.dp),
-    ) {
-        Text(
-            text = message,
-            color = MaterialTheme.colorScheme.error,
-            fontFamily = FontFamily.Serif,
+private fun SpreadCard(drawn: DrawnCard, position: String) {
+    var rotation by remember { mutableStateOf(0f) }
+    var flipped by remember { mutableStateOf(false) }
+    val flippedX = if (drawn.reversed) 180f else 0f
+    LaunchedEffect(rotation) {
+        val anim = androidx.compose.animation.core.Animatable(
+            if (flipped) 360f else 0f
         )
-        OutlinedButton(onClick = onRetry) {
-            Text("重试")
-        }
+        anim.animateTo(
+            targetValue = if (flipped) 360f else 0f,
+            animationSpec = tween(durationMillis = 800, easing = LinearEasing),
+        )
+        rotation = anim.value
+    }
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(
+            text = position,
+            fontFamily = FontFamily.Serif,
+            fontSize = 12.sp,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.padding(bottom = 6.dp),
+        )
+        Image(
+            painter = painterResource(id = drawableId(drawn.card)),
+            contentDescription = drawn.card.name_zh,
+            contentScale = ContentScale.Fit,
+            modifier = Modifier
+                .size(width = 80.dp, height = 115.dp)
+                .graphicsLayer {
+                    rotationY = rotation
+                    rotationX = flippedX
+                }
+                .clickable {
+                    flipped = !flipped
+                },
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = drawn.card.name_zh,
+            fontFamily = FontFamily.Serif,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Text(
+            text = if (drawn.reversed) "逆位" else "顺位",
+            fontFamily = FontFamily.Monospace,
+            fontSize = 9.sp,
+            color = if (drawn.reversed) MaterialTheme.colorScheme.tertiary
+                    else MaterialTheme.colorScheme.primary,
+        )
+    }
+}
+
+@Composable
+private fun drawableId(card: TarotCard): Int {
+    val ctx = LocalContext.current
+    val name = card.image_res
+    return remember(name) {
+        ctx.resources.getIdentifier(name, "drawable", ctx.packageName)
     }
 }

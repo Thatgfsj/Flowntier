@@ -1,6 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!--
+        v0.2.1 (event 000076): declare com.deepseek.chat so
+        Android 11+ package visibility lets the system share
+        sheet find DeepSeek when the chairman taps 问 AI.
+        Same pattern as IChingOracle's manifest.
+    -->
+    <queries>
+        <package android:name="com.deepseek.chat" />
+    </queries>
+
     <application
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
