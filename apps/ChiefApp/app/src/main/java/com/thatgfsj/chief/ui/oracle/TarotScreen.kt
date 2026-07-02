@@ -84,44 +84,70 @@ import com.thatgfsj.chief.tarot.TarotCard
 fun TarotScreen(viewModel: TarotViewModel = viewModel()) {
     val state by viewModel.state.collectAsState()
 
+    // Per chairman bug #2 (re-confirmed in v0.2.1): the home
+    // page still sat too close to the top because the
+    // previous layout wrapped the whole thing in a
+    // verticalScroll Column. verticalScroll always lays
+    // children out from the top, so verticalArrangement=
+    // Center inside the HomePage Column had no effect (the
+    // HomePage Column's intrinsic height was being measured
+    // against the full remaining-after-Header space, but the
+    // verticalScroll pinned everything to the top of the
+    // scroll viewport).
+    //
+    // Fix: drop the verticalScroll. The home page content is
+    // small enough to fit on any phone screen. The loaded
+    // view's card is the only thing that could overflow, and
+    // the chief website's 78-card draw has a 3-card spread
+    // that fits horizontally on every phone we care about.
+    // If we ever need to scroll, we'll add it back scoped to
+    // a specific sub-view rather than the whole screen.
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background),
     ) {
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState()),
+            modifier = Modifier.fillMaxSize(),
             horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Top,
         ) {
+            // Header sits at the top, sized to its content.
+            // The state (home page / loaded view) takes the
+            // remaining space and is centered within that
+            // remaining space by Arrangement.SpaceBetween
+            // on the inner layout — see HomePage and
+            // LoadedView below, which now use a vertical-
+            // center fillMaxSize Box of their own.
             Spacer(Modifier.height(40.dp))
             Header()
             Spacer(Modifier.height(24.dp))
 
-            // Per chairman bug #2: center the loaded view's
-            // contents. The Box-with-verticalCenter pattern
-            // is overkill on a verticalScroll parent — we
-            // instead just give the content intrinsic
-            // height and let the scroll let the chairman
-            // scroll if the screen is short. The
-            // LoadedView adds a Spacer-with-flex below to
-            // push the buttons up to the center of any
-            // remaining space on a tall screen.
-            when (val s = state) {
-                is TarotUiState.Initial -> HomePage(
-                    onDrawOne = viewModel::drawOne,
-                    onDrawThree = viewModel::drawThree,
-                )
-                is TarotUiState.Loaded -> LoadedView(
-                    drawn = s.drawn,
-                    onClear = viewModel::clear,
-                )
-                is TarotUiState.Error -> {
-                    // Shouldn't happen for a built APK
-                    // (assets/cards.json is verified at
-                    // build time). Show the message and
-                    // a retry button anyway.
+            // Wrap the state's content in a Box that takes
+            // the remaining height (weight 1f) and centers
+            // vertically, so the home-page buttons / the
+            // loaded-view card sit in the middle of the
+            // screen, not glued to the top below the header.
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                contentAlignment = Alignment.Center,
+            ) {
+                when (val s = state) {
+                    is TarotUiState.Initial -> HomePage(
+                        onDrawOne = viewModel::drawOne,
+                        onDrawThree = viewModel::drawThree,
+                    )
+                    is TarotUiState.Loaded -> LoadedView(
+                        drawn = s.drawn,
+                        onClear = viewModel::clear,
+                    )
+                    is TarotUiState.Error -> {
+                        // Shouldn't happen for a built APK
+                        // (assets/cards.json is verified at
+                        // build time).
+                    }
                 }
             }
         }
