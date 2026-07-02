@@ -17,47 +17,50 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 
-// v0.1.0 (event 000074): the visual language is the same
-// ink-and-paper palette as IChingOracle (com.thatgfsj.iching)
-// — chairman's established UI vocabulary for talking to
-// the Flwntier chief. Teal primary, beige-paper background,
-// serif headings. See NWT 000073 for the boundary: this is
-// NOT a port of iching-oracle, it's a Flwntier product
-// surface that uses iching-oracle's design system.
+// v0.2.0 (event 000075): the chief app's palette now matches
+// the chief website (workspace/tarot/index.html — the 78-card
+// 67 KB site the chief wrote). The website uses deep purple-
+// black background + gold + champagne text + Cormorant
+// Garamond serif. The chief wanted the Android app to look
+// "跟网站一样" — visual parity with the web site, not
+// with the desktop Flowntier product or with iching-oracle.
 //
-// Why this design system: chairman runs the same dev env on
-// Windows (Tauri desktop) and on Android. Visual parity
-// across both surfaces means a single mental model — when
-// the chairman says 'this card looks right', it looks
-// right on every device.
+// Why we change from the previous teal palette: the chairman's
+// direct quote for this event was "塔罗牌图片你自己去这里
+// 找：https://www.shenpowang.com/taluopai/jieshi/" — and the
+// existing teal/iching-oracle look is too "office product"
+// for a tarot divination app. Tarot wants mystical gold.
+// The desktop Flowntier product stays teal (it isn't a
+// divination tool); only the chief's Android tarot app
+// adopts the gold/purple palette.
 private val DarkColorScheme = darkColorScheme(
-    primary = Color(0xFF80CBC4),
-    onPrimary = Color(0xFF003731),
-    secondary = Color(0xFFB0BEC5),
-    onSecondary = Color(0xFF1A2C2E),
-    tertiary = Color(0xFFBCAAA4),
-    background = Color(0xFF121417),
-    onBackground = Color(0xFFE8E6E1),
-    surface = Color(0xFF1A1D21),
-    onSurface = Color(0xFFE8E6E1),
-    surfaceVariant = Color(0xFF252A30),
-    onSurfaceVariant = Color(0xFFC0BDB6),
-    error = Color(0xFFE57373),
+    primary = Color(0xFFD4AF37),         // gold
+    onPrimary = Color(0xFF1A0F2E),
+    secondary = Color(0xFFF5E7A0),       // champagne gold
+    onSecondary = Color(0xFF1A0F2E),
+    tertiary = Color(0xFF6B3FA0),        // purple
+    background = Color(0xFF040214),      // deep purple-black
+    onBackground = Color(0xFFF5E7C8),    // champagne text
+    surface = Color(0xFF0D052E),
+    onSurface = Color(0xFFF5E7C8),
+    surfaceVariant = Color(0xFF1A0F3E),
+    onSurfaceVariant = Color(0xFFA89CC4),  // muted lavender
+    error = Color(0xFFE85A3C),
 )
 
 private val LightColorScheme = lightColorScheme(
-    primary = Color(0xFF00897B),
+    primary = Color(0xFF6B3FA0),
     onPrimary = Color(0xFFFFFFFF),
-    secondary = Color(0xFF607D8B),
-    onSecondary = Color(0xFFFFFFFF),
-    tertiary = Color(0xFF8D6E63),
-    background = Color(0xFFF5F1E8),
-    onBackground = Color(0xFF1A1A1A),
-    surface = Color(0xFFFFFDF7),
-    onSurface = Color(0xFF1A1A1A),
-    surfaceVariant = Color(0xFFEBE5D6),
-    onSurfaceVariant = Color(0xFF555555),
-    error = Color(0xFFB71C1C),
+    secondary = Color(0xFFD4AF37),
+    onSecondary = Color(0xFF1A0F2E),
+    tertiary = Color(0xFF8A4FB8),
+    background = Color(0xFFFFF8E7),
+    onBackground = Color(0xFF1A0F2E),
+    surface = Color(0xFFFFFCF0),
+    onSurface = Color(0xFF1A0F2E),
+    surfaceVariant = Color(0xFFEFE0C0),
+    onSurfaceVariant = Color(0xFF6B5A2E),
+    error = Color(0xFFB83A1C),
 )
 
 @Composable
@@ -66,13 +69,17 @@ fun ChiefAppTheme(
     dynamicColor: Boolean = false,
     content: @Composable () -> Unit,
 ) {
+    // The chief website is always dark (purple-black bg).
+    // Force dark theme regardless of system setting so the
+    // visual identity is consistent across users. The
+    // lightColorScheme is kept around for a future "light
+    // mode" toggle if the chairman asks.
     val colorScheme = when {
         dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
             val context = LocalContext.current
             if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
         }
-        darkTheme -> DarkColorScheme
-        else -> LightColorScheme
+        else -> DarkColorScheme
     }
 
     val view = LocalView.current
@@ -80,7 +87,7 @@ fun ChiefAppTheme(
         SideEffect {
             val window = (view.context as Activity).window
             window.statusBarColor = colorScheme.background.toArgb()
-            WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !darkTheme
+            WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = false
         }
     }
 

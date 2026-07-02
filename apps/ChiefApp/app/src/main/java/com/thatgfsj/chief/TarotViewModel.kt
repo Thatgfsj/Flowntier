@@ -1,114 +1,82 @@
 package com.thatgfsj.chief
 
-import androidx.lifecycle.ViewModel
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.thatgfsj.chief.data.RuntimeClient
-import com.thatgfsj.chief.tarot.DrawnCard
+import com.thatgfsj.chief.tarot.TarotCard
+import com.thatgfsj.chief.tarot.TarotRepository
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /**
- * v0.1.0 (event 000074): UI state machine for the tarot screen.
+ * v0.2.0 (event 000075): UI state machine, fully offline.
  *
- *   Initial  → no draw yet, home page with "点击抽取" button
- *   Drawing  → draw in flight; we already know the card(s) so
- *              the UI can render the flip animation immediately
- *   Loaded   → animation finished, show card + meaning +
- *              "再抽一签" / "三卡阵" buttons
- *   Error    → transport / parse failure; show retry
+ *   Initial  → no draw yet, home page
+ *   Drawing  → cards known, animation in flight (~3.1s)
+ *   Loaded   → animation done, render the card(s)
+ *   Error    → assets/cards.json missing (shouldn't happen
+ *              for a built APK; this is a fatal build error
+ *              indicator if it does)
  *
- * Same shape as IChingOracleScreen but the data path runs
- * through the Flwntier runtime (`/api/tarot/draw`), not a
- * local 64-gua JSON. The chief app's whole reason to exist
- * is to be a Flwntier product surface that *uses* iching-
- * oracle's visual language — it does not duplicate the deck.
+ * No network calls. No RuntimeClient. No background services.
+ * The Android system can kill this process at any time and
+ * the next launch re-reads cards.json in <50ms — that's the
+ * 'shotgun mode' chairman picked.
  */
 sealed interface TarotUiState {
     data object Initial : TarotUiState
-    data class Drawing(val cards: List<DrawnCard>) : TarotUiState
-    data class Loaded(val cards: List<DrawnCard>, val fadeKey: Int) : TarotUiState
+    data class Drawing(val drawn: List<DrawnCard>) : TarotUiState
+    data class Loaded(val drawn: List<DrawnCard>, val fadeKey: Int) : TarotUiState
     data class Error(val message: String) : TarotUiState
 }
 
-/** Total draw-animation time, in ms. Same 3.1s budget as
- *  iching-oracle's IChingViewModel. */
+data class DrawnCard(
+    val card: TarotCard,
+    val reversed: Boolean,
+)
+
+/** Total draw-animation time, in ms. Matches iching-oracle's
+ *  3.1s budget so the chief app *feels* like the same product. */
 private const val DRAW_ANIMATION_MS: Long = 3_100L
 
-class TarotViewModel(
-    private val client: RuntimeClient = RuntimeClient(),
-) : ViewModel() {
+class TarotViewModel(application: Application) : AndroidViewModel(application) {
+    private val repo = TarotRepository.getInstance(application)
 
     private val _state = MutableStateFlow<TarotUiState>(TarotUiState.Initial)
     val state: StateFlow<TarotUiState> = _state.asStateFlow()
 
-    private val _host = MutableStateFlow("127.0.0.1:8765")
-    val host: StateFlow<String> = _host.asStateFlow()
-
-    private val _connected = MutableStateFlow<Boolean?>(null)
-    /** null = unknown (haven't pinged yet), true = reachable, false = unreachable. */
-    val connected: StateFlow<Boolean?> = _connected.asStateFlow()
-
     private var fadeCounter = 0
 
-    fun setHost(host: String) {
-        _host.value = host
-    }
-
-    /** Ping the runtime. Used by the settings pane to verify
-     *  the host:port the chairman entered is correct. */
-    fun ping() {
-        viewModelScope.launch {
-            val ok = with(com.thatgfsj.chief.data.RuntimeClient(
-                baseUrl = "http://${_host.value}",
-            )) { ping() }
-            _connected.value = ok
-        }
-    }
-
-    /**
-     * Draw a single card. Public entry point; called by the
-     * "点击抽取" button on the home page.
-     */
+    /** Single-card draw. The chief website's "抽卡" button. */
     fun drawOne() {
         viewModelScope.launch {
-            _state.value = TarotUiState.Initial
-            val resp = client.drawOne()
-            if (resp == null || !resp.ok || resp.items.isEmpty()) {
-                _state.value = TarotUiState.Error("runtime 不可达或抽卡失败")
-                return@launch
-            }
-            runDrawAnimation(resp.items)
+            val card = repo.drawOne()
+            val drawn = listOf(DrawnCard(card, repo.isReversed(card)))
+            runDrawAnimation(drawn)
         }
     }
 
-    /**
-     * Draw a 3-card past/present/future spread.
-     */
+    /** Three-card spread: past / present / future. */
     fun drawThree() {
         viewModelScope.launch {
-            _state.value = TarotUiState.Initial
-            val resp = client.drawThree()
-            if (resp == null || !resp.ok || resp.items.size < 3) {
-                _state.value = TarotUiState.Error("runtime 不可达或三卡阵失败")
-                return@launch
-            }
-            runDrawAnimation(resp.items)
+            val cards = repo.drawThree()
+            val drawn = cards.map { DrawnCard(it, repo.isReversed(it)) }
+            runDrawAnimation(drawn)
         }
     }
 
-    /** Reset back to home, clearing the loaded draw. */
+    /** Reset back to the home page. */
     fun clear() {
         _state.value = TarotUiState.Initial
     }
 
-    private suspend fun runDrawAnimation(cards: List<DrawnCard>) {
-        _state.value = TarotUiState.Drawing(cards)
+    private suspend fun runDrawAnimation(drawn: List<DrawnCard>) {
+        _state.value = TarotUiState.Drawing(drawn)
         delay(DRAW_ANIMATION_MS)
         fadeCounter += 1
-        _state.value = TarotUiState.Loaded(cards, fadeCounter)
+        _state.value = TarotUiState.Loaded(drawn, fadeCounter)
     }
 }

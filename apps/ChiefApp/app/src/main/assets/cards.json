@@ -1,0 +1,631 @@
+{
+  "version": "1.0",
+  "source": "shenpowang.com",
+  "count": 78,
+  "cards": [
+    {
+      "id": 0,
+      "name_zh": "愚人",
+      "name_en": "The Fool",
+      "image_res": "the_fool",
+      "arcana": "major",
+      "suit": null
+    },
+    {
+      "id": 1,
+      "name_zh": "魔术师",
+      "name_en": "The Magician",
+      "image_res": "the_magician",
+      "arcana": "major",
+      "suit": null
+    },
+    {
+      "id": 2,
+      "name_zh": "女祭祀",
+      "name_en": "The High Pristess",
+      "image_res": "the_high_pristess",
+      "arcana": "major",
+      "suit": null
+    },
+    {
+      "id": 3,
+      "name_zh": "女皇",
+      "name_en": "The Empress",
+      "image_res": "the_empress",
+      "arcana": "major",
+      "suit": null
+    },
+    {
+      "id": 4,
+      "name_zh": "皇帝",
+      "name_en": "The Emperor",
+      "image_res": "the_emperor",
+      "arcana": "major",
+      "suit": null
+    },
+    {
+      "id": 5,
+      "name_zh": "教皇",
+      "name_en": "The Hierophant",
+      "image_res": "the_hierophant",
+      "arcana": "major",
+      "suit": null
+    },
+    {
+      "id": 6,
+      "name_zh": "恋人",
+      "name_en": "The lovers",
+      "image_res": "the_lovers",
+      "arcana": "major",
+      "suit": null
+    },
+    {
+      "id": 7,
+      "name_zh": "战车",
+      "name_en": "The Chariot",
+      "image_res": "the_chariot",
+      "arcana": "major",
+      "suit": null
+    },
+    {
+      "id": 8,
+      "name_zh": "力量",
+      "name_en": "Strength",
+      "image_res": "strength",
+      "arcana": "major",
+      "suit": null
+    },
+    {
+      "id": 9,
+      "name_zh": "隐士",
+      "name_en": "The Hermit",
+      "image_res": "the_hermit",
+      "arcana": "major",
+      "suit": null
+    },
+    {
+      "id": 10,
+      "name_zh": "命运之轮",
+      "name_en": "The Wheel of Fortune",
+      "image_res": "the_wheel_of_fortune",
+      "arcana": "major",
+      "suit": null
+    },
+    {
+      "id": 11,
+      "name_zh": "正义",
+      "name_en": "Justice",
+      "image_res": "justice",
+      "arcana": "major",
+      "suit": null
+    },
+    {
+      "id": 12,
+      "name_zh": "倒吊人",
+      "name_en": "The Hanged Man",
+      "image_res": "the_hanged_man",
+      "arcana": "major",
+      "suit": null
+    },
+    {
+      "id": 13,
+      "name_zh": "死神",
+      "name_en": "Death",
+      "image_res": "death",
+      "arcana": "major",
+      "suit": null
+    },
+    {
+      "id": 14,
+      "name_zh": "节制",
+      "name_en": "Temperance",
+      "image_res": "temperance",
+      "arcana": "major",
+      "suit": null
+    },
+    {
+      "id": 15,
+      "name_zh": "魔鬼",
+      "name_en": "The Devil",
+      "image_res": "the_devil",
+      "arcana": "major",
+      "suit": null
+    },
+    {
+      "id": 16,
+      "name_zh": "高塔",
+      "name_en": "The Tower",
+      "image_res": "the_tower",
+      "arcana": "major",
+      "suit": null
+    },
+    {
+      "id": 17,
+      "name_zh": "星星",
+      "name_en": "The Star",
+      "image_res": "the_star",
+      "arcana": "major",
+      "suit": null
+    },
+    {
+      "id": 18,
+      "name_zh": "月亮",
+      "name_en": "The Moon",
+      "image_res": "the_moon",
+      "arcana": "major",
+      "suit": null
+    },
+    {
+      "id": 19,
+      "name_zh": "太阳",
+      "name_en": "The Sun",
+      "image_res": "the_sun",
+      "arcana": "major",
+      "suit": null
+    },
+    {
+      "id": 20,
+      "name_zh": "审判",
+      "name_en": "Judgement",
+      "image_res": "judgement",
+      "arcana": "major",
+      "suit": null
+    },
+    {
+      "id": 21,
+      "name_zh": "世界",
+      "name_en": "The World",
+      "image_res": "the_world",
+      "arcana": "major",
+      "suit": null
+    },
+    {
+      "id": 22,
+      "name_zh": "权杖国王",
+      "name_en": "King Of Wands",
+      "image_res": "king_of_wands",
+      "arcana": "minor",
+      "suit": "wands"
+    },
+    {
+      "id": 23,
+      "name_zh": "权杖王后",
+      "name_en": "Queen Of Wands",
+      "image_res": "queen_of_wands",
+      "arcana": "minor",
+      "suit": "wands"
+    },
+    {
+      "id": 24,
+      "name_zh": "权杖骑士",
+      "name_en": "Knight Of Wands",
+      "image_res": "knight_of_wands",
+      "arcana": "minor",
+      "suit": "wands"
+    },
+    {
+      "id": 25,
+      "name_zh": "权杖侍从",
+      "name_en": "Page Of Wands",
+      "image_res": "page_of_wands",
+      "arcana": "minor",
+      "suit": "wands"
+    },
+    {
+      "id": 26,
+      "name_zh": "权杖一",
+      "name_en": "Ace Of Wands",
+      "image_res": "ace_of_wands",
+      "arcana": "minor",
+      "suit": "wands"
+    },
+    {
+      "id": 27,
+      "name_zh": "权杖二",
+      "name_en": "Tow Of Wands",
+      "image_res": "tow_of_wands",
+      "arcana": "minor",
+      "suit": "wands"
+    },
+    {
+      "id": 28,
+      "name_zh": "权杖三",
+      "name_en": "Three Of Wands",
+      "image_res": "three_of_wands",
+      "arcana": "minor",
+      "suit": "wands"
+    },
+    {
+      "id": 29,
+      "name_zh": "权杖四",
+      "name_en": "Four Of Wands",
+      "image_res": "four_of_wands",
+      "arcana": "minor",
+      "suit": "wands"
+    },
+    {
+      "id": 30,
+      "name_zh": "权杖五",
+      "name_en": "Five Of Wands",
+      "image_res": "five_of_wands",
+      "arcana": "minor",
+      "suit": "wands"
+    },
+    {
+      "id": 31,
+      "name_zh": "权杖六",
+      "name_en": "Six Of Wands",
+      "image_res": "six_of_wands",
+      "arcana": "minor",
+      "suit": "wands"
+    },
+    {
+      "id": 32,
+      "name_zh": "权杖七",
+      "name_en": "Seven Of Wands",
+      "image_res": "seven_of_wands",
+      "arcana": "minor",
+      "suit": "wands"
+    },
+    {
+      "id": 33,
+      "name_zh": "权杖八",
+      "name_en": "Eight Of Wands",
+      "image_res": "eight_of_wands",
+      "arcana": "minor",
+      "suit": "wands"
+    },
+    {
+      "id": 34,
+      "name_zh": "权杖九",
+      "name_en": "Nine Of Wands",
+      "image_res": "nine_of_wands",
+      "arcana": "minor",
+      "suit": "wands"
+    },
+    {
+      "id": 35,
+      "name_zh": "权杖十",
+      "name_en": "Ten Of Wands",
+      "image_res": "ten_of_wands",
+      "arcana": "minor",
+      "suit": "wands"
+    },
+    {
+      "id": 36,
+      "name_zh": "圣杯国王",
+      "name_en": "King Of Cups",
+      "image_res": "king_of_cups",
+      "arcana": "minor",
+      "suit": "cups"
+    },
+    {
+      "id": 37,
+      "name_zh": "圣杯王后",
+      "name_en": "Queen Of Cups",
+      "image_res": "queen_of_cups",
+      "arcana": "minor",
+      "suit": "cups"
+    },
+    {
+      "id": 38,
+      "name_zh": "圣杯骑士",
+      "name_en": "Knight Of Cups",
+      "image_res": "knight_of_cups",
+      "arcana": "minor",
+      "suit": "cups"
+    },
+    {
+      "id": 39,
+      "name_zh": "圣杯侍从",
+      "name_en": "Page Of Cups",
+      "image_res": "page_of_cups",
+      "arcana": "minor",
+      "suit": "cups"
+    },
+    {
+      "id": 40,
+      "name_zh": "圣杯一",
+      "name_en": "Ace Of Cups",
+      "image_res": "ace_of_cups",
+      "arcana": "minor",
+      "suit": "cups"
+    },
+    {
+      "id": 41,
+      "name_zh": "圣杯二",
+      "name_en": "Two Of Cups",
+      "image_res": "two_of_cups",
+      "arcana": "minor",
+      "suit": "cups"
+    },
+    {
+      "id": 42,
+      "name_zh": "圣杯三",
+      "name_en": "Three Of Cups",
+      "image_res": "three_of_cups",
+      "arcana": "minor",
+      "suit": "cups"
+    },
+    {
+      "id": 43,
+      "name_zh": "圣杯四",
+      "name_en": "Four Of Cups",
+      "image_res": "four_of_cups",
+      "arcana": "minor",
+      "suit": "cups"
+    },
+    {
+      "id": 44,
+      "name_zh": "圣杯五",
+      "name_en": "Five Of Cups",
+      "image_res": "five_of_cups",
+      "arcana": "minor",
+      "suit": "cups"
+    },
+    {
+      "id": 45,
+      "name_zh": "圣杯六",
+      "name_en": "Six Of Cups",
+      "image_res": "six_of_cups",
+      "arcana": "minor",
+      "suit": "cups"
+    },
+    {
+      "id": 46,
+      "name_zh": "圣杯七",
+      "name_en": "Seven Of Cups",
+      "image_res": "seven_of_cups",
+      "arcana": "minor",
+      "suit": "cups"
+    },
+    {
+      "id": 47,
+      "name_zh": "圣杯八",
+      "name_en": "Eight Of Cups",
+      "image_res": "eight_of_cups",
+      "arcana": "minor",
+      "suit": "cups"
+    },
+    {
+      "id": 48,
+      "name_zh": "圣杯九",
+      "name_en": "Nine Of Cups",
+      "image_res": "nine_of_cups",
+      "arcana": "minor",
+      "suit": "cups"
+    },
+    {
+      "id": 49,
+      "name_zh": "圣杯十",
+      "name_en": "Ten Of Cups",
+      "image_res": "ten_of_cups",
+      "arcana": "minor",
+      "suit": "cups"
+    },
+    {
+      "id": 50,
+      "name_zh": "宝剑国王",
+      "name_en": "King Of Swords",
+      "image_res": "king_of_swords",
+      "arcana": "minor",
+      "suit": "swords"
+    },
+    {
+      "id": 51,
+      "name_zh": "宝剑王后",
+      "name_en": "Queen Of Swords",
+      "image_res": "queen_of_swords",
+      "arcana": "minor",
+      "suit": "swords"
+    },
+    {
+      "id": 52,
+      "name_zh": "宝剑骑士",
+      "name_en": "Knight Of Swords",
+      "image_res": "knight_of_swords",
+      "arcana": "minor",
+      "suit": "swords"
+    },
+    {
+      "id": 53,
+      "name_zh": "宝剑侍从",
+      "name_en": "Page Of Swords",
+      "image_res": "page_of_swords",
+      "arcana": "minor",
+      "suit": "swords"
+    },
+    {
+      "id": 54,
+      "name_zh": "宝剑一",
+      "name_en": "Ace Of Swords",
+      "image_res": "ace_of_swords",
+      "arcana": "minor",
+      "suit": "swords"
+    },
+    {
+      "id": 55,
+      "name_zh": "宝剑二",
+      "name_en": "Two Of Swords",
+      "image_res": "two_of_swords",
+      "arcana": "minor",
+      "suit": "swords"
+    },
+    {
+      "id": 56,
+      "name_zh": "宝剑三",
+      "name_en": "Three Of Swords",
+      "image_res": "three_of_swords",
+      "arcana": "minor",
+      "suit": "swords"
+    },
+    {
+      "id": 57,
+      "name_zh": "宝剑四",
+      "name_en": "Four Of Swords",
+      "image_res": "four_of_swords",
+      "arcana": "minor",
+      "suit": "swords"
+    },
+    {
+      "id": 58,
+      "name_zh": "宝剑五",
+      "name_en": "Five Of Swords",
+      "image_res": "five_of_swords",
+      "arcana": "minor",
+      "suit": "swords"
+    },
+    {
+      "id": 59,
+      "name_zh": "宝剑六",
+      "name_en": "Six Of Swords",
+      "image_res": "six_of_swords",
+      "arcana": "minor",
+      "suit": "swords"
+    },
+    {
+      "id": 60,
+      "name_zh": "宝剑七",
+      "name_en": "Seven Of Swords",
+      "image_res": "seven_of_swords",
+      "arcana": "minor",
+      "suit": "swords"
+    },
+    {
+      "id": 61,
+      "name_zh": "宝剑八",
+      "name_en": "Eight Of Swords",
+      "image_res": "eight_of_swords",
+      "arcana": "minor",
+      "suit": "swords"
+    },
+    {
+      "id": 62,
+      "name_zh": "宝剑九",
+      "name_en": "Nine Of Swords",
+      "image_res": "nine_of_swords",
+      "arcana": "minor",
+      "suit": "swords"
+    },
+    {
+      "id": 63,
+      "name_zh": "宝剑十",
+      "name_en": "Ten Of Swords",
+      "image_res": "ten_of_swords",
+      "arcana": "minor",
+      "suit": "swords"
+    },
+    {
+      "id": 64,
+      "name_zh": "星币国王",
+      "name_en": "King Of Pentacles",
+      "image_res": "king_of_pentacles",
+      "arcana": "minor",
+      "suit": "pentacles"
+    },
+    {
+      "id": 65,
+      "name_zh": "星币王后",
+      "name_en": "Queen Of Pentacles",
+      "image_res": "queen_of_pentacles",
+      "arcana": "minor",
+      "suit": "pentacles"
+    },
+    {
+      "id": 66,
+      "name_zh": "星币骑士",
+      "name_en": "Knight Of Pentacles",
+      "image_res": "knight_of_pentacles",
+      "arcana": "minor",
+      "suit": "pentacles"
+    },
+    {
+      "id": 67,
+      "name_zh": "星币侍从",
+      "name_en": "Page Of Pentacles",
+      "image_res": "page_of_pentacles",
+      "arcana": "minor",
+      "suit": "pentacles"
+    },
+    {
+      "id": 68,
+      "name_zh": "星币一",
+      "name_en": "Ace Of Pentacles",
+      "image_res": "ace_of_pentacles",
+      "arcana": "minor",
+      "suit": "pentacles"
+    },
+    {
+      "id": 69,
+      "name_zh": "星币二",
+      "name_en": "Two Of Pentacles",
+      "image_res": "two_of_pentacles",
+      "arcana": "minor",
+      "suit": "pentacles"
+    },
+    {
+      "id": 70,
+      "name_zh": "星币三",
+      "name_en": "Three Of Pentacles",
+      "image_res": "three_of_pentacles",
+      "arcana": "minor",
+      "suit": "pentacles"
+    },
+    {
+      "id": 71,
+      "name_zh": "星币四",
+      "name_en": "Four Of Pentacles",
+      "image_res": "four_of_pentacles",
+      "arcana": "minor",
+      "suit": "pentacles"
+    },
+    {
+      "id": 72,
+      "name_zh": "星币五",
+      "name_en": "Five Of Pentacles",
+      "image_res": "five_of_pentacles",
+      "arcana": "minor",
+      "suit": "pentacles"
+    },
+    {
+      "id": 73,
+      "name_zh": "星币六",
+      "name_en": "Fix Of Pentacles",
+      "image_res": "fix_of_pentacles",
+      "arcana": "minor",
+      "suit": "pentacles"
+    },
+    {
+      "id": 74,
+      "name_zh": "星币七",
+      "name_en": "Seven Of Pentacles",
+      "image_res": "seven_of_pentacles",
+      "arcana": "minor",
+      "suit": "pentacles"
+    },
+    {
+      "id": 75,
+      "name_zh": "星币八",
+      "name_en": "Eight Of Pentacles",
+      "image_res": "eight_of_pentacles",
+      "arcana": "minor",
+      "suit": "pentacles"
+    },
+    {
+      "id": 76,
+      "name_zh": "星币九",
+      "name_en": "Nine Of Pentacles",
+      "image_res": "nine_of_pentacles",
+      "arcana": "minor",
+      "suit": "pentacles"
+    },
+    {
+      "id": 77,
+      "name_zh": "星币十",
+      "name_en": "Ten Of Pentacles",
+      "image_res": "ten_of_pentacles",
+      "arcana": "minor",
+      "suit": "pentacles"
+    }
+  ]
+}
