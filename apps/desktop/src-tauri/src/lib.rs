@@ -1507,6 +1507,20 @@ async fn get_recent_errors(body: serde_json::Value) -> Result<serde_json::Value,
     pipe_request("GET", &path, None).await
 }
 
+/// v0.4.22 (event 000069): poll a workflow's current status.
+/// The orchestrator runs on a background tokio task (POST
+/// returns wf_id immediately); clients poll this to know when
+/// the workflow finished + what the final summary is.
+#[tauri::command]
+async fn get_workflow_status(body: serde_json::Value) -> Result<serde_json::Value, String> {
+    let wf_id = body.get("wf_id").and_then(|v| v.as_str()).unwrap_or("");
+    if wf_id.is_empty() {
+        return Err("missing 'wf_id'".into());
+    }
+    let path = format!("/api/workflow/{}/status", url_encode(wf_id));
+    pipe_request("GET", &path, None).await
+}
+
 /// Convert a `SystemTime` to an ISO 8601 UTC string with second
 /// precision (e.g. "2026-06-27T12:34:56Z"). Howard Hinnant's
 /// `days_from_civil` algorithm — no chrono dep required.
@@ -1656,6 +1670,7 @@ pub fn run() {
             get_workdir, set_workdir, set_workdir_with_nwt, clear_workdir,
             get_diagnostics,
             get_runtime_workspace, get_workspace_tree, get_recent_errors,
+            get_workflow_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

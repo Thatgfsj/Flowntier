@@ -91,6 +91,29 @@ pub struct PlanDoc {
 }
 
 impl PlanDoc {
+    /// Merge another PlanDoc into this one. The summary /
+    /// architecture fields are kept from `self` (the first
+    /// round's authoritative text); tasks are appended, with
+    /// id-based dedup so a chief that re-uses an id in two
+    /// rounds doesn't create duplicate dispatch rows.
+    /// Empty summaries / architectures from the secondary
+    /// doc don't overwrite the primary doc's values.
+    pub fn merge(&mut self, other: &PlanDoc) {
+        if self.summary.is_empty() && !other.summary.is_empty() {
+            self.summary = other.summary.clone();
+        }
+        if self.architecture.is_empty() && !other.architecture.is_empty() {
+            self.architecture = other.architecture.clone();
+        }
+        let existing_ids: std::collections::HashSet<String> =
+            self.tasks.iter().map(|t| t.id.clone()).collect();
+        for t in &other.tasks {
+            if !existing_ids.contains(&t.id) {
+                self.tasks.push(t.clone());
+            }
+        }
+    }
+
     /// Best-effort JSON extractor. The chief is asked to wrap
     /// the PlanDoc in a fenced ```json block; we strip the
     /// fences and parse the first `{...}` block. Falls back to
@@ -192,7 +215,7 @@ impl Orchestrator {
     ///    fields — App.tsx's transition handler picks this up.
     ///    We send via a generic JSON value; the events pipe
     ///    forwards anything that's newline-delimited JSON.
-    fn emit_phase(&self, from: Option<&str>, to: &str) {
+    async fn emit_phase(&self, from: Option<&str>, to: &str) {
         let _ = self.events.send(AgentEvent::PhaseTransition {
             wf_id: self.wf_id.clone(),
             from: from.map(|s| s.to_string()),
@@ -205,6 +228,19 @@ impl Orchestrator {
             to = %to,
             "phase transition"
         );
+        // v0.4.22 (event 000069): also update the workflows
+        // row so GET /api/workflow/{wf_id}/status returns the
+        // current phase without needing to scrape the events
+        // pipe. Best-effort — log on failure but don't block
+        // the phase transition.
+        let wf_phase = map_phase_name(to);
+        if let Err(e) = self.state.repo.update_workflow_state(
+            &self.wf_id,
+            "ACTIVE",
+            &wf_phase,
+        ).await {
+            warn!(target: "orchestrator", error = %e, wf_id = %self.wf_id, "update_workflow_state failed");
+        }
     }
 
     /// Spawn one agent run and return its outcome. The agent
@@ -313,7 +349,7 @@ impl Orchestrator {
     /// string the chairman sees.
     pub async fn run(mut self) -> String {
         let mut phase_idx = 0;
-        self.emit_phase(None, PHASES[phase_idx]);
+        self.emit_phase(None, PHASES[phase_idx]).await;
 
         // ── Phase 1: requirement analysis ─────────────────
         let chief_clarify = self.run_agent(AgentRunSpec {
@@ -326,41 +362,65 @@ impl Orchestrator {
         }).await;
         self.persist_task_row(&chief_clarify, "1-requirement").await;
         phase_idx = 1;
-        self.emit_phase(Some(PHASES[0]), PHASES[phase_idx]);
+        self.emit_phase(Some(PHASES[0]), PHASES[phase_idx]).await;
 
-        // ── Phase 2: planning ────────────────────────────
-        let plan_text = self.run_agent(AgentRunSpec {
+        // ── Phase 2: planning (segmented) ─────────────────
+        // v0.4.22 (event 000069): the previous monolithic Plan
+        // phase asked the chief to dump the entire PlanDoc in
+        // one LLM turn. For large requests (e.g. "build a 78-card
+        // tarot app") that's >5min of chief token streaming and
+        // the chief runs out of budget mid-way, leaving the
+        // PlanDoc half-formed. We now split the Plan phase into
+        // 3 rounds:
+        //
+        //   Round A: summary + architecture (one short call)
+        //   Round B: Backend / API / Database / Worker tasks
+        //   Round C: Frontend / Testing / Documentation tasks
+        //
+        // Each round's response is wrapped in ```json``` and
+        // gets merged into the cumulative PlanDoc via
+        // PlanDoc::merge(). If a round fails (timeout, no JSON),
+        // we accept what we got and proceed with the partial
+        // doc — the next phase will surface that as PASS with
+        // a note.
+        let plan_round_a = self.run_agent(AgentRunSpec {
             role: Role::Chief,
             task: format!(
-                "用户需求:{}\n\n任务: 输出一个 PlanDoc, 严格按下面的 JSON 格式包在 ```json 围栏里:\n\
-                 ```json\n\
-                 {{\n\
-                   \"summary\": \"<一段中文总结>\",\n\
-                   \"architecture\": \"<一段中文架构说明>\",\n\
-                   \"tasks\": [\n\
-                     {{\n\
-                       \"id\": \"w_<unique>\",\n\
-                       \"title\": \"<中文短标题>\",\n\
-                       \"label\": \"Backend|Frontend|Database|API|Testing|Documentation|Worker\",\n\
-                       \"objective\": \"<本 worker 的目标, 一句话>\",\n\
-                       \"interfaces\": \"<输入输出接口说明, 可空>\",\n\
-                       \"dependencies\": [\"<其他 task id, 可空数组>\"],\n\
-                       \"requirements\": \"<编码要求, 可空>\"\n\
-                     }}\n\
-                   ]\n\
-                 }}\n\
-                 ```\n\
-                 拆任务时按: 后端 / 前端 / 数据库 / API / 测试 / 文档 这些维度拆, 但允许根据任务特点合并或省略。只在确实需要时拆, 不要硬凑。",
+                "用户需求:{}\n\n任务: 输出 PlanDoc 的上半部分。严格按 JSON 格式包在 ```json 围栏里:\n```json\n{{\n  \"summary\": \"<一段中文总结>\",\n  \"architecture\": \"<一段中文架构说明>\",\n  \"tasks\": []\n}}\n```\n只输出 summary + architecture, **不要输出 tasks 数组**(下一轮再加 tasks)。控制在 200 字以内。",
                 self.user_request,
             ),
             context: None,
         }).await;
-        self.persist_task_row(&plan_text, "2-plan").await;
-        let plan = PlanDoc::from_chief_text(&plan_text.text, &self.user_request);
+        self.persist_task_row(&plan_round_a, "2-plan-A-summary").await;
+        let mut plan = PlanDoc::from_chief_text(&plan_round_a.text, &self.user_request);
+
+        let plan_round_b = self.run_agent(AgentRunSpec {
+            role: Role::Chief,
+            task: format!(
+                "用户需求:{}\n\n已知架构:\n```\n{}\n```\n\n任务: 输出后端 / API / 数据库 / 数据 / 算法 这一类任务, 严格按 JSON 格式包在 ```json 围栏里:\n```json\n{{\n  \"tasks\": [\n    {{\n      \"id\": \"w_<unique>\",\n      \"title\": \"<中文短标题>\",\n      \"label\": \"Backend|API|Database|Worker\",\n      \"objective\": \"<本 worker 的目标, 一句话>\",\n      \"interfaces\": \"<输入输出接口说明, 可空>\",\n      \"dependencies\": [],\n      \"requirements\": \"<编码要求, 可空>\"\n    }}\n  ]\n}}\n```\n**只输出 tasks 数组, 不要重复 summary / architecture**。",
+                self.user_request, plan.architecture,
+            ),
+            context: None,
+        }).await;
+        self.persist_task_row(&plan_round_b, "2-plan-B-backend").await;
+        let plan_b = PlanDoc::from_chief_text(&plan_round_b.text, &self.user_request);
+        plan.merge(&plan_b);
+
+        let plan_round_c = self.run_agent(AgentRunSpec {
+            role: Role::Chief,
+            task: format!(
+                "用户需求:{}\n\n已知架构:\n```\n{}\n```\n\n已有任务(后端/API):\n```\n{}\n```\n\n任务: 输出前端 / 测试 / 文档 这一类任务, 严格按 JSON 格式包在 ```json 围栏里:\n```json\n{{\n  \"tasks\": [\n    {{\n      \"id\": \"w_<unique>\",\n      \"title\": \"<中文短标题>\",\n      \"label\": \"Frontend|Testing|Documentation\",\n      \"objective\": \"<本 worker 的目标, 一句话>\",\n      \"interfaces\": \"<输入输出接口说明, 可空>\",\n      \"dependencies\": [<可填上面的 task id>],\n      \"requirements\": \"<编码要求, 可空>\"\n    }}\n  ]\n}}\n```\n**只输出 tasks 数组**。",
+                self.user_request, plan.architecture, serde_json::to_string_pretty(&plan.tasks).unwrap_or_default(),
+            ),
+            context: None,
+        }).await;
+        self.persist_task_row(&plan_round_c, "2-plan-C-frontend").await;
+        let plan_c = PlanDoc::from_chief_text(&plan_round_c.text, &self.user_request);
+        plan.merge(&plan_c);
 
         // ── Phase 3: plan review (parallel) ──────────────
         phase_idx = 2;
-        self.emit_phase(Some(PHASES[1]), PHASES[phase_idx]);
+        self.emit_phase(Some(PHASES[1]), PHASES[phase_idx]).await;
         let plan_ctx = format!("需要评审的 PlanDoc:\n```json\n{}\n```", serde_json::to_string_pretty(&plan).unwrap_or_default());
         let (critic_a, critic_b) = tokio::join!(
             self.run_agent(AgentRunSpec {
@@ -379,7 +439,7 @@ impl Orchestrator {
 
         // ── Phase 4: dispatch (chief declares worker list) ──
         phase_idx = 3;
-        self.emit_phase(Some(PHASES[2]), PHASES[phase_idx]);
+        self.emit_phase(Some(PHASES[2]), PHASES[phase_idx]).await;
         let plan_review = format!(
             "Critic A: {} → {}\nCritic B: {} → {}",
             critic_a.role_display,
@@ -399,7 +459,7 @@ impl Orchestrator {
 
         // ── Phase 5: develop (workers in parallel) ─────────
         phase_idx = 4;
-        self.emit_phase(Some(PHASES[3]), PHASES[phase_idx]);
+        self.emit_phase(Some(PHASES[3]), PHASES[phase_idx]).await;
         let mut worker_futures = Vec::new();
         for t in &plan.tasks {
             let task_text = format!(
@@ -420,7 +480,7 @@ impl Orchestrator {
 
         // ── Phase 6: final review (parallel) ───────────────
         phase_idx = 5;
-        self.emit_phase(Some(PHASES[4]), PHASES[phase_idx]);
+        self.emit_phase(Some(PHASES[4]), PHASES[phase_idx]).await;
         let workers_summary: Vec<String> = worker_results.iter().enumerate().map(|(i, w)| {
             let title = plan.tasks.get(i).map(|t| t.title.clone()).unwrap_or_default();
             format!("[{}] {} ({}): {}\n  -> {}",
@@ -447,7 +507,7 @@ impl Orchestrator {
 
         // ── Phase 7: repair (one pass — chief decides) ────
         phase_idx = 6;
-        self.emit_phase(Some(PHASES[5]), PHASES[phase_idx]);
+        self.emit_phase(Some(PHASES[5]), PHASES[phase_idx]).await;
         let final_review = format!(
             "Final Critic A: {} → {}\nFinal Critic B: {} → {}",
             final_a.role_display, verdict_of(&final_a),
@@ -465,7 +525,7 @@ impl Orchestrator {
 
         // ── Phase 8: delivery ─────────────────────────────
         phase_idx = 7;
-        self.emit_phase(Some(PHASES[6]), PHASES[phase_idx]);
+        self.emit_phase(Some(PHASES[6]), PHASES[phase_idx]).await;
         let delivery = self.run_agent(AgentRunSpec {
             role: Role::Chief,
             task: format!(
@@ -488,6 +548,21 @@ impl Orchestrator {
             status: "DONE".into(),
             summary: delivery.summary.clone(),
         });
+        // v0.4.22 (event 000069): mark the workflow as DONE in
+        // the workflows row so /api/workflow/{wf_id}/status
+        // can be polled by clients that didn't watch the
+        // events pipe.
+        let _ = self.state.repo.update_workflow_state(
+            &self.wf_id, "DONE", "8-delivery",
+        );
+        // Also persist the final summary so status endpoint
+        // returns it.
+        if let Some(s) = &delivery.summary {
+            let _ = self
+                .state
+                .repo
+                .set_workflow_summary(&self.wf_id, s);
+        }
 
         delivery.summary.unwrap_or(delivery.text)
     }
@@ -570,6 +645,23 @@ fn rand_suffix() -> String {
     let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
     // 8 hex chars from the nanosecond tail.
     format!("{:08x}", (nanos as u64) & 0xFFFFFFFF)
+}
+
+/// Map the orchestrator's unprefixed phase names to the
+/// storage layer's WorkflowPhase enum. Kept in sync with
+/// `crates/storage/src/lib.rs` WorkflowPhase definition.
+fn map_phase_name(name: &str) -> String {
+    match name {
+        "requirement" => "1-requirement".into(),
+        "plan" => "2-plan".into(),
+        "plan-review" => "3-plan-review".into(),
+        "dispatch" => "4-dispatch".into(),
+        "develop" => "5-develop".into(),
+        "final-review" => "6-final-review".into(),
+        "repair" => "7-repair".into(),
+        "delivery" => "8-delivery".into(),
+        _ => name.to_string(),
+    }
 }
 
 // Silence unused import warnings on platforms that drop them.

@@ -386,3 +386,22 @@ export interface RecentErrorsResponse {
 export async function getRecentErrors(limit = 10): Promise<RecentErrorsResponse> {
   return invoke<RecentErrorsResponse>('get_recent_errors', { body: { limit } });
 }
+
+// ── v0.4.22 (event 000069): workflow async + status poll ────
+// The orchestrator runs on a background task (POST returns
+// wf_id in ~50ms). Clients poll this endpoint to learn the
+// current phase + summary. PhaseTransition events on the
+// events pipe remain the realtime alternative.
+export interface WorkflowStatus {
+  ok: boolean;
+  wf_id: string;
+  status: string;   // 'running' | 'done' | 'failed' | 'aborted' | 'unknown'
+  phase: string;    // 'requirement' | 'plan' | 'plan-review' | ... | 'done'
+  summary: string | null;
+  tasks_done: number;
+  tasks_total: number;
+}
+
+export async function getWorkflowStatus(wfId: string): Promise<WorkflowStatus> {
+  return invoke<WorkflowStatus>('get_workflow_status', { body: { wf_id: wfId } });
+}

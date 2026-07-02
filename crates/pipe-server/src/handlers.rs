@@ -900,22 +900,19 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
     // ── v0.4.22 (event 000068): POST /api/run_workflow ────
     // Body: { task: "<user_request>" }
     //
-    // Spawns an Orchestrator that runs the 8-phase workflow
-    // from history/PROJECT_SPEC.md:
-    //   1-requirement (chief) -> 2-plan (chief) ->
-    //   3-plan-review (critic:a + critic:b parallel) ->
-    //   4-dispatch (chief) -> 5-develop (workers parallel) ->
-    //   6-final-review (critic:a + critic:b parallel) ->
-    //   7-repair (chief decides) -> 8-delivery (chief summary)
+    // v0.4.22 (event 000069 follow-up): run the workflow on a
+    // background tokio task and return wf_id immediately. The
+    // monolithic call blocked the JSON-RPC handler for up to
+    // 30+ minutes on large requests (78-card tarot app =
+    // 1-requirement + 2-plan (3 rounds) + 3-plan-review
+    // (2 parallel) + 4-dispatch + 5-develop (N workers) +
+    // 6-final-review + 7-repair + 8-delivery — at 5 min/agent
+    // worst case that's way past any reasonable HTTP timeout).
     //
-    // The handler awaits the full 8 phases synchronously so
-    // the JSON-RPC response is "everything done" — but every
-    // phase transition is broadcast on the events pipe in
-    // real-time, so the UI's PhaseTimeline animates as the
-    // workflow progresses instead of waiting 10 minutes for
-    // one big response. Each per-agent 5-min timeout caps the
-    // worst case at ~30-40 minutes total (acceptable for a
-    // desktop app where the chairman is waiting).
+    // Now: POST returns wf_id + status "running" in ~50ms.
+    // Clients poll GET /api/workflow/{wf_id}/status for the
+    // current phase + summary, or listen on the events pipe
+    // for PhaseTransition updates (which the UI does anyway).
     let s_wf = state.clone();
     d.register("POST", "/api/run_workflow", move |body| {
         let s = s_wf.clone();
@@ -938,12 +935,75 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
                 task.to_string(),
             );
             let wf_id = orch.wf_id.clone();
-            let summary = orch.run().await;
+            // Spawn the orchestrator on a background task so
+            // the JSON-RPC response returns immediately. Each
+            // phase still emits AgentEvent::PhaseTransition on
+            // the events pipe so the UI animates as the
+            // workflow progresses.
+            let wf_id_for_log = wf_id.clone();
+            tokio::spawn(async move {
+                let summary = orch.run().await;
+                tracing::info!(
+                    target: "pipe_server",
+                    wf_id = %wf_id_for_log,
+                    summary_len = summary.len(),
+                    "v0.4.22 (event 000068): workflow finished"
+                );
+            });
             Ok((200, json!({
                 "ok": true,
                 "wf_id": wf_id,
+                "status": "running",
+                "note": "poll GET /api/workflow/{wf_id}/status for current phase + summary, or listen on wf:event channel",
+            })))
+        })
+    });
+
+    // ── v0.4.22 (event 000069): GET /api/workflow/{wf_id}/status ─
+    // Returns the current status of a workflow. Reads the
+    // workflows row (state / phase) plus aggregates the tasks
+    // table to count done vs in-flight tasks under the wf_id.
+    // The orchestrator updates workflows.state to DONE when
+    // delivery finishes.
+    let s_wfstatus = state.clone();
+    d.register("GET", "/api/workflow/{wf_id}/status", move |body| {
+        let s = s_wfstatus.clone();
+        let wf_id = body.get("wf_id").and_then(|v| v.as_str())
+            .unwrap_or("").to_string();
+        Box::pin(async move {
+            if wf_id.is_empty() {
+                return Ok((400, json!({
+                    "ok": false,
+                    "error": "missing 'wf_id' in path placeholder",
+                })));
+            }
+            let wf_row = s.repo.get_workflow(&wf_id).await.unwrap_or(None);
+            // If workflows row missing, orchestrator hasn't
+            // started yet (or never persisted — fall through).
+            let (state, phase, summary) = match &wf_row {
+                Some(w) => {
+                    // WorkflowState + WorkflowPhase enums aren't
+                    // `pub` re-exported across the workspace,
+                    // so we just Debug-print and trim. The
+                    // orchestrator writes prefixed strings
+                    // ("1-requirement" / "ACTIVE" / "DONE") so
+                    // a simple string suffix match works.
+                    let state_str = format!("{:?}", w.state).to_lowercase();
+                    let phase_str = format!("{:?}", w.phase).to_lowercase();
+                    (state_str, phase_str, w.summary.clone())
+                }
+                None => ("unknown".to_string(), "unknown".to_string(), None),
+            };
+            // Count tasks for this wf_id to show progress.
+            let (done, total) = s.repo.count_tasks(&wf_id).await.unwrap_or((0, 0));
+            Ok((200, json!({
+                "ok": true,
+                "wf_id": wf_id,
+                "status": state,
+                "phase": phase,
                 "summary": summary,
-                "note": "phases emit PhaseTransition events on the events pipe; tasks rows under each wf_id",
+                "tasks_done": done,
+                "tasks_total": total,
             })))
         })
     });

@@ -211,7 +211,7 @@ impl Repository {
             INSERT OR IGNORE INTO workflows
               (id, created_at, updated_at, state, phase, user_request,
                summary, final_status)
-            VALUES (?, ?, ?, 'DONE', 'chat', ?, ?, ?)
+            VALUES (?, ?, ?, 'ACTIVE', '1-requirement', ?, ?, ?)
             "#,
         )
         .bind(id)
@@ -236,6 +236,24 @@ impl Repository {
         sqlx::query("UPDATE workflows SET state = ?, phase = ?, updated_at = ? WHERE id = ?")
             .bind(state)
             .bind(phase)
+            .bind(now)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// v0.4.22 (event 000069): persist the final workflow
+    /// summary so /api/workflow/{wf_id}/status can return it
+    /// after the orchestrator's delivery phase finishes.
+    pub async fn set_workflow_summary(
+        &self,
+        id: &str,
+        summary: &str,
+    ) -> Result<(), StorageError> {
+        let now = chrono::Utc::now().timestamp();
+        sqlx::query("UPDATE workflows SET summary = ?, updated_at = ? WHERE id = ?")
+            .bind(summary)
             .bind(now)
             .bind(id)
             .execute(&self.pool)
