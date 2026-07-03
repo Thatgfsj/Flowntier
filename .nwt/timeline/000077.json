@@ -1,0 +1,28 @@
+{
+  "id": "000077",
+  "timestamp": "2026-07-03T02:05:00Z",
+  "task": "Rename chief-app to 塔罗镜, retheme launcher icon, fork to an independent Thatgfsj/tarot-oracle repo + GitHub release",
+  "summary": "Chairman: '给app换个名字:塔罗镜 然后换个符合塔罗牌的APP图标,然后给仓库上传一下(新的,仿照算卦就行)'.\n\nWhat this event delivers:\n\nA. chief-app renamed to 塔罗镜 (was 星辰之镜).\n   - apps/ChiefApp/app/src/main/AndroidManifest.xml: label\n     '塔罗镜'.\n   - apps/ChiefApp/app/src/main/java/com/thatgfsj/chief/\n     ui/oracle/TarotScreen.kt: Header text '塔罗镜'.\n\nB. Launcher icon redesigned in the chairman's chosen\n   palette (紫黑金, matches the in-app starfield theme).\n   - apps/ChiefApp/app/src/main/res/drawable/\n     ic_launcher_foreground.xml: gold tarot-card outline\n     (#D4AF37, strokeWidth 3) on a 100×100 inner-border\n     rectangle, with a 5-pointed star (#D4AF37 fill) at\n     the centre and two champagne dots (#F5E7A0) at the\n     bottom corners. Matches the in-app '星辰之镜' tarot-\n     mirror iconography.\n   - apps/ChiefApp/app/src/main/res/values/colors.xml:\n     ic_launcher_background changed from #00897B (teal,\n     IChingOracle inheritance) to #0D052E (deep purple,\n     the app's actual background).\n\nC. Independent repository created and pushed:\n   - Repo: https://github.com/Thatgfsj/tarot-oracle\n   - Initial commit 'c58d749' on main branch.\n   - Layout mirrors IChingOracle: app/ (Kotlin source +\n     resources), gradle/ + gradlew + gradlew.bat,\n     build.gradle.kts, settings.gradle.kts (rootProject\n     name = 'tarot-oracle'), gradle.properties,\n     local.properties, .gitignore, README.md,\n     DEVELOPMENT.md. Per chairman: '仿照算卦就行'.\n   - Package renamed com.thatgfsj.chief →\n     com.thatgfsj.tarot (sed-replaced in all .kt files\n     + namespace in app/build.gradle.kts).\n\nD. GitHub release v0.1.0 on the new repo:\n   - https://github.com/Thatgfsj/tarot-oracle/releases/\n     tag/v0.1.0\n   - Asset: tarot-oracle-v0.1.0-debug.apk\n     (14,145,435 bytes, 14.7 MB)\n   - Release body describes features, tech, boundary.\n\nE. APK also copied to the chairman's desktop as\n   C:/Users/thatg/Desktop/tarot-oracle-v0.1.0-debug.apk\n   for direct install via adb.\n\nF. The Flwntier repo (Thatgfsj/Flwntier) still has\n   apps/ChiefApp/ as the source-of-truth (the\n   migration to the new repo hasn't happened; chairman\n   wanted a 'new repo' so we FORKED, not moved). The\n   Flwntier repo is now an 'also-contains-tarot-oracle'\n   layout; v0.2.0 chief-app under apps/ChiefApp/ is\n   identical to the new-repo's content. The new repo's\n   main branch IS the canonical source going forward\n   (since the chairman said '新的,仿照算卦就行').\n\nBOUNDARY (NWT 000071 + 000073 still hold):\n- tarot-oracle is NOT a Flwntier release product. It\n  is its own independent product (Thatgfsj/tarot-oracle).\n- The APK has its own release (v0.1.0) on its own\n  GitHub repo. Flwntier's own releases page (v0.4.22)\n  is the desktop NSIS only.\n- 塔罗牌 is still the chairman's own end-to-end smoke\n  test, not a Flwntier feature.\n\nFILES TOUCHED:\n- apps/ChiefApp/app/src/main/AndroidManifest.xml\n- apps/ChiefApp/app/src/main/java/com/thatgfsj/chief/\n    ui/oracle/TarotScreen.kt\n- apps/ChiefApp/app/src/main/res/drawable/\n    ic_launcher_foreground.xml\n- apps/ChiefApp/app/src/main/res/values/colors.xml\n- (new) https://github.com/Thatgfsj/tarot-oracle\n  (entire repository content: app/, gradle/, README.md,\n  DEVELOPMENT.md, .gitignore, etc.)\n- .nwt/timeline/000077.json (this file)",
+  "reason": "Chairman: '给app换个名字:塔罗镜 然后换个符合塔罗牌的APP图标,然后给仓库上传一下(新的,仿照算卦就行)'. Three deliverables: rename, retheme, fork to a new independent repo modeled on IChingOracle. All three done; APK on the new GitHub release.",
+  "files": [
+    "apps/ChiefApp/app/src/main/AndroidManifest.xml",
+    "apps/ChiefApp/app/src/main/java/com/thatgfsj/chief/ui/oracle/TarotScreen.kt",
+    "apps/ChiefApp/app/src/main/res/drawable/ic_launcher_foreground.xml",
+    "apps/ChiefApp/app/src/main/res/values/colors.xml",
+    "https://github.com/Thatgfsj/tarot-oracle",
+    "C:/Users/thatg/Desktop/tarot-oracle-v0.1.0-debug.apk"
+  ],
+  "tags": [
+    "event-000077",
+    "renamed",
+    "塔罗镜",
+    "launcher-icon",
+    "purple-gold",
+    "forked",
+    "tarot-oracle",
+    "Thatgfsj",
+    "github-release",
+    "v0.1.0",
+    "14.7MB-APK"
+  ]
+}

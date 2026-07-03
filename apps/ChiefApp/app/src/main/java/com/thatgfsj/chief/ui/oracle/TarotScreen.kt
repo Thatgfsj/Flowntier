@@ -160,7 +160,7 @@ fun TarotScreen(viewModel: TarotViewModel = viewModel()) {
 private fun Header() {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Text(
-            text = "星辰之镜",
+            text = "塔罗镜",
             fontFamily = FontFamily.Serif,
             fontWeight = FontWeight.SemiBold,
             fontSize = 40.sp,

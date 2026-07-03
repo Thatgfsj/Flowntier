@@ -1,4 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="ic_launcher_background">#00897B</color>
+    <!--
+        v0.3.0 (event 000077): the chief app's launcher icon
+        background — the deep purple of the in-app starfield
+        theme. Pairs with drawable/ic_launcher_foreground
+        (gold tarot-card outline + 5-pointed star).
+    -->
+    <color name="ic_launcher_background">#0D052E</color>
 </resources>

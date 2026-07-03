@@ -1,29 +1,41 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-    v0.1.0 (event 000074): the chief app's launcher icon. A
-    tarot card outline with a 5-pointed star at its centre,
-    drawn at 108x108dp with the standard 18dp safe inset.
-    Same teal as iching-oracle for visual consistency.
+    v0.3.0 (event 000077): the chief app's launcher icon.
+    A tarot-card outline with a 5-pointed star at its centre,
+    rendered in champagne gold on the deep purple background
+    (matches the in-app theme: #040214 / #D4AF37).
+    Drawn at 108x108dp with the standard 18dp safe inset.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Card body -->
+    <!-- Card body outline (the back of the card) -->
     <path
-        android:strokeColor="#FFFFFF"
-        android:strokeWidth="2"
+        android:strokeColor="#D4AF37"
+        android:strokeWidth="3"
         android:fillColor="#00000000"
         android:pathData="M36,30 L72,30 L72,84 L36,84 Z" />
-    <!-- Inner border -->
+    <!-- Inner border (gold-on-purple) -->
     <path
-        android:strokeColor="#FFFFFF"
+        android:strokeColor="#F5E7A0"
         android:strokeWidth="1"
         android:fillColor="#00000000"
         android:pathData="M40,34 L68,34 L68,80 L40,80 Z" />
-    <!-- Star at the centre -->
+    <!-- 5-pointed star at the centre (the 78-card / 22-Major
+         tradition's universal marker) -->
     <path
-        android:fillColor="#FFFFFF"
+        android:fillColor="#D4AF37"
         android:pathData="M54,42 L56,52 L66,52 L58,58 L60,68 L54,62 L48,68 L50,58 L42,52 L52,52 Z" />
+    <!-- Bottom-left small dot — the chairman's chosen
+         position for "the 78 cards" tag (subtle; sits inside
+         the card) -->
+    <path
+        android:fillColor="#F5E7A0"
+        android:pathData="M44,76 m-1.5,0 a1.5,1.5 0 1,0 3,0 a1.5,1.5 0 1,0 -3,0" />
+    <!-- Bottom-right small dot — same -->
+    <path
+        android:fillColor="#F5E7A0"
+        android:pathData="M64,76 m-1.5,0 a1.5,1.5 0 1,0 3,0 a1.5,1.5 0 1,0 -3,0" />
 </vector>
