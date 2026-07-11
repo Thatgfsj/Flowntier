@@ -2,9 +2,24 @@
 
 > A Visual AI Software Company Powered by Multi-Agent Workflow
 
-**Version:** v0.1 RFC
+**Version:** v0.1 RFC (founding RFC; the project was renamed
+from `aco` to `flowntier` on 2026-06-24. v0.1 is the design
+that all subsequent versions inherited.)
 
-**Status:** Draft
+**Status:** Draft (superseded by docs/ARCHITECTURE.md v0.3 RFC
+and the v0.4.22 source-of-truth — see
+`crates/agent-core/README.md` for the as-built architecture)
+
+> **Note (v0.4.22 release cleanup, NWT 000079):** this file
+> is the **v0.1 founding RFC**. It documents the original
+> 8-phase workflow, the chief-as-single-source-of-truth
+> design, and the multi-agent role taxonomy. Subsequent
+> versions carried the design forward but the source-of-
+> truth for "the architecture as-built" now lives in
+> `crates/agent-core/README.md` and the per-crate READMEs.
+> This file is kept for historical reference — the spec
+> itself was implemented in v0.2.x and matured in v0.3
+> and v0.4.
 
 **Author:** Thatgfsj
 

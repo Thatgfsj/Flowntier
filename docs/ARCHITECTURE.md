@@ -2,8 +2,22 @@
 
 > End-to-end architecture of Flowntier (v0.3+)
 
-**Version:** v0.3 RFC
-**Status:** Active
+**Version:** v0.3 RFC (matches Flwntier v0.3 — 2026-06-15
+through v0.3.5; superseded in code by v0.4.0 "useable edition"
+which is in turn captured by `crates/agent-core/`,
+`apps/desktop/src-tauri/`, and the per-crate README files in
+`crates/*/README.md`)
+
+> **Note (v0.4.22 release cleanup, NWT 000079):** this file is
+> the **v0.3 RFC** — a frozen snapshot of the architecture
+> at the time of the All-Rust rewrite. v0.4.0+ kept the
+> structure intact and added capabilities / repeat-failure
+> abort / NetworkPolicy on top. For the as-built v0.4.22
+> architecture, read the per-crate READMEs and
+> `crates/agent-core/README.md` instead. The v0.4.22 RFC
+> itself is on the TODO list (event 000080 candidate).
+
+**Status:** Active (frozen at v0.3, kept for historical reference)
 **Author:** Thatgfsj
 **Related:** [TECH_STACK.md](./TECH_STACK.md) · [AGENT_PROTOCOL.md](./AGENT_PROTOCOL.md)
 **Last updated:** 2026-06-22

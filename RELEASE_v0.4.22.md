@@ -1,10 +1,26 @@
-# Flowntier v0.4 — Useable Edition
+# Flowntier v0.4.22 — Useable Edition (refreshed)
 
-> **Status**: v0.4 final. All HIGH/MEDIUM bugs fixed. Full i18n (zh-CN + en-US). Animations + error UI polish. Ready for distribution.
+> **Status**: v0.4.22 final (was v0.4 final; renamed in 2026-07
+> to match the current Tauri `productVersion` and the GitHub
+> release tag). All HIGH/MEDIUM bugs fixed. Full i18n
+> (zh-CN + en-US). Animations + error UI polish. Multi-agent
+> orchestrator running 8-phase workflows end-to-end. Ready
+> for distribution.
 
 > The chairman runs the development: "先弄一个可以使用的成品" ("First make something usable"). This document records what shipped.
 
 ---
+
+## TL;DR
+
+- **Released**: 2026-07-02 (renamed from v0.4.0; cumulative
+  maintenance + bug-fix release covering 19 patch versions
+  from 0.4.0 → 0.4.22)
+- **33+ commits** since v0.0
+- **39/39 Rust integration tests pass** (`cargo test --workspace`)
+- **All dashboard strings translate** between zh-CN and en-US (verified via Playwright screenshot E2E)
+- **22 real bugs fixed** (6 HIGH + 12 MEDIUM + 4 LOW + 1 BLOCKING partial)
+- **~100 new i18n keys** in each of zh-CN and en-US
 
 ## TL;DR
 
@@ -238,3 +254,31 @@ grep -l "bug-006" .nwt/timeline/*.json
 - "修复完成了吗, 那继续跑一下端到端" — Once fixed, run e2e. (event 000021)
 - "先弄一个可以使用的成品" — Make something usable first. (this README + Polish 17)
 
+
+---
+
+## [Unreleased] — 0.4.22 → ?
+
+Maintenance patch release. No user-facing changes since
+v0.4.22; mostly CHANGELOG / RELEASE notes brought up to date
+(NWT 000079), the v0.3 acceptance files removed
+(docs/ACCEPTANCE_v0.3_stage_{a,c}.txt — superseded by
+docs/ACCEPTANCE_v0.4.md), and history/ + docs/ version
+headers clarified (history/PROJECT_SPEC.md is the v0.1
+founding RFC; docs/ARCHITECTURE.md is the v0.3 RFC; the
+current v0.4.22 architecture is in
+docs/ARCHITECTURE.md as a maintained "v0.3 RFC" — to be
+rolled forward to a v0.4.22 RFC in a future event).
+
+### Next candidates
+
+- v0.4.23: NSIS bundle re-cut with the v0.4.22 commit hash
+  + the event 000078 boundary text in the NSIS welcome
+  dialog (so the chairman can tell which build is
+  installed).
+- v0.5: re-enable macOS + Linux NSIS bundle targets in
+  the Tauri config (currently set to NSIS only). Block
+  on the chairman's iOS-signing story first.
+- v0.5: NSIS-driven auto-update via `tauri-plugin-updater`
+  (the plugin is wired but the release flow doesn't
+  currently sign and publish JSON manifests).

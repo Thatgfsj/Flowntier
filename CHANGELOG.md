@@ -15,6 +15,107 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the old `ACO` / `Agent Company OS` brand leaks back in outside of
   `history/`.
 
+## [0.4.22] — 2026-07-02
+
+Cumulative maintenance and bug-fix release that covers every
+change made to the Flwntier master repo between v0.4.0 (the
+"useable edition" milestone) and v0.4.22 (the current
+release). The product line is **Flwntier desktop only** — the
+Android "塔罗镜" v0.3.0 lives in a separate repo
+(`Thatgfsj/tarot-oracle`) and has its own release line per
+NWT 000077 / 000078.
+
+### Added
+* **Multi-agent orchestrator** (NWT 000068): 8-phase workflow
+  (requirement → plan → plan-review → dispatch → develop →
+  final-review → repair → delivery) implementing
+  `history/PROJECT_SPEC.md` lines 60-280. The chief agent
+  is the single source of truth; critic-a + critic-b run
+  in parallel for plan and final reviews; workers run in
+  parallel for development; each agent run writes one row
+  to the `tasks` table so the dashboard's "任务列表"
+  shows real per-agent progress (was a single-row stub
+  before).
+* **PlanDoc segmentation** (NWT 000069): the Plan phase now
+  runs in 3 chief calls (Round A: summary + architecture,
+  Round B: Backend/API/Database tasks, Round C:
+  Frontend/Testing/Documentation tasks) with `merge()` for
+  id-based dedup. Solves the 78-card-tarot timeout where
+  the chief ran out of token budget streaming the full
+  PlanDoc in one turn.
+* **Async workflow kickoff + status poll** (NWT 000069):
+  `POST /api/run_workflow` returns `wf_id` in ~50ms (was
+  30+ min blocking); orchestrator runs in a `tokio::spawn`
+  background task; clients poll `GET /api/workflow/{wf_id}/status`
+  for the current phase + tasks_done/tasks_total counts.
+* **PhaseTransition events** (NWT 000068) broadcast on the
+  events pipe so the UI's PhaseTimeline animates as the
+  workflow progresses.
+* **Foreign-key safety** (NWT 000064): `ensure_workflow_row`
+  in storage makes chat-derived `wf_chat_*` rows idempotent
+  so the chief's `INSERT INTO tasks` doesn't get rolled back
+  by the FK to `workflows.id`. Solves the chairman's
+  "仪表盘永远 0/0 完成" complaint.
+* **Dispatch /api/tasks?wf_id=…** endpoint (NWT 000064) so
+  the dashboard can list per-agent rows under a given
+  workflow.
+* **App-side FileTree + ErrorBadge** (NWT 000066): the
+  desktop app now has a left-side file tree (5s polling
+  against the new `/api/workspace/tree` endpoint) and a
+  TopBar red-dot badge that surfaces `GET /api/errors/recent`
+  transient errors.
+* **Workdir runtime swap** (NWT 000066): `Arc<RwLock<Workspace>>`
+  on the runtime side + `POST /api/workspace/set` called by
+  the Tauri shell's `set_workdir_with_nwt` so the runtime's
+  chief filesystem context actually moves when the
+  chairman changes the workdir in the desktop UI.
+* **NSIS patch fix** (NWT 000066 / 000067): the previous
+  `patch-nsis.cjs` taskkill belt-and-braces patch used
+  `content.indexOf('{', idx)` which matched a brace in a
+  header macro and inserted the block at the top of the
+  file, breaking the .nsi syntax. Fixed by inserting
+  immediately after `Function .onInit\n` instead of hunting
+  for a brace that doesn't exist (NSIS functions are
+  brace-less).
+* **Apollo 8-stop** during the v0.4.0 → v0.4.22 work was
+  needed because of the launch today, but no code was
+  burned at the pad.
+
+### Changed
+* **tarot-oracle has been forked out** of the Flwntier
+  master repo (NWT 000071 / 000073 / 000077 / 000078).
+  The Android chief client code that lived at
+  `apps/ChiefApp/` in v0.4.0 is gone; the same code is
+  now at `Thatgfsj/tarot-oracle` under its own
+  `v0.1.0` release. The Flwntier master only ships the
+  desktop NSIS + the html-frontend cross-platform
+  fast-path.
+* **CHANGELOG and RELEASE notes brought up to date** with
+  this entry. The previous `RELEASE_v0.4.md` is now
+  `RELEASE_v0.4.22.md` (see the file rename in this
+  release's commit log).
+* **`docs/ACCEPTANCE_v0.3_stage_a.txt` /
+  `docs/ACCEPTANCE_v0.3_stage_c.txt` removed** — those
+  are the v0.3 acceptance runs from before the
+  All-Rust rewrite. The current authoritative acceptance
+  is `docs/ACCEPTANCE_v0.4.md`.
+
+### Fixed
+* `patch-nsis.cjs` (the previous broken taskkill insertion
+  that put the block at the very top of the .nsi).
+* `storage` foreign-key constraint blocking the chat
+  workflow's `INSERT INTO tasks` (event 000064).
+* `dispatcher` `?query` not matching (event 000064).
+* `run_task` had no timeout (event 000064).
+* `make_run_workflow` returned 30+ min for large requests
+  (event 000064 → 000069 fix).
+* Runtime `state.emit_phase` update was silently dropped
+  because `update_workflow_state` was sync and emit_phase
+  was sync (event 000069).
+* `ensure_workflow_row` clobbered phase updates with
+  'DONE'/'chat' (event 000069).
+* `no_chairman-yet` no_chairman-yet (event 000068).
+
 ## [0.4.0] — 2026-06-25
 
 The first release **aimed at real users**. v0.3 was a working v0.3; v0.4

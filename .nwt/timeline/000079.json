@@ -1,0 +1,26 @@
+{
+  "id": "000079",
+  "timestamp": "2026-07-11T16:00:00Z",
+  "task": "Repository maintenance — bring CHANGELOG / RELEASE / acceptance / docs version headers up to date with the v0.4.22 release",
+  "summary": "Chairman: '根据检查的问题继续维护仓库'. Five issues surfaced from a state-of-the-repo audit:\n\n1. CHANGELOG.md topped out at v0.4.0 (2026-06-25) but the\n   product line is now at v0.4.22 (2026-07-02). 19 patch\n   versions (0.4.1 .. 0.4.22) had no changelog entries —\n   confusing for the chairman (or anyone reviewing the\n   repo) who reads the changelog and sees v0.4.0 as the\n   current release. Wrote a [0.4.22] section that\n   summarises the cumulative Added / Changed / Fixed\n   surface across all 19 patch versions, drawing from\n   the .nwt/timeline/000060 .. 000078 events + the\n   event 000068 / 000069 / 000075 / 000077 / 000078\n   diffs.\n\n2. RELEASE_v0.4.md (the v0.4 milestone document) said\n   'v0.4 final. Ready for distribution.' That was true\n   when it was written, but the v0.4.22 cumulative\n   release is the current. git mv RELEASE_v0.4.md →\n   RELEASE_v0.4.22.md and updated the top status block\n   to match the Tauri productVersion. Added a fresh\n   [Unreleased] section at the bottom listing the next\n   candidates: v0.4.23 (re-cut NSIS with the v0.4.22\n   commit hash in the welcome dialog), v0.5 (re-enable\n   macOS + Linux bundle targets, NSIS-driven auto-update\n   via tauri-plugin-updater).\n\n3. docs/ACCEPTANCE_v0.3_stage_{a,c}.txt were the v0.3\n   acceptance runs. v0.3 is now superseded by v0.4.22\n   (and the authoritative acceptance is\n   docs/ACCEPTANCE_v0.4.md). git rm'd both files; the\n   600-line delta is gone from main.\n\n4. docs/ARCHITECTURE.md was tagged 'v0.3 RFC' but was\n   still in main as if it were current architecture\n   (the per-crate READMEs are the real v0.4.22\n   architecture reference, not this file). Added a top\n   block noting that this file is a frozen v0.3 snapshot\n   and pointing readers at the per-crate READMEs for\n   the as-built v0.4.22 architecture. Marked 'Active\n   (frozen at v0.3, kept for historical reference)'.\n   history/PROJECT_SPEC.md was tagged 'v0.1 RFC' (the\n   founding design for the project) but was sitting in\n   main as if it were current spec. Same treatment:\n   added a 'founding RFC; superseded by docs/ARCHITECTURE\n   v0.3 + per-crate READMEs' block at the top. The v0.4.22\n   RFC itself is a candidate event 000080 — out of\n   scope here.\n\n5. .nwt/timeline/000061.json is missing (the timeline\n   goes 000060 → 000062). The chairman did not select\n   '补 NWT 000061' from the menu, so this is left\n   for a future event. The gap likely corresponds to\n   the brief 2026-07-02 pre-tarot-incident interval\n   where multiple smaller fixes were absorbed into\n   the 000060 / 000062 events without a dedicated entry.\n\n6. .gitignore was already covering `.gradle/` (item 6\n   on the menu). No action needed.\n\nNET: four docs/CHANGELOG/RELEASE changes + two file\nmoves (RELEASE rename, history/PROJECT_SPEC.md /\ndocs/ARCHITECTURE.md version headers) + two docs\nremovals (ACCEPTANCE_v0.3_stage_a.txt / stage_c.txt).\nNo code touched, no runtime touched, no APK rebuilt.\nThis is a pure-repo-maintenance pass.\n\nFILES TOUCHED:\n- CHANGELOG.md\n- RELEASE_v0.4.md → RELEASE_v0.4.22.md (git mv + content\n  edits)\n- docs/ACCEPTANCE_v0.3_stage_a.txt (deleted)\n- docs/ACCEPTANCE_v0.3_stage_c.txt (deleted)\n- docs/ARCHITECTURE.md (header block added)\n- history/PROJECT_SPEC.md (header block added)\n- .nwt/timeline/000079.json (this file)",
+  "reason": "Chairman: '根据检查的问题继续维护仓库' (continue maintaining the repo per the issues found). Five maintenance items addressed: catch CHANGELOG up to 0.4.22, rename RELEASE_v0.4.md to v0.4.22, drop v0.3 acceptance files, clarify v0.3 RFC and v0.1 RFC provenance. Item 5 (000061 NWT gap) and item 6 (.gitignore OK) left for later.",
+  "files": [
+    "CHANGELOG.md",
+    "RELEASE_v0.4.md",
+    "RELEASE_v0.4.22.md",
+    "docs/ACCEPTANCE_v0.3_stage_a.txt",
+    "docs/ACCEPTANCE_v0.3_stage_c.txt",
+    "docs/ARCHITECTURE.md",
+    "history/PROJECT_SPEC.md"
+  ],
+  "tags": [
+    "event-000079",
+    "maintenance",
+    "changelog",
+    "release-notes",
+    "acceptance-cleanup",
+    "docs-version-headers",
+    "history-founding-rfc",
+    "no-code-changes"
+  ]
+}
