@@ -1,0 +1,19 @@
+{
+  "id": "000078",
+  "timestamp": "2026-07-03T02:15:00Z",
+  "task": "Remove apps/ChiefApp/ from the Flwntier master repo — 塔罗镜 is a separate product, not a Flwntier sub-project",
+  "summary": "Chairman correction: '塔罗牌不在主仓库吧'. I had failed to honour my own boundary.\n\nWhat was wrong:\n* Event 000077 (v0.3.0 commit 627e1cb) had renamed\n  apps/ChiefApp/ files to '塔罗镜' and pushed a fresh\n  launcher icon, but kept the entire apps/ChiefApp/\n  directory (106 tracked files including the 78 image\n  set + assets/cards.json + Kotlin source) in the\n  Flwntier master repo. Per NWT 000071 and 000073:\n  - Flwntier releases publish only Flwntier products\n  - 塔罗牌 is the chairman's own smoke test / product\n  - 塔罗镜 is its own independent product\n    (Thatgfsj/tarot-oracle) on its own repo, with its\n    own release page\n\nSo apps/ChiefApp/ should NEVER have been in the\nFlwntier master in the first place. The earlier\n'v0.3.0 塔罗镜' commit (627e1cb) was the right code\ncontent but the wrong destination. This event fixes\nthe destination: drop the entire 106-file subtree\nfrom apps/ChiefApp/.\n\nWhat this event does:\n* `git rm -r apps/ChiefApp/` — remove all 106 tracked\n  files (Kotlin source, gradle scripts, assets/cards.json,\n  78 drawable-nodpi/*.jpg, manifest xml, themes).\n* Subsequent `git commit -m 'event 000078: ...'`.\n* The corresponding source-of-truth lives at\n  https://github.com/Thatgfsj/tarot-oracle (the new\n  repo I created in event 000077). The 塔罗镜 APK\n  is built from that repo, not from Flwntier.\n\nWhat is NOT touched:\n* Flwntier's own source (apps/desktop, apps/html-frontend)\n  is unchanged.\n* Flwntier releases (v0.4.22 NSIS) are unaffected.\n* The .nwt/timeline/ files for 000068-000077 stay — they\n  document the orchestrator work and the chief-app\n  history. NWT 000078 supersedes event 000077's\n  'the new repo is a copy' framing: 000077 should have\n  removed apps/ChiefApp/ from the start; the copy\n  framing was the wrong decision.\n\nBOUNDARY (NWT 000071 + 000073 + this 000078 all hold):\n* Flwntier master is a desktop product (NSIS, plus\n  html-frontend cross-platform fast-path). No Android.\n* 塔罗镜 is its own thing at Thatgfsj/tarot-oracle.\n  The chairman can pull that repo to fix, build, or\n  extend the Android app. Flwntier is hands-off.\n* 塔罗牌 is still the chairman's end-to-end smoke\n  test, not a Flwntier feature.\n\nFOLLOW-UP WORK:\n* NWT 000074 / 000075 / 000076 still describe the\n  chief-app v0.1.0 → v0.2.1 evolution, but the actual\n  code under apps/ChiefApp/ no longer exists in\n  this repo. Those NWT files are historical — they\n  don't claim the code lives here. The NWT 000077\n  followup (a 'new repo' should be 'the' repo, not a\n  copy) is now resolved by this event.\n\nFILES TOUCHED:\n* apps/ChiefApp/  (DELETED, 106 files)\n* .nwt/timeline/000078.json  (this file)\n\nADDITIONAL NWT FIX:\n* NWT 000077 description said 'The new repo's main\n  branch IS the canonical source going forward (since\n  the chairman said 新的)'. That was correct. But the\n  *Flwntier* repo's chief-app subtree was the duplicate\n  that should have been deleted at the same time. This\n  event closes that gap.",
+  "reason": "Chairman boundary correction. I had committed chief-app v0.3.0 changes to the Flwntier master repo (commit 627e1cb) while ALSO publishing the same code as a new Thatgfsj/tarot-oracle repo (event 000077). Per NWT 000071, the Flwntier master releases publish only Flwntier products — the chief-app (now 塔罗镜) doesn't belong here. Removing it now.",
+  "files": [
+    "apps/ChiefApp/",
+    ".nwt/timeline/000078.json"
+  ],
+  "tags": [
+    "event-000078",
+    "boundary",
+    "remove-chief-app",
+    "tarot-not-in-master",
+    "independent-product",
+    "Thatgfsj/tarot-oracle"
+  ]
+}
