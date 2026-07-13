@@ -8,12 +8,21 @@
 use std::path::PathBuf;
 
 use pipe_server::{
-    register_all, run_http_bridge, run_quota_scheduler, Dispatcher, Server, ServerConfig,
-    ServerState,
+    logs, register_all, run_http_bridge, run_quota_scheduler, Dispatcher, Server,
+    ServerConfig, ServerState,
 };
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 4)]
 async fn main() -> std::io::Result<()> {
+    // v0.4.22 (event 000080): set up the global tracing
+    // subscriber FIRST so all the `tracing::info!` /
+    // `tracing::warn!` calls below actually emit to stderr
+    // (and to ~/Desktop/Flwntier.log when FLWNTIER_LOG_FILE
+    // is set, which is the default). Per chairman: "日志
+    // 暂时放桌面" — so the default is the desktop on
+    // Windows. FLWNTIER_LOG_FILE=0 disables file logging.
+    let _log_file = logs::init();
+
     let mut args = std::env::args().skip(1);
     let mut workspace = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let mut data_dir: Option<PathBuf> = None;

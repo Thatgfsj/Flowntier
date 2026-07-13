@@ -1521,6 +1521,35 @@ async fn get_workflow_status(body: serde_json::Value) -> Result<serde_json::Valu
     pipe_request("GET", &path, None).await
 }
 
+/// v0.4.22 (event 000080): dev-mode log endpoints.
+/// Wraps the runtime's `GET /api/logs/get` so the Settings
+/// panel can show a "View log" / "Clear log" pair of buttons.
+/// The runtime gates the routes behind `FLWNTIER_LOG_API=1`;
+/// this command just surfaces the gate to the user.
+#[tauri::command]
+async fn get_log_tail(body: serde_json::Value) -> Result<serde_json::Value, String> {
+    let tail = body.get("tail").and_then(|v| v.as_u64()).unwrap_or(200);
+    let path = format!("/api/logs/get?tail={tail}");
+    pipe_request("GET", &path, None).await
+}
+
+#[tauri::command]
+async fn clear_log_file() -> Result<serde_json::Value, String> {
+    pipe_request("POST", "/api/logs/clear", None).await
+}
+
+/// v0.4.22 (event 000080): companion command that tells the
+/// UI where the log file is, so the Settings panel can show
+/// "open log file location" / show the path. Reads the env var
+/// path on the runtime side via the route we just added
+/// (the route returns `log_file` in its response, so this
+/// command is a thin pass-through that just calls /api/logs/get
+/// with tail=0 and surfaces the `log_file` field).
+#[tauri::command]
+async fn get_log_file_path() -> Result<serde_json::Value, String> {
+    pipe_request("GET", "/api/logs/get?tail=0", None).await
+}
+
 /// Convert a `SystemTime` to an ISO 8601 UTC string with second
 /// precision (e.g. "2026-06-27T12:34:56Z"). Howard Hinnant's
 /// `days_from_civil` algorithm — no chrono dep required.
@@ -1671,6 +1700,7 @@ pub fn run() {
             get_diagnostics,
             get_runtime_workspace, get_workspace_tree, get_recent_errors,
             get_workflow_status,
+            get_log_tail, clear_log_file, get_log_file_path,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
