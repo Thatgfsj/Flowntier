@@ -121,14 +121,27 @@ impl Server {
 async fn rpc_listener(path: String, dispatcher: Arc<Dispatcher>) -> std::io::Result<()> {
     use tokio::net::windows::named_pipe::ServerOptions;
 
+    // v0.4.22 (event 000083): The first worker creates the
+    // pipe (first_pipe_instance=true). The pipe path stays
+    // alive as long as at least one worker instance is open.
+    // The key bug was that all workers used
+    // first_pipe_instance(false), and after the initial
+    // instance was dropped (client disconnect), there was a
+    // brief window where no instance existed on the path —
+    // the next client got ERROR_FILE_NOT_FOUND. Setting
+    // first_pipe_instance(true) on the first worker ensures
+    // the pipe always has at least one "first" instance
+    // alive, even when all serve_rpc_connection calls have
+    // returned.
     let mut handles = Vec::with_capacity(RPC_WORKERS);
-    for _ in 0..RPC_WORKERS {
+    for i in 0..RPC_WORKERS {
         let d = dispatcher.clone();
         let p = path.clone();
         let h = tokio::spawn(async move {
             loop {
+                let first = i == 0;
                 let server = match ServerOptions::new()
-                    .first_pipe_instance(false)
+                    .first_pipe_instance(first)
                     .create(&p)
                 {
                     Ok(s) => s,
@@ -150,6 +163,7 @@ async fn rpc_listener(path: String, dispatcher: Arc<Dispatcher>) -> std::io::Res
         });
         handles.push(h);
     }
+    tracing::info!(rpc_workers = RPC_WORKERS, "rpc_listener started with permanent first instance");
     futures::future::join_all(handles).await;
     Ok(())
 }
@@ -159,14 +173,15 @@ async fn events_listener(path: String, tx: broadcast::Sender<AgentEvent>) -> std
     use tokio::net::windows::named_pipe::ServerOptions;
 
     let mut handles = Vec::with_capacity(EVENTS_WORKERS);
-    for _ in 0..EVENTS_WORKERS {
+    for i in 0..EVENTS_WORKERS {
         let txc = tx.clone();
         let p = path.clone();
         let h = tokio::spawn(async move {
             let mut rx = txc.subscribe();
             loop {
+                let first = i == 0;
                 let mut server = match ServerOptions::new()
-                    .first_pipe_instance(false)
+                    .first_pipe_instance(first)
                     .create(&p)
                 {
                     Ok(s) => s,
