@@ -102,10 +102,21 @@ impl Agent {
                 drive_loop(tx.clone(), agent_id, display, task, provider, tools, workspace, cfg, ctx_mgr, cancel)
                     .await
             {
+                // v0.4.22 (event 000081): include the error
+                // message in the summary so the chairman sees
+                // the failure cause rather than an empty
+                // response. Previously we just emitted
+                // `summary: None` here, which downstream caused
+                // `summary_len: 0` in the runtime log and an
+                // empty Status field in the UI. Surfacing the
+                // error here makes provider failures (401 bad
+                // key, 429 rate limit, malformed stream, etc.)
+                // visible to the chairman.
+                let err_msg = format!("{e}");
                 let _ = tx.send(AgentEvent::Done {
                     wf_id: String::new(),
                     status: format!("FAILED: {e}"),
-                    summary: None,
+                    summary: Some(err_msg),
                 });
             }
         });

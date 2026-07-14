@@ -540,13 +540,38 @@ impl Orchestrator {
         }).await;
         self.persist_task_row(&delivery, "8-delivery").await;
 
+        // v0.4.22 (event 000081): if the chief's LLM returned
+        // an empty summary AND an empty text, fall back to a
+        // synthetic one-line summary so the chairman sees
+        // something useful in the UI / status endpoint / log.
+        // Per the chairman's manual test (event 000080 log):
+        // three workflows all returned summary_len: 0 —
+        // the LLM was timing out or returning empty bodies
+        // (see NWT 000081 for the full bug writeup).
+        let effective_summary = match delivery.summary.as_deref() {
+            Some(s) if !s.is_empty() => s.to_string(),
+            _ => match delivery.text.as_str() {
+                t if !t.is_empty() => t.to_string(),
+                _ => format!(
+                    "chief phase 8 returned empty summary; \
+                     workflow ran 8 phases ({} tasks planned, \
+                     2 critic reviews, {} worker runs) but \
+                     the LLM didn't produce text. Likely a \
+                     provider timeout — check the runtime log \
+                     on the desktop for details.",
+                    plan.tasks.len(),
+                    plan.tasks.len(),
+                ),
+            },
+        };
+
         // Final Done event so subscribers' useAgentStream sees
         // the terminal state even if they were only listening to
         // orchestrator-emitted events.
         let _ = self.events.send(AgentEvent::Done {
             wf_id: self.wf_id.clone(),
             status: "DONE".into(),
-            summary: delivery.summary.clone(),
+            summary: Some(effective_summary.clone()),
         });
         // v0.4.22 (event 000069): mark the workflow as DONE in
         // the workflows row so /api/workflow/{wf_id}/status
@@ -557,14 +582,22 @@ impl Orchestrator {
         );
         // Also persist the final summary so status endpoint
         // returns it.
-        if let Some(s) = &delivery.summary {
-            let _ = self
-                .state
-                .repo
-                .set_workflow_summary(&self.wf_id, s);
+        if let Err(e) = self
+            .state
+            .repo
+            .set_workflow_summary(&self.wf_id, &effective_summary)
+            .await
+        {
+            warn!(
+                target: "orchestrator",
+                error = %e,
+                wf_id = %self.wf_id,
+                "v0.4.22 (event 000081): set_workflow_summary failed; \
+                 status endpoint will show the placeholder"
+            );
         }
 
-        delivery.summary.unwrap_or(delivery.text)
+        effective_summary
     }
 
     /// Persist a single agent run as a row in the `tasks` table.
