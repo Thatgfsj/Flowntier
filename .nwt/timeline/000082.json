@@ -1,0 +1,11 @@
+{
+  "id": "000082",
+  "timestamp": "2026-07-15T01:15:00Z",
+  "task": "orchestrator per-phase progress log — emit phase_started + phase_completed with elapsed_ms on every phase transition, plus agent_run_started + agent_run_finished per-agent run",
+  "summary": "Chairman: '添加 orchestrator 进度日志 (每 phase)' + '现在什么情况' + '我需要的是一个能多方面思考完成任务的工具'.\n\nTwo pieces:\n\n1. emit_phase (orchestrator.rs:218):\n   - On the FIRST phase: log 'workflow started' with wf_id + first phase name\n   - On EVERY subsequent phase: log 'phase completed' with from_phase + to_phase + phase_runtime_ms\n   - phase_started_at + current_phase tracked on Orchestrator struct to compute elapsed.\n\n2. run_agent (orchestrator.rs:324):\n   - BEFORE: log 'agent run starting' with wf_id + role + role_display\n   - AFTER Done event: log 'agent run finished' with wf_id + status + text_len\n   - These are INFO-level so they always appear in the log file (the default level is INFO).\n\nChairman asked for these because:\n- The old log showed only 'phase transition' DEBUG lines (re-decode of secrets) + the final 'workflow finished' line\n- No visibility into how long each phase took or which agent was running\n- This made it impossible to debug stalls (the mimo:mimo-2.5-pro 401 issue that caused summary_len:0 earlier)\n\nFILES: crates/pipe-server/src/orchestrator.rs (+102 lines, -2 deletions)\nCOMMIT: 81a7dcd",
+  "reason": "Chairman: '添加 orchestrator 进度日志 (每 phase)' — needed to diagnose stalls in the 8-phase workflow. Two INFO-level log additions: phase_started/phase_finished with elapsed_ms, agent run started/finished with role+status.",
+  "files": [
+    "crates/pipe-server/src/orchestrator.rs"
+  ],
+  "tags": ["event-000082", "orchestrator", "progress-log", "phase-timing", "agent-run-log"]
+}
