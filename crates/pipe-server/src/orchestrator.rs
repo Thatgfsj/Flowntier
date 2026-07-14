@@ -338,7 +338,7 @@ impl Orchestrator {
             wf_id = %self.wf_id,
             role = %role_id,
             role_display = %role_display,
-            "v0.4.22 (event 000082): agent run starting"
+            "[TRACE] agent run starting (event 000082)"
         );
 
         // Resolve provider + model from role_overrides. If the
@@ -448,6 +448,7 @@ impl Orchestrator {
     /// Run the full 8-phase workflow. Returns the final summary
     /// string the chairman sees.
     pub async fn run(mut self) -> String {
+        info!(target: "orchestrator", wf_id = %self.wf_id, user_request_len = self.user_request.len(), "[TRACE] Orchestrator::run() ENTERED — starting 8-phase workflow");
         let mut phase_idx = 0;
         self.emit_phase(None, PHASES[phase_idx]).await;
 

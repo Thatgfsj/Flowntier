@@ -101,8 +101,9 @@ impl Dispatcher {
     ///      under the same key.
     pub async fn dispatch(&self, req_id: u64, req: RpcRequest) -> RpcResponse {
         let method = req.method.to_uppercase();
-        let path = req.params.path;
+        let path = req.params.path.clone();
         let mut body = req.params.body.unwrap_or(Value::Null);
+        tracing::info!(target: "dispatcher", req_id = req_id, method = %method, path = %path, "[TRACE] dispatch: entering");
 
         // v0.4.21 (event 000064 follow-up): strip `?query` from
         // the path so handlers registered on the bare path
@@ -149,11 +150,19 @@ impl Dispatcher {
 
         // 1. Exact match.
         if let Some(handler) = self.handlers.get(&(method.clone(), path.clone())) {
+            tracing::info!(target: "dispatcher", req_id = req_id, method = %method, path = %path, "[TRACE] dispatch: EXACT MATCH found, calling handler");
             return match handler(body).await {
-                Ok((status, b)) => RpcResponse::status(req_id, status, b),
-                Err(e) => RpcResponse::err(req_id, codes::INTERNAL, e),
+                Ok((status, b)) => {
+                    tracing::info!(target: "dispatcher", req_id = req_id, status = status, "[TRACE] dispatch: handler returned OK");
+                    RpcResponse::status(req_id, status, b)
+                }
+                Err(e) => {
+                    tracing::error!(target: "dispatcher", req_id = req_id, error = %e, "[TRACE] dispatch: handler returned Err");
+                    RpcResponse::err(req_id, codes::INTERNAL, e)
+                }
             };
         }
+        tracing::debug!(target: "dispatcher", req_id = req_id, method = %method, path = %path, "[TRACE] dispatch: no exact match, trying pattern match");
 
         // 2. Pattern match.
         let incoming_segments: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
@@ -183,6 +192,7 @@ impl Dispatcher {
                 }
             }
             if matched {
+                tracing::info!(target: "dispatcher", req_id = req_id, method = %method, path = %registered_path, "[TRACE] dispatch: PATTERN MATCH found, calling handler");
                 // Inject placeholders into the body so handlers
                 // can access them via `body.get("name")` etc.
                 if let Value::Object(ref mut map) = body {
@@ -197,12 +207,19 @@ impl Dispatcher {
                     body = Value::Object(map);
                 }
                 return match handler(body).await {
-                    Ok((status, b)) => RpcResponse::status(req_id, status, b),
-                    Err(e) => RpcResponse::err(req_id, codes::INTERNAL, e),
+                    Ok((status, b)) => {
+                        tracing::info!(target: "dispatcher", req_id = req_id, status = status, "[TRACE] dispatch: pattern handler returned OK");
+                        RpcResponse::status(req_id, status, b)
+                    }
+                    Err(e) => {
+                        tracing::error!(target: "dispatcher", req_id = req_id, error = %e, "[TRACE] dispatch: pattern handler returned Err");
+                        RpcResponse::err(req_id, codes::INTERNAL, e)
+                    }
                 };
             }
         }
 
+        tracing::warn!(target: "dispatcher", req_id = req_id, method = %method, path = %path, "[TRACE] dispatch: NO HANDLER FOUND — returning NOT_FOUND");
         RpcResponse::err(
             req_id,
             codes::NOT_FOUND,

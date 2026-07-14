@@ -45,9 +45,14 @@ async fn pipe_request(
     path: &str,
     body: Option<serde_json::Value>,
 ) -> Result<serde_json::Value, String> {
+    tracing::info!(target: "tauri_ipc", method = %method, path = %path, "[TRACE] pipe_request: opening pipe connection");
     let mut conn = ClientOptions::new()
         .open(RPC_PIPE)
-        .map_err(|e| format!("pipe open {RPC_PIPE}: {e}"))?;
+        .map_err(|e| {
+            tracing::error!(target: "tauri_ipc", error = %e, "[TRACE] pipe_request: pipe open FAILED");
+            format!("pipe open {RPC_PIPE}: {e}")
+        })?;
+    tracing::debug!(target: "tauri_ipc", "[TRACE] pipe_request: pipe opened successfully");
 
     let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
     let req = serde_json::json!({
@@ -58,16 +63,24 @@ async fn pipe_request(
     });
     let mut line = serde_json::to_vec(&req).map_err(|e| e.to_string())?;
     line.push(b'\n');
+    tracing::info!(target: "tauri_ipc", id = id, method = %method, path = %path, "[TRACE] pipe_request: writing request to pipe");
     conn.write_all(&line)
         .await
-        .map_err(|e| format!("pipe write: {e}"))?;
+        .map_err(|e| {
+            tracing::error!(target: "tauri_ipc", error = %e, "[TRACE] pipe_request: pipe write FAILED");
+            format!("pipe write: {e}")
+        })?;
+    tracing::debug!(target: "tauri_ipc", id = id, "[TRACE] pipe_request: request written, reading response");
 
     let mut buf = Vec::with_capacity(4096);
     let mut byte = [0u8; 1];
     loop {
         conn.read_exact(&mut byte)
             .await
-            .map_err(|e| format!("pipe read: {e}"))?;
+            .map_err(|e| {
+                tracing::error!(target: "tauri_ipc", error = %e, id = id, "[TRACE] pipe_request: pipe read FAILED");
+                format!("pipe read: {e}")
+            })?;
         if byte[0] == b'\n' {
             break;
         }
@@ -76,16 +89,15 @@ async fn pipe_request(
         }
         buf.push(byte[0]);
     }
+    tracing::debug!(target: "tauri_ipc", id = id, resp_len = buf.len(), "[TRACE] pipe_request: response received, parsing JSON");
 
     let resp: serde_json::Value =
         serde_json::from_slice(&buf).map_err(|e| format!("pipe bad json: {e}"))?;
 
     if let Some(err) = resp.get("error") {
-        return Err(err
-            .get("message")
-            .and_then(|m| m.as_str())
-            .unwrap_or("pipe error")
-            .to_string());
+        let msg = err.get("message").and_then(|m| m.as_str()).unwrap_or("pipe error").to_string();
+        tracing::warn!(target: "tauri_ipc", id = id, error = %msg, "[TRACE] pipe_request: server returned error");
+        return Err(msg);
     }
     let status = resp
         .pointer("/result/status")
@@ -191,10 +203,12 @@ fn try_ping_pipe() -> Result<(), String> {
 }
 
 async fn events_bridge(app: tauri::AppHandle) {
+    tracing::info!(target: "tauri_events", "[TRACE] events_bridge: starting — connecting to events pipe");
     let mut backoff_ms = 200u64;
     loop {
         match ClientOptions::new().open(EVENTS_PIPE) {
             Ok(mut conn) => {
+                tracing::info!(target: "tauri_events", "[TRACE] events_bridge: connected to events pipe");
                 backoff_ms = 200;
                 let mut buf = Vec::new();
                 let mut byte = [0u8; 1];
@@ -301,7 +315,13 @@ async fn run_agent_task(body: serde_json::Value) -> Result<serde_json::Value, St
 /// orchestrator) — for now we only support workflow.
 #[tauri::command]
 async fn run_workflow(body: serde_json::Value) -> Result<serde_json::Value, String> {
-    pipe_request("POST", "/api/run_workflow", Some(body)).await
+    tracing::info!(target: "tauri_ipc", "[TRACE] run_workflow Tauri command invoked from frontend");
+    let result = pipe_request("POST", "/api/run_workflow", Some(body)).await;
+    match &result {
+        Ok(v) => tracing::info!(target: "tauri_ipc", response = %v, "[TRACE] run_workflow: success"),
+        Err(e) => tracing::error!(target: "tauri_ipc", error = %e, "[TRACE] run_workflow: FAILED"),
+    }
+    result
 }
 
 /// Draw one hexagram at random from the 64-entry I Ching dataset.

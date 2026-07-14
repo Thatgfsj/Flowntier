@@ -917,24 +917,29 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
     d.register("POST", "/api/run_workflow", move |body| {
         let s = s_wf.clone();
         Box::pin(async move {
+            tracing::info!(target: "pipe_server", "[TRACE] /api/run_workflow handler ENTERED");
             let Some(task) = body.get("task").and_then(|v| v.as_str()) else {
+                tracing::warn!(target: "pipe_server", "[TRACE] /api/run_workflow: missing 'task' field");
                 return Ok((400, json!({
                     "ok": false,
                     "error": "missing 'task'",
                 })));
             };
             if task.trim().is_empty() {
+                tracing::warn!(target: "pipe_server", "[TRACE] /api/run_workflow: task is empty");
                 return Ok((400, json!({
                     "ok": false,
                     "error": "'task' is empty",
                 })));
             }
+            tracing::info!(target: "pipe_server", task_len = task.len(), task_preview = %task.chars().take(80).collect::<String>(), "[TRACE] /api/run_workflow: creating Orchestrator");
             let orch = crate::orchestrator::Orchestrator::new(
                 s.clone(),
                 s.events.clone(),
                 task.to_string(),
             );
             let wf_id = orch.wf_id.clone();
+            tracing::info!(target: "pipe_server", wf_id = %wf_id, "[TRACE] /api/run_workflow: spawning orch.run() on background tokio task");
             // Spawn the orchestrator on a background task so
             // the JSON-RPC response returns immediately. Each
             // phase still emits AgentEvent::PhaseTransition on
@@ -942,14 +947,16 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
             // workflow progresses.
             let wf_id_for_log = wf_id.clone();
             tokio::spawn(async move {
+                tracing::info!(target: "pipe_server", wf_id = %wf_id_for_log, "[TRACE] orch.run() STARTING on background task");
                 let summary = orch.run().await;
                 tracing::info!(
                     target: "pipe_server",
                     wf_id = %wf_id_for_log,
                     summary_len = summary.len(),
-                    "v0.4.22 (event 000068): workflow finished"
+                    "[TRACE] orch.run() FINISHED — workflow complete"
                 );
             });
+            tracing::info!(target: "pipe_server", wf_id = %wf_id, "[TRACE] /api/run_workflow: returning wf_id to caller");
             Ok((200, json!({
                 "ok": true,
                 "wf_id": wf_id,

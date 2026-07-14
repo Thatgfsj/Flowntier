@@ -22,6 +22,7 @@ async fn main() -> std::io::Result<()> {
     // 暂时放桌面" — so the default is the desktop on
     // Windows. FLWNTIER_LOG_FILE=0 disables file logging.
     let _log_file = logs::init();
+    tracing::info!(target: "pipe_server", "[TRACE] v0.4.22 (event 000084): flowntier-runtime binary started — trace logging active");
 
     let mut args = std::env::args().skip(1);
     let mut workspace = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));

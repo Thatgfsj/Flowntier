@@ -146,19 +146,22 @@ async fn rpc_listener(path: String, dispatcher: Arc<Dispatcher>) -> std::io::Res
                 {
                     Ok(s) => s,
                     Err(e) => {
-                        tracing::error!(error = %e, "rpc pipe create failed; backing off");
+                        tracing::error!(error = %e, worker = i, first = first, "[TRACE] rpc pipe create failed; backing off");
                         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                         continue;
                     }
                 };
+                tracing::debug!(worker = i, first = first, "[TRACE] rpc pipe instance created, waiting for client connect");
                 if let Err(e) = server.connect().await {
-                    tracing::error!(error = %e, "rpc pipe connect failed; retrying");
+                    tracing::error!(error = %e, worker = i, "[TRACE] rpc pipe connect failed; retrying");
                     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
                     continue;
                 }
+                tracing::info!(worker = i, "[TRACE] rpc pipe client connected — entering serve_rpc_connection");
                 if let Err(e) = serve_rpc_connection(server, d.clone()).await {
-                    tracing::warn!(error = %e, "rpc serve error");
+                    tracing::warn!(error = %e, worker = i, "[TRACE] rpc serve error");
                 }
+                tracing::debug!(worker = i, "[TRACE] rpc pipe client disconnected, looping to accept next");
             }
         });
         handles.push(h);
@@ -354,12 +357,30 @@ async fn serve_rpc_connection(
 }
 
 async fn handle_one(line: &str, dispatcher: Arc<Dispatcher>) -> RpcResponse {
+    tracing::info!(target: "pipe_server", "[TRACE] handle_one: raw request = {}", line.trim());
     let req: RpcRequest = match serde_json::from_str(line) {
         Ok(r) => r,
-        Err(e) => return RpcResponse::err(0, crate::protocol::codes::PARSE, format!("bad json: {e}")),
+        Err(e) => {
+            tracing::error!(target: "pipe_server", error = %e, "[TRACE] handle_one: JSON parse FAILED");
+            return RpcResponse::err(0, crate::protocol::codes::PARSE, format!("bad json: {e}"));
+        }
     };
     if req.jsonrpc != "2.0" {
+        tracing::warn!(target: "pipe_server", "[TRACE] handle_one: invalid jsonrpc version = {}", req.jsonrpc);
         return RpcResponse::err(req.id, crate::protocol::codes::INVALID, "jsonrpc must be 2.0");
     }
-    dispatcher.dispatch(req.id, req).await
+    tracing::info!(
+        target: "pipe_server",
+        id = req.id,
+        method = %req.method,
+        path = %req.params.path,
+        "[TRACE] handle_one: dispatching to handler"
+    );
+    let resp = dispatcher.dispatch(req.id, req).await;
+    if resp.error.is_some() {
+        tracing::warn!(target: "pipe_server", error = ?resp.error, "[TRACE] handle_one: handler returned error");
+    } else {
+        tracing::info!(target: "pipe_server", id = resp.id, "[TRACE] handle_one: handler returned success");
+    }
+    resp
 }
