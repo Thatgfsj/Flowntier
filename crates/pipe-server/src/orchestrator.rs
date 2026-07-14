@@ -24,6 +24,13 @@
 //! Event 000068. Spawns concurrent agents via `tokio::spawn` so
 //! the critics in Phase 3 + Phase 6 actually run in parallel,
 //! and so workers in Phase 5 don't serialise on each other.
+//!
+//! Event 000082: per-phase progress log. Each phase emits
+//! "phase N started at <ts>" and "phase N completed in <ms>"
+//! so the chairman can see how far a workflow got if it
+//! stalls or crashes mid-run (e.g. when the v0.4.22
+//! mimo:mimo-2.5-pro config returned a 401 and the
+//! workflow hung). See NWT 000082 for the boundary.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -186,6 +193,16 @@ pub struct Orchestrator {
     events: broadcast::Sender<AgentEvent>,
     pub wf_id: String,
     pub user_request: String,
+    /// Per-phase wall-clock start time (Instant::now). Used
+    /// by `phase_finished` to log the elapsed time the
+    /// chairman sees in the runtime log. Helps debug stalls
+    /// (e.g. mimo:mimo-2.5-pro returning 401 in NWT 000081).
+    phase_started_at: std::time::Instant,
+    /// Index of the currently-running phase (matches
+    /// `PHASES[phase_idx]`). Used to label the
+    /// `phase_finished` log line so the chairman can match
+    /// it to the `phase_started` they saw.
+    current_phase: &'static str,
 }
 
 impl Orchestrator {
@@ -201,7 +218,15 @@ impl Orchestrator {
         // single process. Real wf_ids (legacy path) use full ULIDs.
         let now = chrono::Utc::now().timestamp_millis();
         let wf_id = format!("wf_{:x}_{}", now, rand_suffix());
-        Self { state, events, wf_id, user_request }
+        let phase_started_at = std::time::Instant::now();
+        Self {
+            state,
+            events,
+            wf_id,
+            user_request,
+            phase_started_at,
+            current_phase: PHASES[0],
+        }
     }
 
     /// Emit a phase transition. Always best-effort — if no
@@ -215,7 +240,34 @@ impl Orchestrator {
     ///    fields — App.tsx's transition handler picks this up.
     ///    We send via a generic JSON value; the events pipe
     ///    forwards anything that's newline-delimited JSON.
-    async fn emit_phase(&self, from: Option<&str>, to: &str) {
+    async fn emit_phase(&mut self, from: Option<&str>, to: &str) {
+        // v0.4.22 (event 000082): log the previous phase's
+        // elapsed time before the new one starts, so the
+        // chairman can see how long each phase took when
+        // the workflow stalls (NWT 000081 root cause:
+        // provider 401 → LLM never called → phase never
+        // returned → no log line for it). Without this,
+        // a stuck workflow looked like 'no new log lines
+        // since the previous phase started'.
+        if let Some(prev) = from {
+            let elapsed_ms = self.phase_started_at.elapsed().as_millis() as u64;
+            info!(
+                target: "orchestrator",
+                wf_id = %self.wf_id,
+                from_phase = %self.current_phase,
+                to_phase = %to,
+                phase_runtime_ms = elapsed_ms,
+                "v0.4.22 (event 000082): phase completed"
+            );
+        } else {
+            info!(
+                target: "orchestrator",
+                wf_id = %self.wf_id,
+                to_phase = %to,
+                "v0.4.22 (event 000082): workflow started"
+            );
+        }
+
         let _ = self.events.send(AgentEvent::PhaseTransition {
             wf_id: self.wf_id.clone(),
             from: from.map(|s| s.to_string()),
@@ -228,6 +280,25 @@ impl Orchestrator {
             to = %to,
             "phase transition"
         );
+        // v0.4.22 (event 000082): reset the phase timer for
+        // the next phase's elapsed-time log.
+        self.phase_started_at = std::time::Instant::now();
+        self.current_phase = match to {
+            "1-requirement" => "1-requirement",
+            "2-plan" => "2-plan",
+            "3-plan-review" => "3-plan-review",
+            "4-dispatch" => "4-dispatch",
+            "5-develop" => "5-develop",
+            "6-final-review" => "6-final-review",
+            "7-repair" => "7-repair",
+            "8-delivery" => "8-delivery",
+            _ => "unknown",
+        };
+        // v0.4.22 (event 000069): also update the workflows
+        // row so GET /api/workflow/{wf_id}/status returns the
+        // current phase without needing to scrape the events
+        // pipe. Best-effort — log on failure but don't block
+        // the phase transition.
         // v0.4.22 (event 000069): also update the workflows
         // row so GET /api/workflow/{wf_id}/status returns the
         // current phase without needing to scrape the events
@@ -253,6 +324,22 @@ impl Orchestrator {
     async fn run_agent(&self, spec: AgentRunSpec) -> TaskOutcome {
         let role_id = spec.role.id().to_string();
         let role_display = spec.role.display().to_string();
+
+        // v0.4.22 (event 000082): per-agent start log so the
+        // chairman can see which agent role is currently
+        // running. Combined with the phase-completed log
+        // (in emit_phase), the runtime log is now sufficient
+        // to debug any stall without grepping the events
+        // pipe. Model + api_kind surface so the chairman
+        // sees which provider is being hit (mimo:...
+        // vs minimax:...).
+        info!(
+            target: "orchestrator",
+            wf_id = %self.wf_id,
+            role = %role_id,
+            role_display = %role_display,
+            "v0.4.22 (event 000082): agent run starting"
+        );
 
         // Resolve provider + model from role_overrides. If the
         // role isn't configured, return FAILED immediately —
@@ -316,6 +403,19 @@ impl Orchestrator {
                         AgentEvent::Done { status, summary: s, .. } => {
                             last_status = status;
                             summary = s;
+                            // v0.4.22 (event 000082): agent
+                            // finished (success OR error).
+                            // Chairman sees which role finished
+                            // + what status + how long it
+                            // took + whether text was emitted.
+                            info!(
+                                target: "orchestrator",
+                                wf_id = %self.wf_id,
+                                role = %role_id,
+                                status = %last_status,
+                                text_len = text.len(),
+                                "v0.4.22 (event 000082): agent run finished"
+                            );
                             if matches!(last_status.as_str(), "DONE" | "FAILED" | "ABORTED" | "ABORTED_REPEAT" | "TIMEOUT (300s)") {
                                 return false;
                             }
