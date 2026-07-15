@@ -1684,17 +1684,50 @@ async fn add_custom_provider(
     body: Value,
     state: Arc<ServerState>,
 ) -> Result<(u16, Value), String> {
-    let name = body.get("name").and_then(|v| v.as_str())
-        .ok_or_else(|| "missing 'name'".to_string())?.to_string();
+    // v0.4.22 (event 000096): the Tauri shell
+    // (`apps/desktop/src-tauri/src/lib.rs:add_custom_provider`)
+    // sends a body with keys: id, display_name, kind, base_url,
+    // api_key_env, models. The previous handler read `name`
+    // (missing field → 400), `api_key` (raw value), and ignored
+    // `models`. As a result every "添加自定义中转站" form
+    // failed silently and custom_provider table stayed empty,
+    // forcing the chairman into the preset mimo (whose base_url
+    // is api.xiaomimimo.com, not the relay at
+    // token-plan.cn.xiaomimimo.com) — 208 × 401.
+    //
+    // Fix: read all the fields the shell actually sends; persist
+    // models (so the UI's display matches reality); save the API
+    // key under the env var name the shell specified, NOT
+    // auto-generated.
+    let id = body.get("id").and_then(|v| v.as_str())
+        .ok_or_else(|| "missing 'id'".to_string())?.to_string();
+    let display_name = body.get("display_name").and_then(|v| v.as_str())
+        .ok_or_else(|| "missing 'display_name'".to_string())?.to_string();
     let base_url = body.get("base_url").and_then(|v| v.as_str())
         .ok_or_else(|| "missing 'base_url'".to_string())?.to_string();
     let kind = body.get("kind").and_then(|v| v.as_str())
         .unwrap_or("openai-compatible").to_string();
-    let default_model = body.get("default_model")
-        .and_then(|v| v.as_str()).map(|s| s.to_string());
+    let api_key_env = body.get("api_key_env").and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    // v0.4.22 (event 000096): `default_model` is now taken from
+    // the user's first model row (or explicit field). The shell
+    // sends `models[].id` (the model id string) and
+    // `models[].display_name`; we persist the id as a
+    // comma-separated fallback chain so resolve_role sees the
+    // user's actual model list when they pick `<custom_id>:*`.
+    let models_json: Vec<String> = body.get("models")
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.iter()
+            .filter_map(|m| m.get("id").and_then(|x| x.as_str()).map(String::from))
+            .collect())
+        .unwrap_or_default();
+    let default_model = models_json.first().cloned();
 
-    if name.is_empty() || name.len() > 64 {
-        return Ok((400, json!({ "error": "name must be 1..=64 chars" })));
+    if id.is_empty() || id.len() > 64 {
+        return Ok((400, json!({ "error": "id must be 1..=64 chars" })));
+    }
+    if display_name.is_empty() || display_name.len() > 64 {
+        return Ok((400, json!({ "error": "display_name must be 1..=64 chars" })));
     }
     if !base_url.starts_with("https://") && !base_url.starts_with("http://") {
         return Ok((400, json!({ "error": "base_url must start with http(s)://" })));
@@ -1703,14 +1736,13 @@ async fn add_custom_provider(
         return Ok((400, json!({ "error": "kind must be openai-compatible or anthropic-compatible" })));
     }
 
-    let id = ulid::Ulid::new().to_string();
     let now = chrono::Utc::now().timestamp();
     let row = storage::CustomProvider {
         id: id.clone(),
-        name: name.clone(),
+        name: display_name.clone(),
         base_url: base_url.clone(),
         kind: kind.clone(),
-        default_model: default_model.clone(),
+        default_model,
         enabled: true,
         created_at: now,
         updated_at: now,
@@ -1718,20 +1750,38 @@ async fn add_custom_provider(
     state.repo.insert_custom_provider(&row).await
         .map_err(|e| format!("insert_custom: {e}"))?;
 
-    // If an api_key was supplied in the same POST, encrypt and
-    // store it under CUSTOM_PROVIDER_KEY_<id>.
+    // v0.4.22 (event 000096): persist the models list. The
+    // custom_provider table only stores `default_model`; we
+    // mirror the full list into the model_cache row so the
+    // Settings UI can render them.
+    if !models_json.is_empty() {
+        let body_str = serde_json::to_string(&models_json).unwrap_or_else(|_| "[]".into());
+        let _ = state.repo.put_model_cache(&storage::ModelCacheRow {
+            provider_id: format!("custom:{id}"),
+            models_json: body_str,
+            fetched_at: now,
+        }).await;
+    }
+
+    // If an api_key was supplied in the same POST (the Tauri
+    // shell calls save_secret() first to encrypt-and-store,
+    // then addCustomProvider), nothing else needed here. But
+    // also fall back to reading api_key directly (legacy
+    // compat) so any caller still works.
     if let Some(key) = body.get("api_key").and_then(|v| v.as_str()) {
-        let secret_name = format!("CUSTOM_PROVIDER_KEY_{id}");
+        let secret_name = api_key_env.clone()
+            .unwrap_or_else(|| format!("CUSTOM_PROVIDER_KEY_{id}"));
         state.secrets.put(&secret_name, key).await
             .map_err(|e| format!("put secret: {e}"))?;
     }
 
     Ok((201, json!({
         "id": id,
-        "name": name,
+        "name": display_name,
         "base_url": base_url,
         "kind": kind,
-        "default_model": default_model,
+        "default_model": models_json.first(),
+        "models": models_json,
         "enabled": true,
     })))
 }
@@ -1937,28 +1987,51 @@ async fn resolve_role(
             "default_model '{}' must be in '<provider>:<model>' form", default_model
         )),
     };
-    // 3. Look up the preset.
-    let preset = match crate::providers::get(&provider_short) {
-        Some(p) => p.clone(),
-        None => return Err(format!(
-            "unknown provider preset '{}' from default_model '{}'", provider_short, default_model
-        )),
-    };
+    // 3. Look up the preset FIRST, then fall back to
+    //    custom_provider. The custom_provider table lets the
+    //    chairman register relays (e.g. token-plan.cn.xiaomimimo.com)
+    //    that the 9 built-in PRESETS don't cover. Without this
+    //    fallback the chairman has to bypass his relay entirely.
+    let (base_url, api_kind, secret_name) =
+        if let Some(preset) = crate::providers::get(&provider_short) {
+            (
+                preset.base_url.to_string(),
+                preset.kind.to_string(),
+                preset.secret_name.to_string(),
+            )
+        } else {
+            // v0.4.22 (event 000096): look up the custom
+            // provider row by id. Determine the secret name
+            // from the row's `kind` (env var name) — by
+            // convention `CUSTOM_<ID>_API_KEY`.
+            let cp = state.repo.get_custom_provider(&provider_short).await
+                .map_err(|e| format!("get_custom: {e}"))?
+                .ok_or_else(|| format!(
+                    "unknown provider preset or custom '{}' from default_model '{}' \
+                     (Settings → 中转站 → 添加 custom relay, or change default_model)",
+                    provider_short, default_model
+                ))?;
+            // The shell saved the secret under an env-var name
+            // like CUSTOM_MIMIMU_API_KEY (uppercased id).
+            // Convention: id + '_API_KEY' uppercase.
+            let secret = format!("CUSTOM_{}_API_KEY", provider_short.to_uppercase());
+            (cp.base_url, cp.kind, secret)
+        };
     // 4. Reveal the API key from the keychain. Empty defaults give
     //    503 so the chairman knows the cause.
-    let api_key: Zeroizing<String> = match state.secrets.reveal(&preset.secret_name).await {
+    let api_key: Zeroizing<String> = match state.secrets.reveal(&secret_name).await {
         Ok(z) if !z.is_empty() => z,
         _ => return Err(format!(
-            "no API key configured for {} (set it in Settings → 供应商)", preset.secret_name
+            "no API key configured for {} (set it in Settings → 供应商)", secret_name
         )),
     };
     Ok(ResolvedRole {
         role: role.to_string(),
         provider_short,
         model_id,
-        base_url: preset.base_url.to_string(),
-        api_kind: preset.kind.to_string(),
-        secret_name: preset.secret_name.to_string(),
+        base_url,
+        api_kind,
+        secret_name,
         api_key,
         fallback_chain,
     })
