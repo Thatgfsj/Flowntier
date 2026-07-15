@@ -76,7 +76,7 @@ for (const rel of TARGETS) {
   // Patch (b): .onInit taskkill belt-and-braces. Inserts the
   // kill calls BEFORE the wizard UI shows, so the file handles
   // are released before any SetSection installation begins.
-  if (!content.includes('v0.4.22 taskkill-belt-bracess-v2')) {
+  if (!content.includes('v0.4.21 taskkill-belt-bracess start')) {
     const marker = 'Function .onInit';
     const idx = content.indexOf(marker);
     if (idx >= 0) {
@@ -100,17 +100,8 @@ for (const rel of TARGETS) {
       // "Invalid command: ${" parse error from nested `${$...}`.
       const block =
         '\n' +
-        '  ; v0.4.22 (event 000092) taskkill-belt-bracess-v2 start\n' +
+        '  ; v0.4.21 (event 000061) taskkill-belt-bracess start\n' +
         '  ; Catches the daemon / zombie case where the user\n' +
-        // v0.4.22 (event 000092): give the OS 3 seconds to
-        // actually release the file handles after taskkill.
-        // Without this Sleep, the file copy immediately
-        // after .onInit often fails with "file in use" on
-        // Windows — taskkill marks the process for kill but
-        // the kernel doesn't release handles synchronously.
-        // 3s is empirical: long enough to clear, short enough
-        // not to feel sluggish.
-        '  Sleep 3000\n' +
         '  ; closed the GUI but the sidecar is still listening\n' +
         '  ; on the named pipe. NSIS CheckIfAppIsRunning handles\n' +
         '  ; the foreground case; this catches the background.\n' +
@@ -124,19 +115,7 @@ for (const rel of TARGETS) {
         '  Push "taskkill /F /IM flowntier_runtime.exe /T"\n' +
         '  ExecWait $0\n' +
         '  Pop $0\n' +
-        '  ; v0.4.22 (event 000092): re-check after 1s. If the\n' +
-        '  ; process is still alive (rare — usually a UAC prompt\n' +
-        '  ; blocked the kill), try a second time. Without this\n' +
-        '  ; the file copy fails and the user sees an opaque\n' +
-        '  ; "file in use" error mid-install.\n' +
-        '  Sleep 1000\n' +
-        '  Push "taskkill /F /IM flowntier-desktop.exe /T"\n' +
-        '  ExecWait $0\n' +
-        '  Pop $0\n' +
-        '  Push "taskkill /F /IM flowntier_runtime.exe /T"\n' +
-        '  ExecWait $0\n' +
-        '  Pop $0\n' +
-        '  ; v0.4.22 (event 000092) taskkill-belt-bracess-v2 end\n';
+        '  ; v0.4.21 taskkill-belt-bracess end\n';
       content = content.slice(0, insertAt) + block + content.slice(insertAt);
       console.log(`  patched (b): ${fullPath}`);
     } else {
