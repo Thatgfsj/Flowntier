@@ -187,6 +187,12 @@ export function App() {
     summary: string;
   } | null>(null);
   const [finalReport, setFinalReport] = useState<string | null>(null);
+  // v0.4.22 (event 000095): the orchestrator emits a Done
+  // event with status='FAILED: <reason>' when an agent can't
+  // reach the provider (e.g. 401 from Mimo). We capture the
+  // last failed status so the dashboard can show "401 Invalid
+  // API Key" instead of the misleading "工作流超时".
+  const [workflowError, setWorkflowError] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [currentWfId, setCurrentWfId] = useState<string | null>(null);
   const [updateBanner, setUpdateBanner] = useState<UpdateBanner>({ available: false });
@@ -448,6 +454,7 @@ export function App() {
     setMilestones([]);
     setReviewVerdict(null);
     setFinalReport(null);
+    setWorkflowError(null);
     setCurrentWfId(null);
     setPlanNodes([]);
     setPlanEdges([]);
@@ -476,6 +483,19 @@ export function App() {
       setBusy(false);
       setCompleted(true);
       setReviewVerdict({ verdict: 'PASS', summary: t('workflow.verdict.pass') });
+    }
+    // v0.4.22 (event 000095): detect a globally-failed workflow.
+    // The orchestrator emits Done { status: 'FAILED: <reason>' }
+    // when every agent candidate failed (e.g. 401 from Mimo,
+    // 30-min timeout, etc.). Capture the last failure status so
+    // the user sees the real error instead of the generic
+    // "10-minute workflow timeout" the watchdog would show.
+    if (event.kind === 'done' && typeof event.status === 'string'
+        && event.status.startsWith('FAILED')) {
+      const summary = (event.summary ?? '') as string;
+      // Strip the "FAILED: " prefix for display
+      const clean = event.status.replace(/^FAILED:\s*/, '');
+      setWorkflowError(`${clean}\n\n${summary}`.trim());
     }
     if ((event.kind === 'transition' || (event as { kind?: string }).kind === 'phase_transition') && (event as { to?: string }).to) {
       const to = (event as { to: string }).to;
@@ -581,6 +601,7 @@ export function App() {
     setMilestones([]);
     setReviewVerdict(null);
     setFinalReport(null);
+    setWorkflowError(null);
     setActivePhase(0);
     setPhaseStates({ ...PHASE_STATE });
     setAgentStatus({ ...INITIAL_AGENT_STATUS });
@@ -625,7 +646,19 @@ export function App() {
       }
 
       if (!completed) {
-        setReviewVerdict({ verdict: 'REPAIR', summary: t('workflow.verdict.timeout') });
+        // v0.4.22 (event 000095): prefer the captured
+        // workflowError (real 401 message) over the generic
+        // "10-minute workflow timeout" placeholder.
+        if (workflowError !== null) {
+          setReviewVerdict({ verdict: 'REPAIR', summary: workflowError });
+        } else {
+          setReviewVerdict({ verdict: 'REPAIR', summary: t('workflow.verdict.timeout') });
+        }
+      } else if (workflowError !== null) {
+        // Completed normally but every agent failed (rare — fall
+        // through to the delivery phase anyway). Surface the
+        // error so the chairman can see what went wrong.
+        setReviewVerdict({ verdict: 'REPAIR', summary: workflowError });
       }
     } catch (e) {
       console.warn('workflow failed', e);
@@ -919,6 +952,22 @@ export function App() {
               </>
             }
           />
+
+          {workflowError !== null && (
+            <Card className="border-status-error/60 bg-status-error/10">
+              <h3 className="mb-2 text-sm font-semibold text-status-error">
+                {t('workflow.error.heading', { defaultValue: 'Workflow Error' })}
+              </h3>
+              <pre className="whitespace-pre-wrap break-words font-mono text-xs text-status-error">
+                {workflowError}
+              </pre>
+              <p className="mt-2 text-xs text-text-secondary">
+                {t('workflow.error.hint', {
+                  defaultValue: 'Most common cause: the API key stored for this role has expired or is wrong. Open Settings → Providers → MiMo and re-save the key.',
+                })}
+              </p>
+            </Card>
+          )}
 
           {reviewVerdict !== null && (
             <Card>
