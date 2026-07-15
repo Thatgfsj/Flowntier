@@ -53,6 +53,60 @@ async fn main() -> std::io::Result<()> {
             .unwrap_or_else(|| workspace.clone())
     });
 
+    // v0.4.22 (event 000085): read the persisted workdir from
+    // `<data_dir>/workdir.json` and prefer it over the launch-time
+    // cwd. The Tauri shell spawns this sidecar WITHOUT
+    // `--workspace`, so without this fallback the runtime would
+    // use the directory the sidecar was launched from (typically
+    // the install dir like `O:\Flowntier`) and chief's file
+    // writes would land there instead of the user's selected
+    // `O:\try\…` workdir. The Tauri shell's
+    // `set_workdir_with_nwt` command writes this JSON file
+    // atomically (tmp + rename) and the same file is what
+    // `get_workdir` reads back in the UI — keeping the runtime
+    // in sync on cold start means chief never has a wrong
+    // workspace even before the first `set_workspace` round-trip
+    // happens. Best-effort: missing or malformed file → fall
+    // back to cwd (preserves legacy behaviour).
+    let workdir_file = data_dir.join("workdir.json");
+    if workdir_file.exists() {
+        match std::fs::read_to_string(&workdir_file) {
+            Ok(raw) => match serde_json::from_str::<serde_json::Value>(&raw) {
+                Ok(v) => {
+                    if let Some(p) = v.get("workdir").and_then(|x| x.as_str()) {
+                        let candidate = PathBuf::from(p);
+                        if candidate.is_dir() {
+                            tracing::info!(
+                                target: "pipe_server",
+                                workdir = %candidate.display(),
+                                "v0.4.22 (event 000085): restored workspace from workdir.json"
+                            );
+                            workspace = candidate;
+                        } else {
+                            tracing::warn!(
+                                target: "pipe_server",
+                                workdir = %candidate.display(),
+                                "v0.4.22 (event 000085): workdir.json points at a non-directory; using cwd instead"
+                            );
+                        }
+                    }
+                }
+                Err(e) => tracing::warn!(
+                    target: "pipe_server",
+                    error = %e,
+                    path = %workdir_file.display(),
+                    "v0.4.22 (event 000085): failed to parse workdir.json; using cwd"
+                ),
+            },
+            Err(e) => tracing::warn!(
+                target: "pipe_server",
+                error = %e,
+                path = %workdir_file.display(),
+                "v0.4.22 (event 000085): failed to read workdir.json; using cwd"
+            ),
+        }
+    }
+
     let cfg = ServerConfig::default();
     tracing::info!(
         rpc = %cfg.rpc_path,

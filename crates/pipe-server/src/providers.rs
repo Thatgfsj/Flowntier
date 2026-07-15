@@ -122,7 +122,16 @@ pub const PRESETS: &[ProviderPreset] = &[
         id: "mimo",
         display_name: "Xiaomi MiMo",
         kind: "openai-compatible",
-        base_url: "https://api.xiaomi.com/v1",
+        // v0.4.22 (event 000085): corrected base_url. The previous
+        // value `https://api.xiaomi.com/v1` does not resolve (DNS
+        // returns NXDOMAIN) — the actual Xiaomi MiMo endpoint is
+        // `api.xiaomimimo.com` (CNAME → mimo-pri-prod.alb.xiaomi.com).
+        // Chairman's `role_overrides` routes all 6 roles through
+        // `mimo:mimo-2.5-pro`, so every phase hit this DNS failure
+        // and the workflow hung for 5min × 8 phase = 40 min before
+        // the orchestrator's per-phase timeout fired. Verified via
+        // `nslookup` + `curl` against the live endpoint.
+        base_url: "https://api.xiaomimimo.com/v1",
         secret_name: "MIMO_API_KEY",
         default_model: "mimo-v1",
         note: "MiMo-7B (preview)",
