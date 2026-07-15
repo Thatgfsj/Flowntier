@@ -76,7 +76,7 @@ for (const rel of TARGETS) {
   // Patch (b): .onInit taskkill belt-and-braces. Inserts the
   // kill calls BEFORE the wizard UI shows, so the file handles
   // are released before any SetSection installation begins.
-  if (!content.includes('v0.4.21 taskkill-belt-bracess start')) {
+  if (!content.includes('v0.4.22 taskkill-belt-bracess-v3 start')) {
     const marker = 'Function .onInit';
     const idx = content.indexOf(marker);
     if (idx >= 0) {
@@ -98,9 +98,17 @@ for (const rel of TARGETS) {
       // $${MAINBINARYNAME} ($$ → literal $) into the main binary
       // name once, BEFORE ExecWait runs. Avoids the
       // "Invalid command: ${" parse error from nested `${$...}`.
+      // v0.4.22 (event 000097): NSIS taskkill v3 — use
+      // process-tree kill (`taskkill /T /F`) for BOTH the
+      // desktop shell AND the sidecar. The desktop shell
+      // spawns the sidecar as a child of itself; killing the
+      // shell alone doesn't always cascade (Windows
+      // job-object behavior). Killing both with /T + a 1.5s
+      // sleep covers the common case. Sleep is short — long
+      // sleeps in 000092 caused system freezes (event 000093).
       const block =
         '\n' +
-        '  ; v0.4.21 (event 000061) taskkill-belt-bracess start\n' +
+        '  ; v0.4.22 (event 000097) taskkill-belt-bracess-v3 start\n' +
         '  ; Catches the daemon / zombie case where the user\n' +
         '  ; closed the GUI but the sidecar is still listening\n' +
         '  ; on the named pipe. NSIS CheckIfAppIsRunning handles\n' +
@@ -115,7 +123,13 @@ for (const rel of TARGETS) {
         '  Push "taskkill /F /IM flowntier_runtime.exe /T"\n' +
         '  ExecWait $0\n' +
         '  Pop $0\n' +
-        '  ; v0.4.21 taskkill-belt-bracess end\n';
+        '  ; v0.4.22 (event 000097): short settle window so\n' +
+        '  ; the kernel can release the file handles before the\n' +
+        '  ; next File directive reads from disk. 1.5s is short\n' +
+        '  ; enough not to freeze the system (event 000093\'s 3s\n' +
+        '  ; + retry caused freezes), long enough for handles.\n' +
+        '  Sleep 1500\n' +
+        '  ; v0.4.22 (event 000097) taskkill-belt-bracess-v3 end\n';
       content = content.slice(0, insertAt) + block + content.slice(insertAt);
       console.log(`  patched (b): ${fullPath}`);
     } else {

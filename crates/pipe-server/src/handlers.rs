@@ -813,17 +813,103 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
                     by_id.insert(p.id.clone(), c);
                 }
             }
+            // v0.4.22 (event 000097): the previous version
+            // returned ONLY providers that had a model_cache
+            // row. For a fresh install the cache is empty (no
+            // model has been pulled live yet), so the role
+            // picker in Settings showed zero models for the
+            // default mimo role — locking the chairman out
+            // of editing role_overrides (you can't pick an
+            // empty option).
+            //
+            // Fix: for any provider (preset OR custom) that
+            // has no cache row, fall back to the static
+            // OPENAI_FALLBACK_MODELS catalog. For custom
+            // providers, fall back to their stored
+            // `default_model` (which is the only model the
+            // chairman explicitly added). This guarantees the
+            // role picker always has at least one selectable
+            // option per provider.
+            let mut models: Vec<Value> = Vec::new();
+            // Presets — overlay catalog when cache is missing.
+            for preset in crate::providers::PRESETS.iter() {
+                match by_id.get(preset.id) {
+                    Some(cache) => {
+                        if let Ok(m) =
+                            serde_json::from_str::<Vec<Value>>(&cache.models_json)
+                        {
+                            for mm in m {
+                                models.push(json!({
+                                    "provider_id": preset.id,
+                                    "models": mm,
+                                }));
+                            }
+                        }
+                    }
+                    None => {
+                        // Pull the fallback catalog entry for this
+                        // preset (only has ids for the openai /
+                        // anthropic tiers).
+                        if let Some((_, entries)) = crate::providers::OPENAI_FALLBACK_MODELS
+                            .iter()
+                            .find(|(pid, _)| *pid == preset.id)
+                        {
+                            for entry in *entries {
+                                models.push(json!({
+                                    "provider_id": preset.id,
+                                    "models": json!({
+                                        "id": entry.id,
+                                        "display_name": entry.display_name,
+                                        "thinking_strength": entry.thinking_strength,
+                                        "context_length": entry.context_length,
+                                        "source": "fallback",
+                                    }),
+                                }));
+                            }
+                        }
+                    }
+                }
+            }
+            // Custom providers — overlay catalog or use stored
+            // default_model.
+            //
+            // v0.4.22 (event 000097): cache key is the bare
+            // custom id (e.g. "mimimu"), matching what
+            // `add_custom_provider` writes via
+            // `repo.put_model_cache("custom:<id>", ...)`. The
+            // prefix in the storage key is for SQL row
+            // disambiguation only; the runtime by_id map keys
+            // are normalized to the bare id so the role
+            // resolver can look it up via
+            // `state.repo.get_custom_provider(&provider_short)`.
             for c in custom {
                 if let Ok(Some(cache)) = s.repo.get_model_cache(&c.id).await {
                     by_id.insert(c.id.clone(), cache);
                 }
+                if let Some(cache) = by_id.get(c.id.as_str()) {
+                    if let Ok(m) =
+                        serde_json::from_str::<Vec<Value>>(&cache.models_json)
+                    {
+                        for mm in m {
+                            models.push(json!({
+                                "provider_id": format!("custom:{}", c.id),
+                                "models": mm,
+                            }));
+                        }
+                    }
+                } else if let Some(dm) = c.default_model.as_ref() {
+                    models.push(json!({
+                        "provider_id": format!("custom:{}", c.id),
+                        "models": json!({
+                            "id": dm,
+                            "display_name": dm,
+                            "thinking_strength": "medium",
+                            "context_length": null,
+                            "source": "fallback",
+                        }),
+                    }));
+                }
             }
-            let models: Vec<Value> = by_id.iter()
-                .filter_map(|(id, cache)| {
-                    serde_json::from_str::<Vec<Value>>(&cache.models_json).ok()
-                        .map(|m| json!({ "provider_id": id, "models": m }))
-                })
-                .collect();
             Ok((200, json!({
                 "models": models,
                 "count": models.len(),
