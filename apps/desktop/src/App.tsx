@@ -94,6 +94,31 @@ function agentStatusToRole(s: AgentStatus): AgentStatus {
   return s;
 }
 
+/** v0.4.22 (event 000094): map a phase name to the role
+ * that runs it. Drives the agent-status dashboard so the
+ * chairman sees the right card flip to "thinking" instead of
+ * every card staying "空闲" even when the chief is mid-Plan.
+ */
+function phaseToRole(
+  phase: string,
+): keyof AgentStatusMap | null {
+  switch (phase) {
+    case 'requirement':
+    case 'plan':
+    case 'dispatch':
+    case 'repair':
+    case 'delivery':
+      return 'chief';
+    case 'plan-review':
+    case 'final-review':
+      return 'critic-a';
+    case 'develop':
+      return 'worker';
+    default:
+      return null;
+  }
+}
+
 // ── DriftBanner ────────────────────────────────────────────────
 // Renders a non-blocking warning at the top of the dashboard
 // when the sidecar's reported version is older than the shell's
@@ -467,6 +492,18 @@ export function App() {
           next[toName] = 'active';
           return next;
         });
+        // v0.4.22 (event 000094): flip the corresponding role
+        // card to "thinking" when its phase becomes active.
+        // Without this the dashboard shows every role as
+        // 空闲 even mid-workflow, because no per-agent
+        // event fires during the 8-phase orchestrator runs.
+        // Chief runs phases 1-requirement, 2-plan, 4-dispatch,
+        // 7-repair, 8-delivery. Critic-a + critic-b run
+        // 3-plan-review + 6-final-review. Worker runs 5-develop.
+        const role = phaseToRole(to);
+        if (role) {
+          setAgentStatus((prev) => ({ ...prev, [role]: 'thinking' }));
+        }
       }
     }
     if (event.kind === 'milestone' && event.label) {
@@ -490,6 +527,15 @@ export function App() {
           'pending';
         setActivePhase(newState === 'active' ? idx : activePhase);
         setPhaseStates((prev) => ({ ...prev, [phaseName]: newState }));
+        // v0.4.22 (event 000094): flip role back to idle on
+        // phase completion (or keep thinking if still active).
+        const role = phaseToRole(event.phase);
+        if (role) {
+          setAgentStatus((prev) => ({
+            ...prev,
+            [role]: newState === 'done' ? 'idle' : 'thinking',
+          }));
+        }
       }
     }
     if (event.kind === 'console' && event.agent_id) {

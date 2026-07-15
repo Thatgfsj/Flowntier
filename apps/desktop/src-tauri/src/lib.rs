@@ -16,7 +16,7 @@ use tauri::Manager;
 use tauri::Emitter;
 use tauri_plugin_shell::ShellExt;
 use tauri_core::logging::{self, LoggingGuard};
-use tauri_core::{start_workflow, AppState, NewWorkflowRequest, NewWorkflowResponse};
+use tauri_core::{AppState, NewWorkflowResponse};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::windows::named_pipe::ClientOptions;
 
@@ -707,14 +707,31 @@ async fn invoke_plugin(
 
 #[tauri::command]
 async fn start_workflow_cmd(
-    state: tauri::State<'_, AppState>,
+    _state: tauri::State<'_, AppState>,
     text: String,
     project_id: Option<String>,
 ) -> Result<NewWorkflowResponse, String> {
-    // Flatten at the Tauri boundary so the webview can pass each field
-    // as a top-level arg (`invoke('start_workflow_cmd', { text, project_id })`).
-    // The alternative `{ req: { text, ... } }` confused Tauri's IPC deserializer.
-    start_workflow(state, NewWorkflowRequest { text, project_id }).await
+    // v0.4.22 (event 000094): the tauri_core::start_workflow is
+    // a STUB — it writes a workflow row to the DB and returns,
+    // but never invokes the orchestrator. The UI was calling
+    // this stub, so chairman's "tarot" requests completed
+    // instantly with state REQ_RECEIVED and no agent runs.
+    //
+    // Route through the pipe-server's `/api/run_workflow`
+    // instead — that's where the real 8-phase orchestrator
+    // lives (event 000068). The pipe-server handles workflow
+    // row creation, agent spawning, and broadcast events on
+    // its own.
+    let _ = project_id; // currently unused — orchestrator derives id
+    let body = serde_json::json!({ "task": text });
+    let resp = pipe_request("POST", "/api/run_workflow", Some(body))
+        .await
+        .map_err(|e| e)?;
+    let wf_id = resp.get("wf_id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "runtime returned no wf_id".to_string())?
+        .to_string();
+    Ok(NewWorkflowResponse { id: wf_id })
 }
 
 #[tauri::command]
