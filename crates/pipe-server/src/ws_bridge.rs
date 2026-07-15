@@ -197,6 +197,32 @@ async fn serve_http_connection(
 
     let mut leftover: Vec<u8> = Vec::new();
 
+    // v0.4.22 (event 000091 fix #34): require a bearer token
+    // for all non-`/health` requests. The Tauri shell passes
+    // the same token in `Authorization: Bearer <hex>` so this
+    // is a no-op for legitimate callers but blocks any other
+    // process on the same machine. `/health` stays open so
+    // the chairman can probe the runtime without auth.
+    if path != "/health" {
+        let expected = token_from_env();
+        match expected {
+            None => {
+                return write_401(&mut stream, "FLOWNTIER_HTTP_BRIDGE_TOKEN not configured").await;
+            }
+            Some(token) => {
+                let auth = headers.get("authorization")
+                    .map(|s| s.as_str())
+                    .unwrap_or("");
+                let supplied = auth.strip_prefix("Bearer ")
+                    .or_else(|| auth.strip_prefix("bearer "))
+                    .unwrap_or("");
+                if !ct_eq(supplied.as_bytes(), token.as_bytes()) {
+                    return write_401(&mut stream, "invalid or missing token").await;
+                }
+            }
+        }
+    }
+
     match (method.as_str(), path.as_str()) {
         ("GET", "/health") => {
             eprintln!("[bridge] /health");
@@ -344,6 +370,12 @@ async fn write_400(w: &mut TcpStream, msg: &str) -> std::io::Result<()> {
     write_json(w, 400, &serde_json::json!({"error": msg})).await
 }
 
+/// v0.4.22 (event 000091 fix #34): used when a request
+/// arrives without a valid `FLOWNTIER_HTTP_BRIDGE_TOKEN`.
+async fn write_401(w: &mut TcpStream, msg: &str) -> std::io::Result<()> {
+    write_json(w, 401, &serde_json::json!({"error": msg})).await
+}
+
 async fn write_cors_preflight(w: &mut TcpStream) -> std::io::Result<()> {
     let resp = "HTTP/1.1 204 No Content\r\n\
         Access-Control-Allow-Origin: *\r\n\
@@ -408,6 +440,35 @@ async fn write_json_bytes(
 pub fn bind_from_env() -> String {
     std::env::var("FLOWNTIER_HTTP_BRIDGE")
         .unwrap_or_else(|_| DEFAULT_BIND.to_string())
+}
+
+/// v0.4.22 (event 000091 fix #34): shared-secret auth for the
+/// HTTP bridge. The Tauri shell sets `FLOWNTIER_HTTP_BRIDGE_TOKEN`
+/// to a 32-byte random hex string on startup, and the
+/// same value is included as `Authorization: Bearer <token>`
+/// in every request to the bridge. Requests with no token,
+/// or a wrong token, get 401. Without this, ANY local
+/// process (browser tab, malware, side-loaded app) can
+/// POST to `127.0.0.1:8765/rpc` and read every secret
+/// in the keystore.
+pub fn token_from_env() -> Option<String> {
+    std::env::var("FLOWNTIER_HTTP_BRIDGE_TOKEN")
+        .ok()
+        .filter(|s| !s.is_empty())
+}
+
+/// Constant-time string compare for the bearer token. Avoids
+/// timing side-channels; irrelevant for a local loopback
+/// attacker but cheap to be correct.
+fn ct_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff: u8 = 0;
+    for (x, y) in a.iter().zip(b.iter()) {
+        diff |= x ^ y;
+    }
+    diff == 0
 }
 
 /// Quick reachability check used by e2e tests: parse "host:port"

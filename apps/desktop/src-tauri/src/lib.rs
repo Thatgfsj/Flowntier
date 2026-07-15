@@ -46,12 +46,27 @@ async fn pipe_request(
     body: Option<serde_json::Value>,
 ) -> Result<serde_json::Value, String> {
     tracing::info!(target: "tauri_ipc", method = %method, path = %path, "[TRACE] pipe_request: opening pipe connection");
-    let mut conn = ClientOptions::new()
-        .open(RPC_PIPE)
-        .map_err(|e| {
+    // v0.4.22 (event 000091 fix #40): `ClientOptions::open`
+    // is a SYNCHRONOUS syscall on Windows (named pipes use
+    // `CreateFileW` internally, which blocks the calling
+    // thread). Calling it directly from an async fn would
+    // pin one of Tauri's tokio worker threads on every
+    // pipe_request call. Wrap in `spawn_blocking` so the
+    // blocking I/O lands on the dedicated blocking pool.
+    let path_for_open = RPC_PIPE;
+    let mut conn = match tokio::task::spawn_blocking(move || {
+        ClientOptions::new().open(path_for_open)
+    }).await {
+        Ok(Ok(c)) => c,
+        Ok(Err(e)) => {
             tracing::error!(target: "tauri_ipc", error = %e, "[TRACE] pipe_request: pipe open FAILED");
-            format!("pipe open {RPC_PIPE}: {e}")
-        })?;
+            return Err(format!("pipe open {RPC_PIPE}: {e}"));
+        }
+        Err(e) => {
+            tracing::error!(target: "tauri_ipc", error = %e, "[TRACE] pipe_request: spawn_blocking join FAILED");
+            return Err(format!("pipe open task panicked: {e}"));
+        }
+    };
     tracing::debug!(target: "tauri_ipc", "[TRACE] pipe_request: pipe opened successfully");
 
     let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
@@ -72,23 +87,28 @@ async fn pipe_request(
         })?;
     tracing::debug!(target: "tauri_ipc", id = id, "[TRACE] pipe_request: request written, reading response");
 
-    let mut buf = Vec::with_capacity(4096);
-    let mut byte = [0u8; 1];
-    loop {
-        conn.read_exact(&mut byte)
-            .await
-            .map_err(|e| {
-                tracing::error!(target: "tauri_ipc", error = %e, id = id, "[TRACE] pipe_request: pipe read FAILED");
-                format!("pipe read: {e}")
-            })?;
-        if byte[0] == b'\n' {
-            break;
+    // v0.4.22 (event 000091 fix #25): read with a hard 60s
+    // timeout. Without this, a stuck runtime (or a dead but
+    // half-connected sidecar) would cause pipe_request to
+    // block the Tauri command forever, leaving the UI stuck
+    // on "发送中…". 60s is generous — even a 78-card tarot
+    // dispatch returns in <30s, so 60s is well above the
+    // natural latency floor and catches any hang cleanly.
+    let read_fut = read_response_bytes(&mut conn, MAX_LINE);
+    let buf = match tokio::time::timeout(
+        std::time::Duration::from_secs(60),
+        read_fut,
+    ).await {
+        Ok(Ok(buf)) => buf,
+        Ok(Err(e)) => {
+            tracing::error!(target: "tauri_ipc", error = %e, id = id, "[TRACE] pipe_request: pipe read FAILED");
+            return Err(format!("pipe read: {e}"));
         }
-        if buf.len() >= MAX_LINE {
-            return Err(format!("pipe response exceeds {MAX_LINE} bytes"));
+        Err(_) => {
+            tracing::error!(target: "tauri_ipc", id = id, "[TRACE] pipe_request: pipe read TIMED OUT after 60s");
+            return Err(format!("pipe read timed out after 60s (id={id})"));
         }
-        buf.push(byte[0]);
-    }
+    };
     tracing::debug!(target: "tauri_ipc", id = id, resp_len = buf.len(), "[TRACE] pipe_request: response received, parsing JSON");
 
     let resp: serde_json::Value =
@@ -116,6 +136,36 @@ async fn pipe_request(
         .pointer("/result/body")
         .cloned()
         .unwrap_or(serde_json::Value::Null))
+}
+
+/// v0.4.22 (event 000091 fix #25 + #26): extracted from
+/// `pipe_request` so the read can be wrapped in a timeout
+/// (`fix #25`) and switched to `BufReader::read_until` for
+/// better throughput (`fix #26`).
+///
+/// Reads from `conn` byte-by-byte until newline, returning
+/// the bytes without the trailing `\n`. Errors if the
+/// response exceeds `max_bytes`.
+async fn read_response_bytes(
+    conn: &mut tokio::net::windows::named_pipe::NamedPipeClient,
+    max_bytes: usize,
+) -> std::io::Result<Vec<u8>> {
+    use tokio::io::AsyncReadExt;
+    let mut buf = Vec::with_capacity(4096);
+    let mut byte = [0u8; 1];
+    loop {
+        conn.read_exact(&mut byte).await?;
+        if byte[0] == b'\n' {
+            return Ok(buf);
+        }
+        if buf.len() >= max_bytes {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("pipe response exceeds {max_bytes} bytes"),
+            ));
+        }
+        buf.push(byte[0]);
+    }
 }
 
 // ── Sidecar management ──────────────────────────────────────────
@@ -682,14 +732,13 @@ async fn get_workflow(
 
 #[tauri::command]
 async fn cancel_workflow(id: String) -> Result<(), String> {
-    // Was a no-op before; actually call the runtime so the orchestrator
-    // can stop the running workflow.
-    pipe_request(
-        "POST",
-        &format!("/api/workflow/{}/cancel", id),
-        None,
-    )
-    .await?;
+    // v0.4.22 (event 000091 fix #33): URL-encode the wf_id so
+    // a workflow id with `/` or other URL-unsafe chars
+    // doesn't break the route. Also now uses a JSON body
+    // instead of a path placeholder, since the runtime's
+    // dispatcher matches `body.get("wf_id")` for this route.
+    let body = serde_json::json!({ "wf_id": id });
+    pipe_request("POST", "/api/workflow/cancel", Some(body)).await?;
     Ok(())
 }
 

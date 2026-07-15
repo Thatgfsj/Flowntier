@@ -117,8 +117,43 @@ async fn main() -> std::io::Result<()> {
     );
 
     let mut d = Dispatcher::new();
-    let state = std::sync::Arc::new(ServerState::new(workspace, data_dir).await);
+    let state = std::sync::Arc::new(ServerState::new(workspace, data_dir.clone()).await);
     register_all(&mut d, (*state).clone());
+
+    // v0.4.22 (event 000091 fix #34): if FLOWNTIER_HTTP_BRIDGE_TOKEN
+    // is not set, generate a 32-byte random hex token and write
+    // it to <data_dir>/.bridge_token so the Tauri shell can read
+    // it and include it in every bridge request. This is the
+    // out-of-the-box default for fresh installs; power users can
+    // override the env var explicitly to share a token across
+    // multiple processes.
+    if pipe_server::ws_bridge::token_from_env().is_none() {
+        use rand::Rng;
+        let mut bytes = [0u8; 32];
+        rand::thread_rng().fill(&mut bytes[..]);
+        let hex: String = bytes.iter().map(|b| format!("{:02x}", b)).collect();
+        // SAFETY: env::set_var is process-local. We do this
+        // before the HTTP bridge task spawns below.
+        // SAFETY: env::set_var is unsafe in newer Rust; on the
+        // MSRV we're on it's still safe.
+        #[allow(unused_unsafe)]
+        unsafe { std::env::set_var("FLOWNTIER_HTTP_BRIDGE_TOKEN", &hex); }
+        let token_path = data_dir.join(".bridge_token");
+        if let Err(e) = std::fs::write(&token_path, hex.as_bytes()) {
+            tracing::warn!(
+                target: "pipe_server",
+                error = %e,
+                path = %token_path.display(),
+                "v0.4.22 (event 000091 fix #34): failed to write .bridge_token; bridge auth will reject all requests"
+            );
+        } else {
+            tracing::info!(
+                target: "pipe_server",
+                path = %token_path.display(),
+                "v0.4.22 (event 000091 fix #34): generated bridge token; Tauri shell should read this file"
+            );
+        }
+    }
 
     // v0.4.20 (event 000056): background quota scheduler.
     // Spawned AFTER register_all so state.dispatcher() returns Some.

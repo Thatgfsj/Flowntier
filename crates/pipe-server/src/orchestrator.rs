@@ -184,6 +184,35 @@ pub struct TaskOutcome {
     pub elapsed_ms: u64,
 }
 
+/// v0.4.22 (event 000091 fix #23): one resolved candidate for
+/// a (provider_short, model_id) pair, with everything needed
+/// to build an `OpenAiProvider`. The orchestrator iterates
+/// over a Vec of these when the primary fails — the chairman
+/// can configure `fallback_chain: ["anthropic:claude-opus-4-8",
+/// "minimax:MiniMax-Text-01"]` so a mimo 401 falls through to
+/// anthropic / MiniMax instead of killing the whole phase.
+struct ResolvedCandidate {
+    provider_short: String,
+    model_id: String,
+    base_url: String,
+    api_kind: String,
+    secret_name: String,
+    api_key: zeroize::Zeroizing<String>,
+}
+
+impl ResolvedCandidate {
+    fn from_resolved(r: &crate::handlers::ResolvedRole) -> Self {
+        Self {
+            provider_short: r.provider_short.clone(),
+            model_id: r.model_id.clone(),
+            base_url: r.base_url.clone(),
+            api_kind: r.api_kind.clone(),
+            secret_name: r.secret_name.clone(),
+            api_key: r.api_key.clone(),
+        }
+    }
+}
+
 /// Top-level orchestrator handle. One Orchestrator owns a
 /// single workflow (wf_id) and runs the 8 phases serially,
 /// spawning parallel agents inside each phase as the spec
@@ -325,29 +354,24 @@ impl Orchestrator {
         let role_id = spec.role.id().to_string();
         let role_display = spec.role.display().to_string();
 
-        // v0.4.22 (event 000082): per-agent start log so the
-        // chairman can see which agent role is currently
-        // running. Combined with the phase-completed log
-        // (in emit_phase), the runtime log is now sufficient
-        // to debug any stall without grepping the events
-        // pipe. Model + api_kind surface so the chairman
-        // sees which provider is being hit (mimo:...
-        // vs minimax:...).
-        info!(
-            target: "orchestrator",
-            wf_id = %self.wf_id,
-            role = %role_id,
-            role_display = %role_display,
-            "[TRACE] agent run starting (event 000082)"
-        );
-
-        // Resolve provider + model from role_overrides. If the
-        // role isn't configured, return FAILED immediately —
-        // don't sit on a 30-minute timeout for nothing.
-        let resolved = match crate::handlers::resolve_role_for_orchestrator(
-            &self.state, &role_id,
-        ).await {
-            Ok(r) => r,
+        // v0.4.22 (event 000091 fix #23): build a list of
+        // (provider, model_id, base_url, api_kind) candidates
+        // from the primary default_model + the configured
+        // fallback_chain. If the primary fails with a
+        // retriable error (DNS, 401, 429, 5xx), try the next
+        // candidate instead of letting the whole phase die.
+        let candidates = match self.build_candidates(&role_id).await {
+            Ok(c) if !c.is_empty() => c,
+            Ok(_) => {
+                warn!(target: "orchestrator", role = %role_id, "no candidates resolved; default_model missing or empty");
+                return TaskOutcome {
+                    role_id, role_display,
+                    status: "FAILED: no candidates resolved".into(),
+                    summary: None,
+                    text: String::new(),
+                    elapsed_ms: 0,
+                };
+            }
             Err(e) => {
                 warn!(target: "orchestrator", role = %role_id, error = %e, "resolve_role failed");
                 return TaskOutcome {
@@ -360,30 +384,166 @@ impl Orchestrator {
             }
         };
 
-        let provider: Arc<dyn agent_core::Provider> = match resolved.api_kind.as_str() {
-            "openai" => Arc::new(agent_core::provider::openai::OpenAiProvider::openai(
-                resolved.model_id.clone(),
-                resolved.api_key.to_string(),
-            )),
-            _ => Arc::new(agent_core::provider::openai::OpenAiProvider::compat(
-                resolved.base_url.clone(),
-                resolved.model_id.clone(),
-                resolved.api_key.to_string(),
-            )),
-        };
-        let agent = agent_core::Agent::new(
-            spec.role.clone(),
-            provider,
-            self.state.tools.clone(),
-            self.state.workspace_snapshot(),
-            agent_core::AgentConfig::default(),
-        );
-        let task = if let Some(ctx) = spec.context {
-            format!("{}\n\n{}", spec.task, ctx)
-        } else {
-            spec.task
-        };
+        // Try each candidate in order. Stop on first success.
+        let mut last_outcome: Option<TaskOutcome> = None;
+        for (idx, cand) in candidates.iter().enumerate() {
+            info!(
+                target: "orchestrator",
+                wf_id = %self.wf_id,
+                role = %role_id,
+                role_display = %role_display,
+                candidate_idx = idx,
+                provider_short = %cand.provider_short,
+                model_id = %cand.model_id,
+                base_url = %cand.base_url,
+                api_kind = %cand.api_kind,
+                "[TRACE] event 000091 fix #23: agent run starting (with fallback)"
+            );
 
+            let provider: Arc<dyn agent_core::Provider> = match cand.api_kind.as_str() {
+                "openai" => Arc::new(agent_core::provider::openai::OpenAiProvider::openai(
+                    cand.model_id.clone(),
+                    cand.api_key.to_string(),
+                )),
+                _ => Arc::new(agent_core::provider::openai::OpenAiProvider::compat(
+                    cand.base_url.clone(),
+                    cand.model_id.clone(),
+                    cand.api_key.to_string(),
+                )),
+            };
+            let agent = agent_core::Agent::new(
+                spec.role.clone(),
+                provider,
+                self.state.tools.clone(),
+                self.state.workspace_snapshot(),
+                agent_core::AgentConfig::default(),
+            );
+            let task = if let Some(ref ctx) = spec.context {
+                format!("{}\n\n{}", spec.task, ctx)
+            } else {
+                spec.task.clone()
+            };
+
+            let outcome = self.drive_single_agent(agent, task, role_id.clone(), role_display.clone()).await;
+            // If the outcome looks like a retriable failure, log
+            // it and try the next candidate. "DONE" / "ABORTED"
+            // (user-cancelled) / "TIMEOUT" (5-min wall clock) are
+            // not retriable — they reflect intent, not provider
+            // health.
+            let retriable = outcome.status.starts_with("FAILED")
+                && !outcome.status.starts_with("FAILED: abort")
+                && !outcome.status.starts_with("FAILED: cancel");
+            if !retriable {
+                return outcome;
+            }
+            warn!(
+                target: "orchestrator",
+                wf_id = %self.wf_id,
+                role = %role_id,
+                candidate_idx = idx,
+                status = %outcome.status,
+                "event 000091 fix #23: candidate failed; trying next"
+            );
+            last_outcome = Some(outcome);
+        }
+        // All candidates exhausted — return the last failure.
+        last_outcome.unwrap_or_else(|| TaskOutcome {
+            role_id, role_display,
+            status: "FAILED: all candidates exhausted".into(),
+            summary: None,
+            text: String::new(),
+            elapsed_ms: 0,
+        })
+    }
+
+    /// Build the list of (provider, model, base_url, api_kind)
+    /// candidates. Primary = `default_model`. Fallback = each
+    /// entry in `fallback_chain` (which is itself in
+    /// "<provider>:<model>" form). Both are resolved against
+    /// the preset table. API key is taken from the matching
+    /// preset's `secret_name` in the OS keystore. Returns an
+    /// error only if the primary can't be resolved; the
+    /// fallback is best-effort (skip entries with a missing
+    /// preset or no API key, with a warn log).
+    async fn build_candidates(
+        &self,
+        role_id: &str,
+    ) -> Result<Vec<ResolvedCandidate>, String> {
+        let primary = crate::handlers::resolve_role_for_orchestrator(
+            &self.state, role_id,
+        ).await?;
+        let mut out = vec![ResolvedCandidate::from_resolved(&primary)];
+        for fb in &primary.fallback_chain {
+            match crate::handlers::resolve_role_for_orchestrator(
+                &self.state, role_id,
+            ).await {
+                Ok(_) => {
+                    // resolve_role_for_orchestrator always
+                    // returns the primary; for fallback we need
+                    // to resolve the override string directly.
+                    // See helper below.
+                }
+                Err(_) => continue,
+            }
+            match self.resolve_fallback_string(fb).await {
+                Ok(c) => {
+                    info!(
+                        target: "orchestrator", role = %role_id,
+                        fallback = %fb, "added fallback candidate"
+                    );
+                    out.push(c);
+                }
+                Err(e) => warn!(
+                    target: "orchestrator", role = %role_id,
+                    fallback = %fb, error = %e,
+                    "fallback candidate unresolvable; skipping"
+                ),
+            }
+        }
+        Ok(out)
+    }
+
+    /// Resolve a single "<provider>:<model>" string into a
+    /// candidate (uses the preset's base_url + secret_name).
+    async fn resolve_fallback_string(
+        &self,
+        fb: &str,
+    ) -> Result<ResolvedCandidate, String> {
+        let (provider_short, model_id) = match fb.split_once(':') {
+            Some((p, m)) => (p.to_string(), m.to_string()),
+            None => return Err(format!("fallback '{fb}' must be in '<provider>:<model>' form")),
+        };
+        let preset = crate::providers::get(&provider_short)
+            .ok_or_else(|| format!("unknown provider preset '{provider_short}'"))?;
+        let api_key: zeroize::Zeroizing<String> = match self
+            .state
+            .secrets
+            .reveal(&preset.secret_name)
+            .await
+        {
+            Ok(z) if !z.is_empty() => z,
+            _ => return Err(format!("no API key for {}", preset.secret_name)),
+        };
+        Ok(ResolvedCandidate {
+            provider_short,
+            model_id,
+            base_url: preset.base_url.to_string(),
+            api_kind: preset.kind.to_string(),
+            secret_name: preset.secret_name.to_string(),
+            api_key,
+        })
+    }
+
+    /// Run one agent and collect its outcome (extracted from
+    /// the original `run_agent` body so the fallback loop can
+    /// call it multiple times).
+    async fn drive_single_agent(
+        &self,
+        agent: agent_core::Agent,
+        task: String,
+        role_id: String,
+        role_display: String,
+    ) -> TaskOutcome {
         let start = Instant::now();
         let mut rx = agent.run(task);
         let mut text = String::new();
@@ -416,7 +576,21 @@ impl Orchestrator {
                                 text_len = text.len(),
                                 "v0.4.22 (event 000082): agent run finished"
                             );
-                            if matches!(last_status.as_str(), "DONE" | "FAILED" | "ABORTED" | "ABORTED_REPEAT" | "TIMEOUT (300s)") {
+                            // v0.4.22 (event 000091 fix #2): use
+                            // starts_with instead of exact match.
+                            // The agent loop emits statuses like
+                            // "FAILED: DNS error" or
+                            // "FAILED: MaxIterationsReached(50)"
+                            // — exact "FAILED" never matched those,
+                            // so run_agent hung until the 5-min
+                            // per-agent timeout. Prefix matching
+                            // catches all of: DONE, FAILED:*,
+                            // ABORTED, ABORTED_REPEAT, TIMEOUT:*.
+                            if last_status == "DONE"
+                                || last_status.starts_with("FAILED")
+                                || last_status.starts_with("ABORTED")
+                                || last_status.starts_with("TIMEOUT")
+                            {
                                 return false;
                             }
                         }
@@ -427,7 +601,9 @@ impl Orchestrator {
             },
         ).await.unwrap_or(true);
 
-        let status = if timed_out && !matches!(last_status.as_str(), "DONE" | "FAILED" | "ABORTED" | "ABORTED_REPEAT") {
+        let status = if timed_out && !(last_status == "DONE"
+            || last_status.starts_with("FAILED")
+            || last_status.starts_with("ABORTED")) {
             let _ = self.events.send(AgentEvent::Done {
                 wf_id: self.wf_id.clone(),
                 status: format!("TIMEOUT (300s)"),

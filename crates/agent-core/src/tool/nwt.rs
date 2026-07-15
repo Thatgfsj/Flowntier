@@ -109,7 +109,11 @@ fn read_highest_id(root: &Path) -> u32 {
         return 0;
     }
     let mut max = 0u32;
-    for entry in fs::read_dir(&timeline).into_iter().flatten() {
+    let read_dir = match fs::read_dir(&timeline) {
+        Ok(rd) => rd,
+        Err(_) => return 0,
+    };
+    for entry in read_dir.flatten() {
         if let Some(name) = entry.file_name().to_str() {
             if let Some(rest) = name.strip_suffix(".json") {
                 if let Ok(n) = rest.parse::<u32>() {
@@ -333,7 +337,7 @@ impl Tool for NwtLogTool {
     async fn execute(
         &self,
         args: serde_json::Value,
-        ctx: ToolContext,
+        ctx: &ToolContext,
     ) -> Result<ToolOutput, ToolError> {
         let task = args
             .get("task")
@@ -389,6 +393,7 @@ impl Tool for NwtLogTool {
         Ok(ToolOutput {
             content: format!("logged nwt event {id}"),
             preview: format!("nwt {id}"),
+            is_error: false,
         })
     }
 }

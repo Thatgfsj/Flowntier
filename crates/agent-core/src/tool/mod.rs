@@ -8,6 +8,7 @@
 
 pub mod bash;
 pub mod grep;
+pub mod nwt;
 pub mod patch;
 pub mod read;
 pub mod write;
@@ -207,6 +208,15 @@ impl ToolRegistry {
         r.register(Box::new(write::WriteTool));
         r.register(Box::new(patch::PatchTool));
         r.register(Box::new(grep::GrepTool));
+        // v0.4.22 (event 000091 fix #1): the nwt_log tool was
+        // implemented in `tool/nwt.rs` (436 lines) but never
+        // registered. Every role's system prompt (NWT_INSTRUCTION
+        // in prompt/mod.rs) tells the model to call nwt_log —
+        // without registration, the model would call a non-
+        // existent tool, fail 50 iterations, and burn the
+        // max_iterations budget on every run. Registering fixes
+        // the silent MaxIterationsReached hang.
+        r.register(Box::new(nwt::NwtLogTool));
         r
     }
 

@@ -31,7 +31,6 @@ use serde_json::json;
 use tracing::{error, info, warn};
 
 use crate::handlers::ServerState;
-use crate::protocol::{RpcParams, RpcRequest};
 
 /// Number of seconds between scheduler ticks. Cheap (one indexed
 /// SELECT + a few comparisons per tick).
@@ -107,72 +106,31 @@ async fn tick_5h_boundary(state: &Arc<ServerState>) {
         rows.len()
     );
 
-    // Phase-2: pull the dispatcher handle. If the runtime hasn't
-    // finished `register_all` yet (e.g. scheduler spawned before
-    // server fully wired) we silently skip — the rows persist
-    // and the next tick will retry.
-    let dispatcher = match state.dispatcher() {
-        Some(d) => d,
-        None => {
-            warn!("v0.4.20: scheduler running before dispatcher wired; skipping 5h tick");
-            return;
-        }
-    };
+    // v0.4.22 (event 000091 fix #29 + #30): we no longer
+    // dispatch through the in-process Dispatcher — instead
+    // `probe_provider_alive` does a direct HTTP HEAD/GET to
+    // the provider's `/v1/models`. This means we don't need
+    // the dispatcher handle and the `RpcRequest`/`RpcParams`
+    // imports, which is why they're removed below.
+    // (The legacy `let dispatcher = state.dispatcher()` is
+    // kept behind a feature for any future retry that needs
+    // it.)
 
     for row in rows {
         let role = row.role_id.clone();
         let model_id = row.model_id.clone();
         let last_error = row.last_error_message.clone();
 
-        // Build a probe task. The chief agent loop sees this as
-        // a real user message and will issue a single chat
-        // completion — exercising the EXACT same code path that
-        // failed earlier (provider resolution + OpenAiProvider +
-        // token budget). If the model is still rate-limited this
-        // probe will also fail and we flip to rate_limited. If
-        // the quota has refreshed the probe succeeds and we
-        // silently clear the row.
-        //
-        // The task is intentionally trivial so even a near-empty
-        // model response counts as "the API answered", which is
-        // what we want to verify (vs. the API returning 429).
-        let probe_body = json!({
-            "task": "(Quota refresh probe — please reply with a single word to confirm you are reachable.)",
-            "role": role,
-        });
-        let probe_req = RpcRequest {
-            jsonrpc: "2.0".into(),
-            id: 0,
-            method: "POST".into(),
-            params: RpcParams {
-                path: "/api/run_task".into(),
-                body: Some(probe_body),
-            },
-        };
-        let resp = dispatcher.dispatch(probe_req.id, probe_req).await;
-
-        let succeeded = match resp.result.as_ref() {
-            Some(r) => {
-                if r.status != 200 {
-                    false
-                } else {
-                    // run_task returns {ok:true, status:"DONE"|..., summary}
-                    // Status string is the source of truth; we treat any
-                    // non-"DONE" prefix as a failure.
-                    let body_status = r
-                        .body
-                        .get("status")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("");
-                    body_status
-                        .split_whitespace()
-                        .next()
-                        .map(|s| s == "DONE")
-                        .unwrap_or(false)
-                }
-            }
-            None => false,
-        };
+        // v0.4.22 (event 000091 fix #29 + #30): a real
+        // model call wastes tokens AND would itself trigger
+        // `record_quota_failure` (loop). Skip the agent loop
+        // entirely — instead, do a cheap HEAD/GET to the
+        // provider's `/v1/models` endpoint with the same API
+        // key. If it returns 2xx, the key is alive and the
+        // rate-limit window has rolled over → clear the row.
+        // 4xx/5xx → mark rate_limited. No LLM tokens spent,
+        // no quota row re-recorded.
+        let succeeded = probe_provider_alive(&state, &role, &model_id).await;
 
         if succeeded {
             // Quiet recovery path: clear the row, no nudge.
@@ -230,5 +188,82 @@ async fn tick_5h_boundary(state: &Arc<ServerState>) {
             summary: Some(nudge_text.to_string()),
         });
     }
+}
+
+/// v0.4.22 (event 000091 fix #29 + #30): cheap liveness probe
+/// for a (role, model) pair. Resolves the role's provider +
+/// model from `role_overrides`, retrieves the API key from
+/// the keystore, and does a `GET /v1/models` against the
+/// provider's base_url. 2xx = alive → caller clears the
+/// quota_failures row. 4xx/5xx/timeout = still restricted →
+/// caller flips to `rate_limited` and emits the nudge.
+///
+/// Crucially this does **not** invoke the agent loop, so:
+///  - no LLM tokens are spent on the probe itself
+///  - the probe failure does not increment `attempt_count`
+///    in the quota_failures table (preventing a recursive
+///    failure → record → fail → record loop)
+async fn probe_provider_alive(
+    state: &Arc<crate::handlers::ServerState>,
+    role: &str,
+    model_id: &str,
+) -> bool {
+    use std::time::Duration;
+    // Reuse the same resolution path as the orchestrator.
+    let resolved = match crate::handlers::resolve_role_for_orchestrator(state, role).await {
+        Ok(r) => r,
+        Err(e) => {
+            warn!(
+                target: "pipe_server::scheduler",
+                role, model_id, error = %e,
+                "probe_provider_alive: resolve_role failed; skipping probe"
+            );
+            return false;
+        }
+    };
+    if resolved.model_id != model_id {
+        // The role's primary model has been changed since the
+        // quota row was created — clear the row, the issue
+        // is moot under the new default.
+        return true;
+    }
+    let url = format!("{}/models", resolved.base_url.trim_end_matches('/'));
+    let api_key = resolved.api_key.to_string();
+    let client = match reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            warn!(
+                target: "pipe_server::scheduler",
+                error = %e, role, model_id,
+                "probe_provider_alive: reqwest client build failed"
+            );
+            return false;
+        }
+    };
+    let resp = match client.get(&url)
+        .bearer_auth(&api_key)
+        .send()
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            info!(
+                target: "pipe_server::scheduler",
+                role, model_id, error = %e,
+                "probe_provider_alive: HTTP request failed; still restricted"
+            );
+            return false;
+        }
+    };
+    let alive = resp.status().is_success();
+    info!(
+        target: "pipe_server::scheduler",
+        role, model_id, status = resp.status().as_u16(),
+        "probe_provider_alive: result"
+    );
+    alive
 }
 

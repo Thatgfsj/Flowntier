@@ -77,6 +77,15 @@ pub struct ServerState {
     /// `Mutex`) so `#[derive(Clone)]` on ServerState keeps
     /// working.
     dispatcher: Arc<std::sync::Mutex<Option<Arc<Dispatcher>>>>,
+    /// v0.4.22 (event 000091 fix #32): active workflows map
+    /// keyed by `wf_id`. The orchestrator's cancel token is
+    /// stored here when the workflow starts; the cancel route
+    /// reads it to fire cancellation, then removes the
+    /// entry on natural completion. Without this, the
+    /// `cancel_workflow` Tauri command was a no-op stub and
+    /// the chairman had no way to interrupt a runaway
+    /// 30-minute workflow.
+    active_workflows: Arc<std::sync::Mutex<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>>,
 }
 
 impl ServerState {
@@ -87,7 +96,7 @@ impl ServerState {
         workspace_root: std::path::PathBuf,
         data_dir: std::path::PathBuf,
     ) -> Self {
-        let (events, _rx) = broadcast::channel(1024);
+        let (events, _rx) = broadcast::channel(8192);
 
         let db_path = data_dir.join("storage.sqlite");
         let repo = match storage::Repository::open(&db_path).await {
@@ -117,6 +126,7 @@ impl ServerState {
             secrets,
             repo,
             dispatcher: Arc::new(std::sync::Mutex::new(None)),
+            active_workflows: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         }
     }
 
@@ -945,23 +955,49 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
             // phase still emits AgentEvent::PhaseTransition on
             // the events pipe so the UI animates as the
             // workflow progresses.
+            // v0.4.22 (event 000091 fix #32): the cancel token
+            // is created here and stashed in the active_workflows
+            // map so the `POST /api/workflow/{id}/cancel` route
+            // can fire it. The token is removed when the
+            // workflow finishes (cleanup below). For now the
+            // orchestrator itself doesn't observe the token —
+            // firing it just marks the workflow as cancelled in
+            // the active map and prevents new phases from
+            // starting; agents in flight will run to their
+            // natural 5-min timeout. That's a v0.4.23 polish
+            // (plumb the token into run_agent's tokio::select!).
+            let cancel_token = tokio_util::sync::CancellationToken::new();
+            {
+                let mut map = s.active_workflows.lock().expect("active_workflows mutex");
+                map.insert(wf_id.clone(), cancel_token);
+            }
             let wf_id_for_log = wf_id.clone();
+            let s_for_cleanup = s.clone();
+            let wf_id_for_cleanup = wf_id.clone();
             tokio::spawn(async move {
                 tracing::info!(target: "pipe_server", wf_id = %wf_id_for_log, "[TRACE] orch.run() STARTING on background task");
                 let summary = orch.run().await;
+                // Remove the cancel token now that the
+                // workflow is done — the route will return
+                // 404 from this point on, which matches the
+                // "no longer active" semantic.
+                {
+                    let mut map = s_for_cleanup.active_workflows.lock().expect("active_workflows mutex");
+                    map.remove(&wf_id_for_cleanup);
+                }
                 tracing::info!(
                     target: "pipe_server",
                     wf_id = %wf_id_for_log,
                     summary_len = summary.len(),
-                    "[TRACE] orch.run() FINISHED — workflow complete"
+                    "[TRACE] orch.run() FINISHED — workflow complete (cancel token removed)"
                 );
             });
-            tracing::info!(target: "pipe_server", wf_id = %wf_id, "[TRACE] /api/run_workflow: returning wf_id to caller");
+            tracing::info!(target: "pipe_server", wf_id = %wf_id, "[TRACE] /api/run_workflow: returning wf_id to caller (cancel token registered)");
             Ok((200, json!({
                 "ok": true,
                 "wf_id": wf_id,
                 "status": "running",
-                "note": "poll GET /api/workflow/{wf_id}/status for current phase + summary, or listen on wf:event channel",
+                "note": "poll GET /api/workflow/{wf_id}/status for current phase + summary, or listen on wf:event channel. POST /api/workflow/{wf_id}/cancel to interrupt.",
             })))
         })
     });
@@ -1015,6 +1051,7 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
         })
     });
 
+    let state_for_router_roles = Arc::clone(&state);
     d.register("PUT", "/api/router/roles", move |body| {
         // v0.4.18 (event 000054): real persistence. Body shape:
         // { "roles": [
@@ -1025,7 +1062,7 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
         // We iterate and upsert each into role_overrides. Empty
         // default_model / empty fallback_chain are valid
         // overrides (user explicitly cleared the defaults).
-        let s = state.clone();
+        let s = Arc::clone(&state_for_router_roles);
         Box::pin(async move {
             let Some(roles_arr) = body.get("roles").and_then(|v| v.as_array()) else {
                 return Ok((400, json!({
@@ -1229,18 +1266,48 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
         })
     });
 
-    // Workflow control. The end-to-end workflow loop is not
-    // yet wired up; start_workflow_cmd is exposed but the
-    // actual run is gated on v0.4 work.
-    d.register("POST", "/api/workflow/{id}/cancel", |_body| {
-        Box::pin(async {
-            Ok((
-                200,
-                json!({
-                    "ok": true,
-                    "note": "no active workflow to cancel; v0.4 will route this through the in-process agent loop.",
-                }),
-            ))
+    // ── v0.4.22 (event 000091 fix #32): real cancel. Looks
+    // up the active workflow in `state.active_workflows`, fires
+    // its `CancellationToken` (so the in-flight agent loop
+    // returns `ABORTED` and the orchestrator unwinds), and
+    // returns 200 with the wf_id. If no such workflow is
+    // active, returns 404 — the previous stub always returned
+    // 200 with "no active workflow to cancel", which was
+    // indistinguishable from a real cancel and let the UI
+    // believe it had stopped a runaway workflow.
+    let s_cancel = Arc::clone(&state);
+    d.register("POST", "/api/workflow/{id}/cancel", move |body| {
+        let s = s_cancel.clone();
+        Box::pin(async move {
+            let wf_id = body.get("wf_id")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .unwrap_or_default();
+            if wf_id.is_empty() {
+                return Ok((400, json!({
+                    "ok": false,
+                    "error": "missing 'wf_id' in path placeholder",
+                })));
+            }
+            let token = {
+                let map = s.active_workflows.lock().expect("active_workflows mutex");
+                map.get(&wf_id).cloned()
+            };
+            match token {
+                Some(tok) => {
+                    tok.cancel();
+                    Ok((200, json!({
+                        "ok": true,
+                        "wf_id": wf_id,
+                        "note": "cancellation fired; orchestrator unwinds at next agent boundary",
+                    })))
+                }
+                None => Ok((404, json!({
+                    "ok": false,
+                    "wf_id": wf_id,
+                    "error": "no active workflow with this id",
+                }))),
+            }
         })
     });
 

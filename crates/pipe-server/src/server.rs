@@ -138,8 +138,18 @@ async fn rpc_listener(path: String, dispatcher: Arc<Dispatcher>) -> std::io::Res
         let d = dispatcher.clone();
         let p = path.clone();
         let h = tokio::spawn(async move {
+            // v0.4.22 (event 000091 fix #16): track whether THIS
+            // worker has already created its first-instance for
+            // the path. `first_pipe_instance(true)` can only be
+            // used ONCE per pipe path; the second call fails
+            // because the path already has a "first" instance.
+            // Worker 0 uses `true` on its first loop iteration,
+            // then `false` on every subsequent iteration (so it
+            // can keep serving clients after the first one
+            // disconnects). Other workers always use `false`.
+            let mut created_first = false;
             loop {
-                let first = i == 0;
+                let first = i == 0 && !created_first;
                 let server = match ServerOptions::new()
                     .first_pipe_instance(first)
                     .create(&p)
@@ -152,6 +162,9 @@ async fn rpc_listener(path: String, dispatcher: Arc<Dispatcher>) -> std::io::Res
                     }
                 };
                 tracing::debug!(worker = i, first = first, "[TRACE] rpc pipe instance created, waiting for client connect");
+                if first {
+                    created_first = true;
+                }
                 if let Err(e) = server.connect().await {
                     tracing::error!(error = %e, worker = i, "[TRACE] rpc pipe connect failed; retrying");
                     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -181,8 +194,14 @@ async fn events_listener(path: String, tx: broadcast::Sender<AgentEvent>) -> std
         let p = path.clone();
         let h = tokio::spawn(async move {
             let mut rx = txc.subscribe();
+            // v0.4.22 (event 000091 fix #16): same fix as the
+            // RPC listener above — first worker uses
+            // first_pipe_instance(true) on the FIRST iteration
+            // only, then switches to false so it can keep
+            // serving clients after the first disconnect.
+            let mut created_first = false;
             loop {
-                let first = i == 0;
+                let first = i == 0 && !created_first;
                 let mut server = match ServerOptions::new()
                     .first_pipe_instance(first)
                     .create(&p)
@@ -194,6 +213,9 @@ async fn events_listener(path: String, tx: broadcast::Sender<AgentEvent>) -> std
                         continue;
                     }
                 };
+                if first {
+                    created_first = true;
+                }
                 if let Err(e) = server.connect().await {
                     tracing::error!(error = %e, "events pipe connect failed; retrying");
                     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
