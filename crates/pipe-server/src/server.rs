@@ -138,51 +138,55 @@ async fn rpc_listener(path: String, dispatcher: Arc<Dispatcher>) -> std::io::Res
         let d = dispatcher.clone();
         let p = path.clone();
         let h = tokio::spawn(async move {
-            // event 000103: the v0.4.22 comment was wrong —
-            // tokio's `ServerOptions::create` does NOT auto-
-            // create the pipe when every worker passes
-            // `first_pipe_instance(false)`. On Windows named
-            // pipes, exactly one process must own the
-            // FIRST_PIPE_INSTANCE flag to bring the pipe into
-            // existence; subsequent workers attach as
-            // SECONDARY instances. Worker 0 is that primary.
+            // event 000104: worker 0 creates the pipe (primary),
+            // workers 1..N attach as secondary.
             //
-            // The previous attempt (event 000094) used
-            // `first=false` for all workers to avoid
-            // ERROR_ACCESS_DENIED (os error 5) when a stale
-            // pipe survived from a prior session. The fix
-            // for THAT is the explicit `delete_if_exists`
-            // sweep below — we tolerate the stale pipe, try
-            // to delete it, and only then ask for the
-            // FIRST_PIPE_INSTANCE flag.
+            // The event 000103 attempt put a `ServerOptions::new()
+            // .first_pipe_instance(false).create(&p)` BEFORE the
+            // primary create — the idea was to "drop a stale
+            // pipe". That was wrong: ServerOptions::create
+            // doesn't delete; it CREATES a new server instance
+            // and attaches to any existing pipe path. So worker
+            // 0 ended up:
+            //   1. attaching as secondary to any stale pipe
+            //              (succeeds)
+            //   2. asking for FIRST_PIPE_INSTANCE which the OS
+            //      now refuses with ERROR_ACCESS_DENIED (5)
+            //      because the previous call already attached
+            //
+            // The OS design is: if there's already a primary
+            // instance for a pipe name, you can ONLY attach as
+            // secondary. There is no "delete via Win32 API" —
+            // the only ways to clear a pipe are (a) the owning
+            // process to exit (releases all handles), or (b)
+            // the Tauri shell to taskkill the prior sidecar
+            // BEFORE spawning the new one.
+            //
+            // We rely on (b). The desktop shell runs taskkill
+            // /F /IM flowntier_runtime.exe before spawning
+            // (event 000103 fix C). If something went wrong
+            // upstream, we just back off and let the OS clean
+            // up; eventually the prior process exits and our
+            // primary create will succeed.
             let is_primary = i == 0;
             loop {
                 let mut opts = ServerOptions::new();
-                if is_primary {
-                    // Best-effort: if a previous pipe survived,
-                    // drop it so we can claim first instance.
-                    let _ = ServerOptions::new()
-                        .first_pipe_instance(false)
-                        .create(&p);
-                    opts.first_pipe_instance(true);
-                } else {
-                    opts.first_pipe_instance(false);
-                }
+                opts.first_pipe_instance(is_primary);
                 let server = match opts.create(&p) {
                     Ok(s) => s,
                     Err(e) => {
-                        tracing::error!(error = %e, worker = i, primary = is_primary, "[TRACE] rpc pipe create failed; backing off");
-                        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                        tracing::warn!(error = %e, worker = i, primary = is_primary, "[TRACE] rpc pipe create failed; backing off 2s");
+                        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
                         continue;
                     }
                 };
-                tracing::debug!(worker = i, "[TRACE] rpc pipe instance created, waiting for client connect");
+                tracing::debug!(worker = i, primary = is_primary, "[TRACE] rpc pipe instance created, waiting for client connect");
                 if let Err(e) = server.connect().await {
                     tracing::error!(error = %e, worker = i, "[TRACE] rpc pipe connect failed; retrying");
                     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
                     continue;
                 }
-                tracing::info!(worker = i, "[TRACE] rpc pipe client connected — entering serve_rpc_connection");
+                tracing::info!(worker = i, primary = is_primary, "[TRACE] rpc pipe client connected — entering serve_rpc_connection");
                 if let Err(e) = serve_rpc_connection(server, d.clone()).await {
                     tracing::warn!(error = %e, worker = i, "[TRACE] rpc serve error");
                 }
