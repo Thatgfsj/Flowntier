@@ -173,46 +173,66 @@ async fn read_response_bytes(
 fn spawn_runtime_sidecar(app: &tauri::AppHandle) {
     use tauri_plugin_shell::process::CommandEvent;
 
-// Kill any stale flowntier-runtime.exe from a previous session. Pipes
+// Kill any stale flowntier_runtime.exe from a previous session. Pipes
     // are exclusive, so a dead binary that left the pipe handle open
     // would block the new instance.
+    //
+    // event 000103: the v0.4.22 spawn had two bugs:
+    //   (a) taskkill used the WRONG image name (flowntier-runtime
+    //       with a hyphen) — the actual binary is named with an
+    //       underscore (flowntier_runtime). The kill silently
+    //       no-op'd because /im lookup returns 128 and we ignored
+    //       the exit code.
+    //   (b) the 30s "wait for sidecar healthy" loop silently
+    //       returned when the deadline elapsed. The Tauri shell
+    //       then asked for RPC and got pipe-not-found forever —
+    //       visible to the user as "卡死很长一段時間". We now
+    //       log a loud error if we time out so the failure mode
+    //       is at least diagnosable.
     #[cfg(target_os = "windows")]
     {
-        let _ = std::process::Command::new("taskkill")
-            .args(["/f", "/im", "flowntier-runtime.exe"])
+        let r = std::process::Command::new("taskkill")
+            .args(["/f", "/im", "flowntier_runtime.exe"])
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .status();
+        tracing::warn!(
+            target: "flowntier_shell",
+            "taskkill /f /im flowntier_runtime.exe returned {:?} (128 means no matching process)",
+            r.map(|s| s.code())
+        );
         std::thread::sleep(Duration::from_millis(1000));
     }
 
     // Already up? Probe the RPC pipe.
     if try_ping_pipe().is_ok() {
-        println!("[flowntier] runtime already running");
+        tracing::info!(target: "flowntier_shell", "[TRACE] runtime already running on RPC pipe");
     } else {
-        println!("[flowntier] spawning sidecar...");
+        tracing::info!(target: "flowntier_shell", "[TRACE] spawning sidecar...");
         let sidecar_command = match app.shell().sidecar("flowntier_runtime") {
             Ok(cmd) => cmd,
             Err(e) => {
-                eprintln!("[flowntier] failed to create sidecar: {}", e);
+                tracing::error!(target: "flowntier_shell", error = %e, "failed to create sidecar Command");
                 return;
             }
         };
 
         match sidecar_command.spawn() {
             Ok((mut rx, child)) => {
-                println!("[flowntier] sidecar pid={:?}", child.pid());
+                tracing::info!(target: "flowntier_shell", pid = ?child.pid(), "[TRACE] sidecar spawned");
                 tauri::async_runtime::spawn(async move {
                     while let Some(event) = rx.recv().await {
                         match event {
                             CommandEvent::Stdout(line) => {
-                                println!("[sidecar] {}", String::from_utf8_lossy(&line));
+                                let s = String::from_utf8_lossy(&line);
+                                tracing::info!(target: "flowntier_shell", "[sidecar:out] {}", s);
                             }
                             CommandEvent::Stderr(line) => {
-                                eprintln!("[sidecar:err] {}", String::from_utf8_lossy(&line));
+                                let s = String::from_utf8_lossy(&line);
+                                tracing::error!(target: "flowntier_shell", "[sidecar:err] {}", s);
                             }
                             CommandEvent::Terminated(status) => {
-                                eprintln!("[sidecar] terminated: {:?}", status);
+                                tracing::error!(target: "flowntier_shell", "[sidecar] terminated: {:?}", status);
                                 break;
                             }
                             _ => {}
@@ -222,16 +242,26 @@ fn spawn_runtime_sidecar(app: &tauri::AppHandle) {
 
                 // Wait until the sidecar is listening on the pipe.
                 let deadline = std::time::Instant::now() + Duration::from_secs(30);
+                let mut became_healthy = false;
                 while std::time::Instant::now() < deadline {
                     if try_ping_pipe().is_ok() {
-                        println!("[flowntier] sidecar healthy!");
+                        tracing::info!(target: "flowntier_shell", "[TRACE] sidecar healthy on RPC pipe");
+                        became_healthy = true;
                         break;
                     }
                     std::thread::sleep(Duration::from_millis(500));
                 }
+                if !became_healthy {
+                    tracing::error!(
+                        target: "flowntier_shell",
+                        "sidecar did NOT become healthy within 30s; the webview will see \
+                         pipe-not-found on every API call. Check sidecar stderr in \
+                         ~/Desktop/Flowntier.log (event 000103 typo fixed)."
+                    );
+                }
             }
             Err(e) => {
-                eprintln!("[flowntier] failed to spawn: {}", e);
+                tracing::error!(target: "flowntier_shell", error = %e, "failed to spawn sidecar");
                 return;
             }
         }

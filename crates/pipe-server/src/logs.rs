@@ -60,9 +60,9 @@ pub fn default_log_path() -> PathBuf {
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."));
     if cfg!(target_os = "windows") {
-        home.join("Desktop").join("Flwntier.log")
+        home.join("Desktop").join("Flowntier.log")
     } else {
-        home.join("Flwntier.log")
+        home.join("Flowntier.log")
     }
 }
 
@@ -172,11 +172,28 @@ pub fn init() -> Option<PathBuf> {
         // conflicts with tauri-core's existing pin). The
         // shape we need is simple: a Mutex<File> behind a
         // MakeWriter impl that locks, writes, flushes, drops.
-        let file = std::fs::OpenOptions::new()
+        //
+        // event 000103: don't `.expect()` here — if the
+        // desktop is read-only / onedrive-syncing and the
+        // file open fails, the runtime must still come up
+        // (just without file logging). Falling back to
+        // stderr-only logging keeps the RPC pipe alive.
+        let file = match std::fs::OpenOptions::new()
             .create(true)
             .append(true)
             .open(&path)
-            .expect("open log file for write");
+        {
+            Ok(f) => f,
+            Err(e) => {
+                eprintln!(
+                    "[flowntier-runtime] could not open log file {}: {}; \
+                     falling back to stderr-only",
+                    path.display(),
+                    e
+                );
+                return init_stderr_only(&env_filter);
+            }
+        };
         let writer = LogFileWriter {
             file: std::sync::Arc::new(std::sync::Mutex::new(file)),
         };
@@ -199,23 +216,42 @@ pub fn init() -> Option<PathBuf> {
             path = %path.display(),
             "v0.4.22 (event 000080): log file initialised"
         );
-    } else {
-        // File logging disabled; just stderr.
-        use tracing_subscriber::prelude::*;
-        tracing_subscriber::registry()
-            .with(env_filter)
-            .with(
-                tracing_subscriber::fmt::layer()
-                    .with_span_events(FmtSpan::NONE)
-                    .with_writer(std::io::stderr),
-            )
-            .init();
-        tracing::info!(
-            "v0.4.22 (event 000080): log file disabled \
-             (FLWNTIER_LOG_FILE=0); stderr only"
-        );
+        return Some(path);
     }
-    log_path
+
+    // event 000103: helper for the file-open-failure fallback
+    // path above. Mirrors the FLWNTIER_LOG_FILE=0 branch but
+    // is reachable from inside `init()` when the file open
+    // itself fails (vs. when the env var says "don't file
+    // log").
+    init_stderr_only_inner(&env_filter)
+}
+
+/// Set up only the stderr layer (no file output). Used when
+/// `FLWNTIER_LOG_FILE=0` is set OR when the resolved log file
+/// path can't be opened for write (e.g. read-only desktop,
+/// OneDrive sync conflict).
+pub fn init_stderr_only(
+    env_filter: &tracing_subscriber::EnvFilter,
+) -> Option<PathBuf> {
+    init_stderr_only_inner(env_filter)
+}
+
+fn init_stderr_only_inner(
+    env_filter: &tracing_subscriber::EnvFilter,
+) -> Option<PathBuf> {
+    use tracing_subscriber::prelude::*;
+    use tracing_subscriber::fmt::format::FmtSpan;
+    tracing_subscriber::registry()
+        .with(env_filter.clone())
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_span_events(FmtSpan::NONE)
+                .with_writer(std::io::stderr),
+        )
+        .init();
+    tracing::info!("v0.4.23 (event 000103): stderr-only logging initialised");
+    None
 }
 
 /// Hand-rolled tracing MakeWriter that appends each

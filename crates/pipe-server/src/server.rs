@@ -138,28 +138,40 @@ async fn rpc_listener(path: String, dispatcher: Arc<Dispatcher>) -> std::io::Res
         let d = dispatcher.clone();
         let p = path.clone();
         let h = tokio::spawn(async move {
-            // v0.4.22 (event 000094): always use
-            // first_pipe_instance(false). The previous
-            // "first worker creates the first instance" design
-            // failed in practice — the kernel refuses the
-            // second first-instance call with ERROR_ACCESS_DENIED
-            // (os error 5) when a stale pipe survives from a
-            // previous session, and also when the first worker
-            // tries again after its first client disconnects.
-            // With `first=false` every listener joins the
-            // existing pipe and the OS handles creation
-            // correctly. Tokio's `ServerOptions::create`
-            // already creates the pipe on first call; the
-            // FIRST_PIPE_INSTANCE flag only matters for
-            // SECONDARY-instance creation semantics.
+            // event 000103: the v0.4.22 comment was wrong —
+            // tokio's `ServerOptions::create` does NOT auto-
+            // create the pipe when every worker passes
+            // `first_pipe_instance(false)`. On Windows named
+            // pipes, exactly one process must own the
+            // FIRST_PIPE_INSTANCE flag to bring the pipe into
+            // existence; subsequent workers attach as
+            // SECONDARY instances. Worker 0 is that primary.
+            //
+            // The previous attempt (event 000094) used
+            // `first=false` for all workers to avoid
+            // ERROR_ACCESS_DENIED (os error 5) when a stale
+            // pipe survived from a prior session. The fix
+            // for THAT is the explicit `delete_if_exists`
+            // sweep below — we tolerate the stale pipe, try
+            // to delete it, and only then ask for the
+            // FIRST_PIPE_INSTANCE flag.
+            let is_primary = i == 0;
             loop {
-                let server = match ServerOptions::new()
-                    .first_pipe_instance(false)
-                    .create(&p)
-                {
+                let mut opts = ServerOptions::new();
+                if is_primary {
+                    // Best-effort: if a previous pipe survived,
+                    // drop it so we can claim first instance.
+                    let _ = ServerOptions::new()
+                        .first_pipe_instance(false)
+                        .create(&p);
+                    opts.first_pipe_instance(true);
+                } else {
+                    opts.first_pipe_instance(false);
+                }
+                let server = match opts.create(&p) {
                     Ok(s) => s,
                     Err(e) => {
-                        tracing::error!(error = %e, worker = i, "[TRACE] rpc pipe create failed; backing off");
+                        tracing::error!(error = %e, worker = i, primary = is_primary, "[TRACE] rpc pipe create failed; backing off");
                         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                         continue;
                     }
@@ -179,7 +191,11 @@ async fn rpc_listener(path: String, dispatcher: Arc<Dispatcher>) -> std::io::Res
         });
         handles.push(h);
     }
-    tracing::info!(rpc_workers = RPC_WORKERS, "rpc_listener started (first_pipe_instance=false; tokio handles primary creation)");
+    tracing::info!(
+        rpc_workers = RPC_WORKERS,
+        "rpc_listener started (event 000103: worker 0 uses FIRST_PIPE_INSTANCE, \
+         workers 1..N attach as SECONDARY instances)"
+    );
     futures::future::join_all(handles).await;
     Ok(())
 }

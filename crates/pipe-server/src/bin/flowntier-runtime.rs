@@ -14,15 +14,42 @@ use pipe_server::{
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 4)]
 async fn main() -> std::io::Result<()> {
+    // event 000103: install a panic hook BEFORE logs::init so
+    // any panic during init still surfaces to stderr and the
+    // Windows Event Log. Without this the spawned sidecar
+    // appeared to "die silently" with no stdout/stderr to
+    // diagnose.
+    std::panic::set_hook(Box::new(|info| {
+        let bt = std::backtrace::Backtrace::force_capture();
+        eprintln!("[flowntier-runtime] PANIC: {info}\n{bt}");
+        // Best-effort: also try to write to the same log file
+        // path logs::init() uses, in case file logging is
+        // already initialised when the panic fires.
+        let home = std::env::var_os("USERPROFILE")
+            .or_else(|| std::env::var_os("HOME"))
+            .map(PathBuf::from);
+        if let Some(home) = home {
+            let log = home.join("Desktop").join("Flowntier.log");
+            if let Ok(mut f) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&log)
+            {
+                use std::io::Write;
+                let _ = writeln!(f, "[flowntier-runtime] PANIC: {info}\n{bt}");
+            }
+        }
+    }));
+
     // v0.4.22 (event 000080): set up the global tracing
     // subscriber FIRST so all the `tracing::info!` /
     // `tracing::warn!` calls below actually emit to stderr
-    // (and to ~/Desktop/Flwntier.log when FLWNTIER_LOG_FILE
+    // (and to ~/Desktop/Flowntier.log when FLWNTIER_LOG_FILE
     // is set, which is the default). Per chairman: "日志
     // 暂时放桌面" — so the default is the desktop on
     // Windows. FLWNTIER_LOG_FILE=0 disables file logging.
     let _log_file = logs::init();
-    tracing::info!(target: "pipe_server", "[TRACE] v0.4.22 (event 000084): flowntier-runtime binary started — trace logging active");
+    tracing::info!(target: "pipe_server", "[TRACE] v0.4.23 (event 000103): flowntier-runtime binary started — panic hook + typo fix + stderr fallback");
 
     let mut args = std::env::args().skip(1);
     let mut workspace = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
