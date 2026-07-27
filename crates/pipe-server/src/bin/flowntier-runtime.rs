@@ -8,39 +8,12 @@
 use std::path::PathBuf;
 
 use pipe_server::{
-    logs, register_all, run_http_bridge, run_quota_scheduler, Dispatcher, Server,
+    logs, register_all, run_quota_scheduler, Dispatcher, Server,
     ServerConfig, ServerState,
 };
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 4)]
 async fn main() -> std::io::Result<()> {
-    // event 000103: install a panic hook BEFORE logs::init so
-    // any panic during init still surfaces to stderr and the
-    // Windows Event Log. Without this the spawned sidecar
-    // appeared to "die silently" with no stdout/stderr to
-    // diagnose.
-    std::panic::set_hook(Box::new(|info| {
-        let bt = std::backtrace::Backtrace::force_capture();
-        eprintln!("[flowntier-runtime] PANIC: {info}\n{bt}");
-        // Best-effort: also try to write to the same log file
-        // path logs::init() uses, in case file logging is
-        // already initialised when the panic fires.
-        let home = std::env::var_os("USERPROFILE")
-            .or_else(|| std::env::var_os("HOME"))
-            .map(PathBuf::from);
-        if let Some(home) = home {
-            let log = home.join("Desktop").join("Flowntier.log");
-            if let Ok(mut f) = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(&log)
-            {
-                use std::io::Write;
-                let _ = writeln!(f, "[flowntier-runtime] PANIC: {info}\n{bt}");
-            }
-        }
-    }));
-
     // v0.4.22 (event 000080): set up the global tracing
     // subscriber FIRST so all the `tracing::info!` /
     // `tracing::warn!` calls below actually emit to stderr
@@ -48,8 +21,17 @@ async fn main() -> std::io::Result<()> {
     // is set, which is the default). Per chairman: "日志
     // 暂时放桌面" — so the default is the desktop on
     // Windows. FLWNTIER_LOG_FILE=0 disables file logging.
+    //
+    // event 000109: install the panic hook AFTER logs::init
+    // (so we can read the resolved log file path), but the
+    // hook writes to the SAME file as the subscriber — no
+    // more "panic goes to eprintln, log goes to file,
+    // chairman greps the wrong place" inconsistency.
     let _log_file = logs::init();
-    tracing::info!(target: "pipe_server", "[TRACE] v0.4.23 (event 000103): flowntier-runtime binary started — panic hook + typo fix + stderr fallback");
+    if let Some(path) = &_log_file {
+        logs::install_panic_hook(path);
+    }
+    tracing::info!(target: "pipe_server", "[TRACE] v0.4.23 (event 000109): flowntier-runtime binary started — panic hook + token override");
 
     let mut args = std::env::args().skip(1);
     let mut workspace = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
@@ -147,40 +129,62 @@ async fn main() -> std::io::Result<()> {
     let state = std::sync::Arc::new(ServerState::new(workspace, data_dir.clone()).await);
     register_all(&mut d, (*state).clone());
 
-    // v0.4.22 (event 000091 fix #34): if FLOWNTIER_HTTP_BRIDGE_TOKEN
-    // is not set, generate a 32-byte random hex token and write
-    // it to <data_dir>/.bridge_token so the Tauri shell can read
-    // it and include it in every bridge request. This is the
-    // out-of-the-box default for fresh installs; power users can
-    // override the env var explicitly to share a token across
-    // multiple processes.
-    if pipe_server::ws_bridge::token_from_env().is_none() {
+    // event 000109: Resolve the bridge auth token WITHOUT touching
+    // env vars. Priority:
+    //   1. `FLOWNTIER_HTTP_BRIDGE_TOKEN` env var (already set
+    //      by the caller — power users / shared deployments).
+    //   2. Otherwise generate a 32-byte random hex token.
+    //
+    // We then pass the token DIRECTLY to
+    // `run_http_bridge_on_with_token` (no env var round-trip
+    // needed). The token is also written to
+    // `<data_dir>/.bridge_token` so the portable HTML frontend
+    // and the Tauri shell can read it for their Authorization
+    // header.
+    //
+    // Before event 000109 we used `std::env::set_var(...)` to
+    // stuff the generated token into the process env, then
+    // `token_from_env()` read it back. That worked but
+    // `std::env::set_var` is `unsafe` since Rust 1.84 (MSRV
+    // 1.85 — we're already on the unsafe side) AND it polluted
+    // the process env which the parallel test suite
+    // (`cargo test`) saw as a global, making per-test token
+    // isolation impossible without explicit `unsafe` blocks in
+    // every test. Direct param-pass is faster, safer, and
+    // makes the test suite cleaner.
+    let bridge_token: Option<String> = if let Some(existing) =
+        pipe_server::ws_bridge::token_from_env()
+    {
+        Some(existing)
+    } else {
         use rand::Rng;
         let mut bytes = [0u8; 32];
         rand::thread_rng().fill(&mut bytes[..]);
         let hex: String = bytes.iter().map(|b| format!("{:02x}", b)).collect();
-        // SAFETY: env::set_var is process-local. We do this
-        // before the HTTP bridge task spawns below.
-        // SAFETY: env::set_var is unsafe in newer Rust; on the
-        // MSRV we're on it's still safe.
-        #[allow(unused_unsafe)]
-        unsafe { std::env::set_var("FLOWNTIER_HTTP_BRIDGE_TOKEN", &hex); }
         let token_path = data_dir.join(".bridge_token");
         if let Err(e) = std::fs::write(&token_path, hex.as_bytes()) {
             tracing::warn!(
                 target: "pipe_server",
                 error = %e,
                 path = %token_path.display(),
-                "v0.4.22 (event 000091 fix #34): failed to write .bridge_token; bridge auth will reject all requests"
+                "event 000109: failed to write .bridge_token; the portable HTML \
+                 frontend will not be able to auth against the HTTP bridge"
             );
         } else {
             tracing::info!(
                 target: "pipe_server",
                 path = %token_path.display(),
-                "v0.4.22 (event 000091 fix #34): generated bridge token; Tauri shell should read this file"
+                "event 000109: generated bridge token; portable HTML frontend \
+                 should read this file and use it as `Authorization: Bearer <hex>`"
             );
         }
-    }
+        Some(hex)
+    };
+    let _ = bridge_token.as_ref().map(|t| tracing::debug!(
+        target: "pipe_server",
+        token_len = t.len(),
+        "event 000109: HTTP bridge auth token active"
+    ));
 
     // v0.4.20 (event 000056): background quota scheduler.
     // Spawned AFTER register_all so state.dispatcher() returns Some.
@@ -198,10 +202,24 @@ async fn main() -> std::io::Result<()> {
     let bind = pipe_server::ws_bridge::bind_from_env();
     let dispatcher_for_bridge = state.dispatcher().expect("dispatcher wired by register_all");
     let events_for_bridge = state.events.clone();
-    let bridge = tokio::spawn(run_http_bridge(
-        bind,
+    // event 000109: pass the resolved token DIRECTLY instead of
+    // going through FLOWNTIER_HTTP_BRIDGE_TOKEN env var. Same
+    // auth semantics (override > env var > generate-and-write),
+    // no process-global env mutation, no `unsafe { set_var }`.
+    // Bind synchronously up front (TcpListener::bind is sync
+    // in std) so we know the listener is ready before
+    // tokio::spawn starts polling.
+    let bridge_listener = std::net::TcpListener::bind(&bind)
+        .or_else(|_| std::net::TcpListener::bind(pipe_server::ws_bridge::DEFAULT_BIND))
+        .expect("bind HTTP bridge listener");
+    bridge_listener.set_nonblocking(true).expect("set_nonblocking");
+    let bridge_listener = tokio::net::TcpListener::from_std(bridge_listener)
+        .expect("convert std TcpListener to tokio");
+    let bridge = tokio::spawn(pipe_server::run_http_bridge_on_with_token(
+        bridge_listener,
         dispatcher_for_bridge,
         events_for_bridge,
+        bridge_token,
     ));
 
     let events_for_server = state.events.clone();

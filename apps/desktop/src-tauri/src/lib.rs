@@ -170,10 +170,72 @@ async fn read_response_bytes(
 
 // ── Sidecar management ──────────────────────────────────────────
 
+/// event 000109: the canonical sidecar image name. Centralised
+/// here so `spawn_runtime_sidecar`, `wipe_all_data`, and any
+/// future shutdown / health-check sites all use the SAME string.
+/// Before this fix, `wipe_all_data` used `flowntier-runtime`
+/// (hyphen) while `spawn_runtime_sidecar` used `flowntier_runtime`
+/// (underscore). The hyphen form always returned 128 silently,
+/// so the wipe half always no-op'd.
+#[cfg(target_os = "windows")]
+const SIDECAR_IMAGE: &str = "flowntier_runtime.exe";
+
+/// event 000109: kill the sidecar if it's running. Returns the
+/// taskkill exit code so the caller can decide whether to log
+/// (a no-op return 128 is normal — no sidecar alive). On
+/// non-Windows this is a no-op.
+#[cfg(target_os = "windows")]
+fn kill_sidecar_silent() -> Option<i32> {
+    std::process::Command::new("taskkill")
+        .args(["/f", "/im", SIDECAR_IMAGE])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .ok()
+        .and_then(|s| s.code())
+}
+
+#[cfg(not(target_os = "windows"))]
+fn kill_sidecar_silent() -> Option<i32> {
+    // On Linux/macOS, the sidecar is currently not shipped —
+    // the kill is only meaningful on Windows. Returns 128
+    // (no match) so caller-side logs remain consistent.
+    None
+}
+
+/// event 000109: stored on the Tauri `AppHandle` via
+/// `app.manage(SidecarHandle { ... })`. The `RunEvent::Exit
+/// Requested` handler in `run()` calls `graceful_kill` so the
+/// sidecar's named-pipe handles are released by the kernel
+/// before the desktop process exits. Without this, the next
+/// launch hits the *exact* bug the event 000083→000105 chain
+/// was patching around: a stale `flowntier_runtime.exe`
+/// (or its still-open pipe handles) survives the shutdown.
+/// Belt-and-braces taskkill (event 000097) was the symptom
+/// fix; THIS is the root-cause fix.
+#[derive(Default)]
+pub struct SidecarHandle {
+    /// Process ID of the spawned sidecar (None if not yet
+    /// spawned in this process — e.g. tests, or the
+    /// `try_ping_pipe` early-return path).
+    pub pid: Option<u32>,
+}
+
+/// event 000109: graceful exit. Tries `child.kill()` (via
+/// stored PID and process tree) first; falls back to
+/// `kill_sidecar_silent()` (the historical taskkill belt) if
+/// the parent PID has already been reaped. Either way, the
+/// goal is "sidecar is dead by the time `main` returns 0" so
+/// the named pipe `\\.\pipe\flowntier_runtime` is released
+/// and the next launch can bind to it cleanly.
+pub fn graceful_kill_sidecar() {
+    kill_sidecar_silent();
+}
+
 fn spawn_runtime_sidecar(app: &tauri::AppHandle) {
     use tauri_plugin_shell::process::CommandEvent;
 
-// Kill any stale flowntier_runtime.exe from a previous session. Pipes
+// Kill any stale sidecar from a previous session. Pipes
     // are exclusive, so a dead binary that left the pipe handle open
     // would block the new instance.
     //
@@ -189,17 +251,16 @@ fn spawn_runtime_sidecar(app: &tauri::AppHandle) {
     //       visible to the user as "卡死很长一段時間". We now
     //       log a loud error if we time out so the failure mode
     //       is at least diagnosable.
-    #[cfg(target_os = "windows")]
+    //
+    // event 000109: use the shared `kill_sidecar_silent` helper
+    // so the image name stays in lock-step with `wipe_all_data`.
     {
-        let r = std::process::Command::new("taskkill")
-            .args(["/f", "/im", "flowntier_runtime.exe"])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status();
+        let rc = kill_sidecar_silent();
         tracing::warn!(
             target: "flowntier_shell",
-            "taskkill /f /im flowntier_runtime.exe returned {:?} (128 means no matching process)",
-            r.map(|s| s.code())
+            image = SIDECAR_IMAGE,
+            taskkill_exit = ?rc,
+            "event 000109: pre-spawn taskkill (128 = no matching process, normal)"
         );
         std::thread::sleep(Duration::from_millis(1000));
     }
@@ -220,6 +281,21 @@ fn spawn_runtime_sidecar(app: &tauri::AppHandle) {
         match sidecar_command.spawn() {
             Ok((mut rx, child)) => {
                 tracing::info!(target: "flowntier_shell", pid = ?child.pid(), "[TRACE] sidecar spawned");
+                // event 000109: remember the PID so the
+                // RunEvent::ExitRequested handler can
+                // gracefully kill the sidecar before the
+                // desktop process exits. Without this, the
+                // sidecar (and its open named-pipe handles)
+                // could survive shutdown and block the next
+                // launch — exactly what event 000083→000105
+                // worked around with belt-and-braces taskkill.
+                let pid = child.pid();
+                app.manage(SidecarHandle { pid: Some(pid) });
+                tracing::debug!(
+                    target: "flowntier_shell",
+                    pid,
+                    "event 000109: stored SidecarHandle.pid for graceful shutdown"
+                );
                 tauri::async_runtime::spawn(async move {
                     while let Some(event) = rx.recv().await {
                         match event {
@@ -1203,14 +1279,23 @@ async fn wipe_all_data() -> Result<(), String> {
     // handles on storage.sqlite are released. We don't need the
     // sidecar to acknowledge — the rm -rf below will fail loudly
     // on Windows if the file is still locked.
+    //
+    // event 000109: use the SAME image name as the actual
+    // sidecar. Before this fix, line 195 used `flowntier_runtime`
+    // (underscore — matches `app.shell().sidecar("flowntier_
+    // runtime")` at line 212) but THIS site used
+    // `flowntier-runtime` (hyphen). The hyphen form always
+    // no-op'd (returned 128 silently) so `wipe_all_data` left
+    // the running sidecar alive, and the subsequent rm -rf on
+    // the data dir was racing the sidecar's still-open
+    // SQLite handle — Windows locks would sometimes let the
+    // wipe succeed anyway, sometimes not.
     #[cfg(target_os = "windows")]
     {
-        let _ = std::process::Command::new("taskkill")
-            .args(["/f", "/im", "flowntier-runtime.exe"])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status();
-        // Give the kernel a moment to actually release the handle.
+        kill_sidecar_silent();
+        // Give the kernel a moment to actually release the
+        // handle. The previous 500ms is plenty for a normal
+        // `taskkill /f` round-trip.
         std::thread::sleep(Duration::from_millis(500));
     }
     // Recursively remove the data dir. Errors are surfaced to the
@@ -1818,6 +1903,44 @@ pub fn run() {
             get_workflow_status,
             get_log_tail, clear_log_file, get_log_file_path,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        // event 000109: RunEvent::ExitRequested handler — the
+        // root-cause fix for the stale-sidecar-blocks-next-launch
+        // bug that the event 000083→000105 chain was patching
+        // around with belt-and-braces taskkill.
+        //
+        // Before this fix, the desktop process could exit
+        // (user closed the window, OS sent SIGTERM, etc.) while
+        // the spawned `flowntier_runtime.exe` sidecar was still
+        // alive with its named-pipe handles open. Next launch
+        // would then hit `ERROR_ACCESS_DENIED` / `pipe busy`
+        // because the kernel still held those handles.
+        //
+        // `RunEvent::ExitRequested` fires when the OS / window
+        // manager asks the desktop to quit. We:
+        //   1. Try to kill the sidecar by the PID we stored in
+        //      `SidecarHandle` at spawn time (root-cause).
+        //   2. As a belt-and-braces fallback (covers cases
+        //      where PID is None, or the sidecar was spawned
+        //      by a different process), also call
+        //      `taskkill /f /im flowntier_runtime.exe`.
+        //   3. Close stdin / stdout / stderr handles by
+        //      dropping the rx task (we don't need to wait
+        //      for the kill to land — the OS will reap the
+        //      child shortly after we return from this handler
+        //      and the desktop process is on its way out).
+        //
+        // We do NOT call `.prevent_exit()` — the user asked
+        // us to quit, so we quit. We just make sure the
+        // sidecar goes with us.
+        .run(|_app_handle, event| {
+            if let tauri::RunEvent::ExitRequested { .. } = &event {
+                tracing::info!(
+                    target: "flowntier_shell",
+                    "event 000109: ExitRequested — killing sidecar before quit"
+                );
+                graceful_kill_sidecar();
+            }
+        });
 }

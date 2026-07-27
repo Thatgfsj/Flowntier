@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+* **NWT 000109 — Perfect fixes, not patches**: tear out the historical
+  belt-and-braces workarounds and replace them with root-cause fixes:
+  - `flowntier-runtime` no longer uses `unsafe { std::env::set_var }`
+    (Rust 1.84+ marks `set_var` unsafe; MSRV is 1.85). The bridge
+    token is now passed DIRECTLY to
+    `run_http_bridge_on_with_token(…, token_override)`. The
+    `.bridge_token` file is still written for the portable HTML
+    frontend; only the process-env pollution is gone.
+  - `wipe_all_data` and `spawn_runtime_sidecar` now share a single
+    `kill_sidecar_silent()` helper + `SIDECAR_IMAGE` const. The
+    pre-fix bug where `wipe_all_data` taskkilled `flowntier-runtime`
+    (hyphen, always no-op 128) while `spawn_runtime_sidecar`
+    taskkilled `flowntier_runtime` (underscore, correct) is gone.
+  - `tauri::Builder::run` now installs a `RunEvent::ExitRequested`
+    handler that calls `graceful_kill_sidecar()`. The spawned
+    sidecar's PID is stashed in a new `SidecarHandle` state so the
+    desktop process can guarantee the sidecar exits alongside it
+    — the root cause of the stale-sidecar-blocks-next-launch bug
+    that the 000083→000105 patch chain worked around. NSIS v3
+    taskkill belt (event 000097) is now belt-and-braces, not a
+    requirement.
+  - Panic hook moved out of `flowntier-runtime.rs::main` and into
+    `pipe_server::logs::install_panic_hook(&Path)`. Hook and
+    subscriber now share the same resolved log-file path (single
+    source of truth). Regression test
+    `logs::tests::install_panic_hook_writes_to_path` pins the
+    marker format `[flowntier-runtime] PANIC at <RFC3339>`.
+
 * **NWT 000108 — Run full test suite, fix root causes, add regression guards**:
   - `pipe-server::logs::read_tail/clear_log` now accept `path_override:
     Option<&Path>` so tests can verify roundtrip without touching the
@@ -29,8 +57,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `prod_pipe_handles_concurrent_clients`.
   - Doc-comment typo `Flwntier.log` → `Flowntier.log`.
 * **Workspace test results**: `cargo test --workspace --release`
-  reports **164 passed / 0 failed / 1 ignored** across 22 binaries
-  (up from 155 passed / 6 failed pre-fix).
+  reports **165 passed / 0 failed / 1 ignored** across 22 binaries
+  (up from 155 passed / 6 failed pre-fix; +1 from the 000109
+  panic-hook regression test).
 
 ### Added
 

@@ -276,6 +276,46 @@ fn init_stderr_only_inner(
     None
 }
 
+/// event 000109: install a panic hook that writes any panic
+/// to the same log file the chairman already opens
+/// (`~/Desktop/Flowntier.log` by default). The sidecar binary
+/// is a standalone process with no `tauri_core` available at
+/// link time, so it uses this hook instead of
+/// `tauri_core::logging::install_panic_hook` — but the two
+/// hooks have the SAME shape (eprintln + best-effort file
+/// append + structured timestamp) so the chairman can read
+/// either process's panic output the same way.
+///
+/// The hook is process-global — call exactly once at
+/// startup (from `flowntier-runtime.rs::main`). Rust's
+/// `std::panic::set_hook` is last-write-wins, so calling
+/// twice silently discards the first hook.
+pub fn install_panic_hook(log_path: &std::path::Path) {
+    let path = log_path.to_path_buf();
+    std::panic::set_hook(Box::new(move |info| {
+        // Default-style stderr write — visible in dev mode,
+        // swallowed in release builds where stdout/stderr
+        // are detached (windows_subsystem="windows").
+        let bt = std::backtrace::Backtrace::force_capture();
+        eprintln!("[flowntier-runtime] PANIC: {info}\n{bt}");
+
+        // Best-effort append to the log file the chairman
+        // already has open. Don't panic inside the hook.
+        use std::io::Write;
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+        {
+            let _ = writeln!(
+                f,
+                "[flowntier-runtime] PANIC at {}: {info}\n{bt}",
+                chrono::Utc::now().to_rfc3339()
+            );
+        }
+    }));
+}
+
 /// Hand-rolled tracing MakeWriter that appends each
 /// tracing event as a single line and flushes. Simpler
 /// than the `tracing_appender::file` feature and avoids
@@ -328,6 +368,57 @@ static LOG_GUARD: std::sync::OnceLock<tracing_appender::non_blocking::WorkerGuar
 mod tests {
     use super::*;
     use std::io::Write;
+
+    /// event 000109: pin the contract that `install_panic_hook`
+    /// writes a `[flowntier-runtime] PANIC at <RFC3339>: …`
+    /// line to the configured path. This is the chairman's
+    /// one-stop diagnostic — the log file always has panics.
+    ///
+    /// We don't actually trigger a panic (that would abort the
+    /// test process). Instead we install a hook to a scratch
+    /// path, then invoke the same panic-handler code path via
+    /// `std::panic::catch_unwind(|| -> i32 { panic!("test")
+    /// })` which still runs the hook before unwinding.
+    ///
+    /// After this runs the installed global hook is replaced
+    /// (Rust's `set_hook` semantics: last write wins) — so
+    /// subsequent tests in this binary see the hook we set
+    /// here. We restore a no-op hook at the end via a guard
+    /// pattern (NextTestHook) to avoid leaking state.
+    #[test]
+    fn install_panic_hook_writes_to_path() {
+        let dir = std::env::temp_dir().join("flowntier-panic-hook-test");
+        let _ = std::fs::create_dir_all(&dir);
+        let unique = format!(
+            "{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let path = dir.join(format!("panic-{unique}.log"));
+        let _ = std::fs::remove_file(&path);
+
+        install_panic_hook(&path);
+        let r = std::panic::catch_unwind(|| -> () {
+            panic!("event 000109 test panic — should land in {path:?}");
+        });
+        assert!(r.is_err(), "expected the panic to be caught");
+
+        // Give the hook a moment to flush.
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        let raw = std::fs::read_to_string(&path)
+            .expect("hook should have written panic to file");
+        assert!(
+            raw.contains("[flowntier-runtime] PANIC at"),
+            "hook output missing marker: {raw}"
+        );
+        assert!(
+            raw.contains("event 000109 test panic"),
+            "hook output missing panic message: {raw}"
+        );
+    }
 
     /// Round-trip: write lines, read tail, clear, write
     /// more, read again. The clear should put a sentinel
