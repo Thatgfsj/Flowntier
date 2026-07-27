@@ -1430,7 +1430,7 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
                 })));
             }
             let path = crate::logs::resolve_log_path();
-            let lines = crate::logs::read_tail(tail);
+            let lines = crate::logs::read_tail(tail, None);
             Ok((200, json!({
                 "ok": true,
                 "log_file": path.as_ref().map(|p| p.display().to_string()),
@@ -1450,7 +1450,7 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
                               (event 000080).",
                 })));
             }
-            match crate::logs::clear_log() {
+            match crate::logs::clear_log(None) {
                 Ok(path) => Ok((200, json!({
                     "ok": true,
                     "path": path.display().to_string(),

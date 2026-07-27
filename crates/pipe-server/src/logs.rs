@@ -7,12 +7,17 @@
 //!
 //! Three pieces:
 //!
-//! 1. **Default log file location** — `~/Desktop/Flwntier.log`
+//! 1. **Default log file location** — `~/Desktop/Flowntier.log`
 //!    on Windows (the chairman's main dev box), `~/Flowntier.log`
 //!    elsewhere. Can be overridden via `FLWNTIER_LOG_FILE=<path>`
 //!    env var. Set `FLWNTIER_LOG_FILE=0` (zero) to disable file
 //!    logging entirely — the runtime still emits tracing
 //!    events to stdout but nothing hits the disk.
+//!
+//! event 000108: `read_tail` / `clear_log` accept an optional
+//! `path` argument so unit tests can target a tmp file instead
+//! of the chairman's real `~/Desktop/Flowntier.log`. The HTTP
+//! handlers continue to use `None` (the resolved default path).
 //!
 //! 2. **Two HTTP endpoints** on the pipe-server JSON-RPC
 //!    bridge: `GET /api/logs/get?tail=N` (last N lines, default
@@ -37,10 +42,9 @@
 //!   a. `POST /api/logs/clear` (truncate to 0, write a
 //!      sentinel line, keep the file open for further writes).
 //!   b. `Settings → Logs → Clear` button (Tauri shell).
-//!   c. `rm ~/Desktop/Flwntier.log` (manual, the file is
+//!   c. `rm ~/Desktop/Flowntier.log` (manual, the file is
 //!      recreated on the next runtime start since we
 //!      always open in append mode).
-//!
 //! None of these are silent: the log file's path is
 //! available in the Settings panel and via
 //! `GET /health` (the runtime's `version` field) for the
@@ -93,9 +97,20 @@ pub fn log_api_enabled() -> bool {
 /// the file). The runtime's tracing-appender instance is
 /// NOT involved — we just read the on-disk file directly
 /// so the API call doesn't depend on subscriber state.
-pub fn read_tail(tail: usize) -> Vec<String> {
-    let Some(path) = resolve_log_path() else {
-        return Vec::new();
+///
+/// event 000108: `path_override` lets unit tests read a
+/// scratch file (e.g. `tmp/foo.log`) instead of the
+/// chairman's real `~/Desktop/Flowntier.log`. Pass `None`
+/// to keep the production behaviour. The HTTP handler at
+/// `crates/pipe-server/src/handlers.rs::get_log_tail`
+/// always calls this with `None`.
+pub fn read_tail(tail: usize, path_override: Option<&std::path::Path>) -> Vec<String> {
+    let path = match path_override {
+        Some(p) => p.to_path_buf(),
+        None => match resolve_log_path() {
+            Some(p) => p,
+            None => return Vec::new(),
+        },
     };
     let Ok(raw) = std::fs::read_to_string(&path) else {
         return Vec::new();
@@ -113,13 +128,20 @@ pub fn read_tail(tail: usize) -> Vec<String> {
 /// Truncate the log file to zero bytes and write a single
 /// sentinel line so the chairman can tell where the next
 /// session starts. Returns the path on success.
-pub fn clear_log() -> std::io::Result<PathBuf> {
-    let path = resolve_log_path().ok_or_else(|| {
-        std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            "FLWNTIER_LOG_FILE=0; file logging disabled",
-        )
-    })?;
+///
+/// event 000108: same `path_override` escape hatch as
+/// `read_tail` — production callers pass `None`, tests pass
+/// `Some(scratch_path)`.
+pub fn clear_log(path_override: Option<&std::path::Path>) -> std::io::Result<PathBuf> {
+    let path = match path_override {
+        Some(p) => p.to_path_buf(),
+        None => resolve_log_path().ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "FLWNTIER_LOG_FILE=0; file logging disabled",
+            )
+        })?,
+    };
     // Touch (create if missing) then truncate.
     std::fs::OpenOptions::new()
         .create(true)
@@ -324,7 +346,7 @@ mod tests {
                 .unwrap();
             writeln!(f, "line {i}").unwrap();
         }
-        let tail = read_tail(3);
+        let tail = read_tail(3, Some(&path));
         assert_eq!(tail, vec!["line 7", "line 8", "line 9"]);
         let cleared = clear_log_for(&path).unwrap();
         assert_eq!(cleared, path);
@@ -337,7 +359,7 @@ mod tests {
             .open(&path)
             .unwrap();
         writeln!(f, "after clear").unwrap();
-        let tail = read_tail(2);
+        let tail = read_tail(2, Some(&path));
         assert!(tail.last().unwrap().contains("after clear"));
     }
 

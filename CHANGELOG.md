@@ -6,6 +6,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+* **NWT 000108 — Run full test suite, fix root causes, add regression guards**:
+  - `pipe-server::logs::read_tail/clear_log` now accept `path_override:
+    Option<&Path>` so tests can verify roundtrip without touching the
+    real desktop log path.
+  - `pipe-server::ws_bridge::run_http_bridge_on_with_token` accepts a
+    `token_override: Option<String>`; the per-connection auth check
+    prefers override over `FLOWNTIER_HTTP_BRIDGE_TOKEN`. Eliminates the
+    process-global env-var race that made parallel `#[tokio::test]`
+    cases intermittently 401 each other.
+  - `e2e_pipe::custom_provider_full_crud` rewritten to the two-step
+    secret + custom-provider flow (PUT secret under
+    `CUSTOM_PROVIDER_KEY_<id>` first, then POST `/api/providers/custom`
+    with the v0.4.22 schema). DELETE path now formatted with the real id
+    instead of the literal `{id}` placeholder.
+  - 3 new production-pipe regression tests under
+    `e2e_pipe::production_pipe` (windows-only):
+    `prod_pipe_cold_start_serves_first_request`,
+    `prod_pipe_kill_then_respawn_serves_first_request` (the exact
+    scenario that triggered the 000083→000105 patch chain),
+    `prod_pipe_handles_concurrent_clients`.
+  - Doc-comment typo `Flwntier.log` → `Flowntier.log`.
+* **Workspace test results**: `cargo test --workspace --release`
+  reports **164 passed / 0 failed / 1 ignored** across 22 binaries
+  (up from 155 passed / 6 failed pre-fix).
+
 ### Added
 
 * `tools/replace_in_files.py` — UTF-8-safe text replace helper (replaces

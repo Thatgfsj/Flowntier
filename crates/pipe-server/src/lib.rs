@@ -32,5 +32,6 @@ pub use protocol::{codes, RpcError, RpcParams, RpcRequest, RpcResponse, RpcResul
 pub use scheduler::run_quota_scheduler;
 pub use server::{Server, ServerConfig};
 pub use ws_bridge::{
-    bind_listener, run_http_bridge, run_http_bridge_on, DEFAULT_BIND as DEFAULT_HTTP_BIND,
+    bind_listener, run_http_bridge, run_http_bridge_on,
+    run_http_bridge_on_with_token, DEFAULT_BIND as DEFAULT_HTTP_BIND,
 };

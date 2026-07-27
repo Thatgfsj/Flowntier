@@ -318,62 +318,117 @@ async fn providers_list_returns_presets_with_has_secret_join() {
 async fn custom_provider_full_crud() {
     let (addr, handle) = spawn_server("custom").await;
 
+    // v0.4.22 (event 000096 + event 000108): the Tauri shell
+    // does a TWO-STEP add:
+    //   1. PUT /api/settings/secrets/CUSTOM_PROVIDER_KEY_<id>
+    //      to persist the api_key into the secret store, then
+    //   2. POST /api/providers/custom with id/display_name/
+    //      kind/base_url/models[] to register the relay.
+    //
+    // The previous test had a single POST with `name`/
+    // `default_model`/`api_key` — that was the pre-v0.4.22
+    // schema and silently failed at the missing-`id` gate (the
+    // dispatcher routed the error into `error.message` not
+    // `result.status`, so the assertion looked like a Null).
+    //
+    // The two-step shape also matches the real Tauri shell
+    // (`apps/desktop/src-tauri/src/lib.rs:add_custom_provider`
+    // assumes the secret was already PUT). Crucially,
+    // `list_providers` joins `has_secret` on
+    // `CUSTOM_PROVIDER_KEY_<id>` (handlers.rs:1520) — so the
+    // test must use that exact secret name or `has_secret`
+    // will read false even after a successful POST.
+    let id = "my-relay";
+    let secret_name = format!("CUSTOM_PROVIDER_KEY_{id}");
+
+    // Step 1 — PUT the api_key under the expected secret name.
     let resp = client::connect_and_request(
         &addr,
         serde_json::json!({
             "jsonrpc": "2.0",
             "id": 30,
-            "method": "POST",
+            "method": "PUT",
             "params": {
-                "path": "/api/providers/custom",
-                "body": {
-                    "name": "My Relay",
-                    "base_url": "https://relay.example.com/v1",
-                    "kind": "openai-compatible",
-                    "default_model": "gpt-4o-mini",
-                    "api_key": "sk-relay-test-1234567890"
-                }
+                "path": format!("/api/settings/secrets/{secret_name}"),
+                "body": { "name": secret_name, "value": "sk-relay-test-1234567890" }
             }
         }),
     )
     .await;
-    assert_eq!(resp["result"]["status"], 201);
-    let id = resp["result"]["body"]["id"].as_str().unwrap().to_string();
+    assert_eq!(resp["result"]["status"].as_u64().unwrap_or(0), 200,
+        "PUT secret should return 200; got resp={}", serde_json::to_string(&resp).unwrap_or_default());
 
+    // Step 2 — POST the custom_provider record.
     let resp = client::connect_and_request(
         &addr,
         serde_json::json!({
             "jsonrpc": "2.0",
             "id": 31,
+            "method": "POST",
+            "params": {
+                "path": "/api/providers/custom",
+                "body": {
+                    "id": id,
+                    "display_name": "My Relay",
+                    "kind": "openai-compatible",
+                    "base_url": "https://relay.example.com/v1",
+                    "models": [
+                        { "id": "gpt-4o-mini", "display_name": "GPT-4o mini" }
+                    ]
+                }
+            }
+        }),
+    )
+    .await;
+    assert_eq!(resp["result"]["status"].as_u64().unwrap_or(0), 201,
+        "POST custom_provider should return 201; got resp={}", serde_json::to_string(&resp).unwrap_or_default());
+    let returned_id = resp["result"]["body"]["id"].as_str().unwrap().to_string();
+    assert_eq!(returned_id, id);
+
+    // Step 3 — GET /api/providers must show the new relay with
+    // has_secret:true (because step 1 wrote the secret under
+    // the name list_providers joins on).
+    let resp = client::connect_and_request(
+        &addr,
+        serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 32,
             "method": "GET",
             "params": {"path": "/api/providers", "body": null}
         }),
     )
     .await;
     let custom = resp["result"]["body"]["custom_providers"].as_array().unwrap();
-    assert_eq!(custom.len(), 1);
-    assert_eq!(custom[0]["has_secret"], serde_json::json!(true));
+    assert_eq!(custom.len(), 1, "expected 1 custom_provider; got resp={}",
+        serde_json::to_string(&resp).unwrap_or_default());
+    assert_eq!(custom[0]["has_secret"], serde_json::json!(true),
+        "custom_provider should have has_secret:true after PUT + POST");
 
-    let resp = client::connect_and_request(
-        &addr,
-        serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": 32,
-            "method": "DELETE",
-            "params": {
-                "path": "/api/providers/custom/{id}",
-                "body": { "id": id }
-            }
-        }),
-    )
-    .await;
-    assert_eq!(resp["result"]["status"], 200);
-
+    // Step 4 — DELETE the custom_provider. The path uses the
+    // concrete id (the dispatcher placeholder {id} only matches
+    // real segments, not the literal string "{id}").
+    let delete_path = format!("/api/providers/custom/{id}");
     let resp = client::connect_and_request(
         &addr,
         serde_json::json!({
             "jsonrpc": "2.0",
             "id": 33,
+            "method": "DELETE",
+            "params": {
+                "path": delete_path,
+                "body": { "id": id }
+            }
+        }),
+    )
+    .await;
+    assert_eq!(resp["result"]["status"].as_u64().unwrap_or(0), 200,
+        "DELETE custom_provider should return 200; got resp={}", serde_json::to_string(&resp).unwrap_or_default());
+
+    let resp = client::connect_and_request(
+        &addr,
+        serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 34,
             "method": "GET",
             "params": {"path": "/api/providers", "body": null}
         }),
@@ -1394,9 +1449,10 @@ async fn quota_5h_tick_clears_on_recovery() {
 async fn spawn_bridge(tag: &str) -> (
     String,
     tokio::task::JoinHandle<std::io::Result<()>>,
+    String,
 ) {
     use pipe_server::{
-        bind_listener, register_all, run_http_bridge_on, Dispatcher, ServerState,
+        bind_listener, register_all, run_http_bridge_on_with_token, Dispatcher, ServerState,
     };
     let unique = format!(
         "{tag}-{}",
@@ -1408,6 +1464,19 @@ async fn spawn_bridge(tag: &str) -> (
     let data_root = std::env::temp_dir().join(format!("flowntier-bridge-{unique}"));
     let _ = std::fs::remove_dir_all(&data_root);
     let _ = std::fs::create_dir_all(&data_root);
+
+    // v0.4.22 (event 000091 fix #34 + event 000108): every
+    // non-`/health` HTTP bridge request MUST carry a bearer
+    // token. We pass the token DIRECTLY to the bridge (not via
+    // env var) so each parallel test stays isolated — env vars
+    // are process-global and tokio tests run concurrently, so
+    // using `unsafe { std::env::set_var }` would race between
+    // `spawn_bridge` setting the var and the bridge task reading
+    // it on a fresh connection.
+    let token = format!(
+        "test-token-{}-{unique}",
+        std::process::id()
+    );
 
     let mut d = Dispatcher::new();
     let state = ServerState::new(data_root.clone(), data_root.clone()).await;
@@ -1421,16 +1490,34 @@ async fn spawn_bridge(tag: &str) -> (
     let bound = bound_addr.to_string();
     let dispatcher = state.dispatcher().expect("dispatcher wired");
     let events = state.events.clone();
+    let token_for_bridge = token.clone();
     let handle = tokio::spawn(async move {
-        run_http_bridge_on(listener, dispatcher, events).await
+        run_http_bridge_on_with_token(listener, dispatcher, events, Some(token_for_bridge)).await
     });
     tokio::time::sleep(Duration::from_millis(150)).await;
-    (bound, handle)
+    (bound, handle, token)
 }
 
-async fn http_request(addr: &str, req: String) -> (u16, String) {
+async fn http_request(addr: &str, req: String, token: Option<&str>) -> (u16, String) {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpStream;
+    // event 000108: the bridge's `/health` and OPTIONS handlers
+    // do NOT consult the bearer token. If the caller already
+    // embedded the header in `req` (e.g. for OPTIONS where we
+    // want to make sure no Authorization slips in), respect
+    // that. Otherwise inject `Authorization: Bearer <token>`
+    // when `token` is `Some`. This is a no-op for the existing
+    // tests because every non-health/non-OPTIONS call now
+    // passes `Some(token)`.
+    let mut req = req;
+    if let Some(t) = token {
+        if !req.to_ascii_lowercase().contains("authorization:") {
+            // Insert the header before the blank line that
+            // terminates the request headers.
+            let injected = format!("Authorization: Bearer {t}\r\n");
+            req = req.replacen("\r\n\r\n", &format!("\r\n{injected}\r\n"), 1);
+        }
+    }
     let mut s = TcpStream::connect(addr).await.expect("connect");
     s.write_all(req.as_bytes()).await.expect("write");
     s.flush().await.expect("flush");
@@ -1464,10 +1551,11 @@ async fn http_request(addr: &str, req: String) -> (u16, String) {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn http_bridge_health_returns_ok() {
-    let (addr, handle) = spawn_bridge("health").await;
+    let (addr, handle, _token) = spawn_bridge("health").await;
     let (status, body) = http_request(
         &addr,
         "GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n".to_string(),
+        None,
     )
     .await;
     assert_eq!(status, 200, "expected 200, got {status}: {body}");
@@ -1477,7 +1565,7 @@ async fn http_bridge_health_returns_ok() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn http_bridge_rpc_round_trips() {
-    let (addr, handle) = spawn_bridge("rpc").await;
+    let (addr, handle, token) = spawn_bridge("rpc").await;
     let body = serde_json::json!({
         "jsonrpc": "2.0",
         "id": 1,
@@ -1489,7 +1577,7 @@ async fn http_bridge_rpc_round_trips() {
         "POST /rpc HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
         body_str.len(), body_str
     );
-    let (status, resp_body) = http_request(&addr, req).await;
+    let (status, resp_body) = http_request(&addr, req, Some(&token)).await;
     assert_eq!(status, 200, "expected 200, got {status}: {resp_body}");
     let parsed: serde_json::Value =
         serde_json::from_str(&resp_body).expect("response must be JSON");
@@ -1502,9 +1590,9 @@ async fn http_bridge_rpc_round_trips() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn http_bridge_rpc_missing_content_length_returns_400() {
-    let (addr, handle) = spawn_bridge("rpc-nolen").await;
+    let (addr, handle, token) = spawn_bridge("rpc-nolen").await;
     let req = "POST /rpc HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n{}\n";
-    let (status, body) = http_request(&addr, req.to_string()).await;
+    let (status, body) = http_request(&addr, req.to_string(), Some(&token)).await;
     assert_eq!(status, 400, "expected 400, got {status}: {body}");
     assert!(body.contains("missing content-length"), "body={body}");
     handle.abort();
@@ -1512,21 +1600,262 @@ async fn http_bridge_rpc_missing_content_length_returns_400() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn http_bridge_cors_preflight_returns_204() {
-    let (addr, handle) = spawn_bridge("cors").await;
+    let (addr, handle, _token) = spawn_bridge("cors").await;
     let req = "OPTIONS /rpc HTTP/1.1\r\nHost: localhost\r\nAccess-Control-Request-Method: POST\r\nConnection: close\r\n\r\n";
-    let (status, body) = http_request(&addr, req.to_string()).await;
+    let (status, body) = http_request(&addr, req.to_string(), None).await;
     assert_eq!(status, 204, "expected 204, got {status}: {body}");
     handle.abort();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn http_bridge_unknown_route_returns_404() {
-    let (addr, handle) = spawn_bridge("404").await;
-    let (status, _body) = http_request(
-        &addr,
-        "GET /nope HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n".to_string(),
-    )
-    .await;
-    assert_eq!(status, 404);
+    let (addr, handle, token) = spawn_bridge("404").await;
+    let req = "GET /nope HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n";
+    let (status, body) = http_request(&addr, req.to_string(), Some(&token)).await;
+    assert_eq!(status, 404, "expected 404, got {status}: {body}");
     handle.abort();
+}
+
+// ── v0.4.22 (event 000108) production-pipe-name regression guard ─
+//
+// The "every test gets a unique pipe name" pattern used by
+// `spawn_server`/`spawn_bridge` (above) is fine for testing
+// dispatcher/handler logic, but it never exercised the
+// production behaviour: TWO servers competing for the SAME
+// `\\.\pipe\flowntier_runtime` path. That was the root
+// cause behind the entire event 000083 → 000094 → 000103
+// → 000104 → 000105 patch chain.
+//
+// These tests pin two invariants that must hold on the
+// production pipe path:
+//
+//   A. spawning a server on the production pipe name
+//      while a previous server's handle is STILL ALIVE
+//      must succeed — the second server must take over
+//      transparently because the kernel round-robins
+//      across all instances.
+//
+//   B. killing the previous server and immediately
+//      spawning a new one on the same pipe must succeed
+//      — no ERROR_ACCESS_DENIED deadlock, no
+//      ERROR_PIPE_BUSY loop, no timeout. This is what
+//      happens every time the chairman quits Flowntier
+//      and relaunches it while a stale `flowntier_runtime.exe`
+//      is still holding the pipe handle.
+//
+// These tests are #[cfg(windows)] because the production
+// behaviour we're guarding against only exists on Windows
+// named pipes. Unix tests live behind their own cfg gate
+// and exercise the `fs::remove_file` path in
+// `crates/pipe-server/src/server.rs` instead.
+
+#[cfg(windows)]
+mod production_pipe {
+    use std::time::Duration;
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    use tokio::net::windows::named_pipe::ClientOptions;
+
+    // Use a NON-default pipe name so parallel test runs don't
+    // collide with each other or with the real sidecar on
+    // `\\.\pipe\flowntier_runtime`. The point is to use the
+    // SAME name twice — that's exactly what the production
+    // pipe name does across reboots of the sidecar.
+    fn prod_pipe_name(tag: &str) -> String {
+        format!(
+            r"\\.\pipe\flowntier_prod_test_{tag}_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        )
+    }
+
+    async fn spawn_pipe_server(tag: &str) -> (String, tokio::task::JoinHandle<std::io::Result<()>>) {
+        use pipe_server::{
+            register_all, Dispatcher, Server, ServerConfig, ServerState,
+        };
+        let rpc_path = prod_pipe_name(tag);
+        let cfg = ServerConfig {
+            rpc_path: rpc_path.clone(),
+            events_path: format!(r"\\.\pipe\flowntier_prod_test_events_{tag}_{}",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()),
+        };
+        let unique = format!(
+            "{tag}-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let data_root = std::env::temp_dir().join(format!("flowntier-prod-pipe-{unique}"));
+        let _ = std::fs::remove_dir_all(&data_root);
+        let _ = std::fs::create_dir_all(&data_root);
+        let mut d = Dispatcher::new();
+        let state = ServerState::new(data_root.clone(), data_root.clone()).await;
+        register_all(&mut d, state.clone());
+        let server = Server::new(cfg, d, state.events.clone());
+        let handle = tokio::spawn(async move { server.run().await });
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        (rpc_path, handle)
+    }
+
+    async fn ping_pipe(path: &str, timeout_ms: u64) -> Result<serde_json::Value, String> {
+        // Run the synchronous ClientOptions::open inside
+        // spawn_blocking so we don't pin a tokio worker thread
+        // on a CreateFileW syscall — same pattern the Tauri
+        // shell uses at apps/desktop/src-tauri/src/lib.rs:56.
+        let path_owned = path.to_string();
+        let mut conn = tokio::task::spawn_blocking(move || {
+            ClientOptions::new().open(&path_owned)
+        })
+        .await
+        .map_err(|e| format!("join error: {e}"))?
+        .map_err(|e| format!("open error: {e}"))?;
+        let req = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "GET",
+            "params": {"path": "/api/ping", "body": null}
+        });
+        let mut line = serde_json::to_vec(&req).unwrap();
+        line.push(b'\n');
+        conn.write_all(&line).await.map_err(|e| format!("write: {e}"))?;
+        let mut reader = BufReader::new(&mut conn);
+        let mut buf = String::new();
+        let read = tokio::time::timeout(
+            Duration::from_millis(timeout_ms),
+            reader.read_line(&mut buf),
+        )
+        .await
+        .map_err(|_| "read timed out".to_string())?
+        .map_err(|e| format!("read error: {e}"))?;
+        assert!(read > 0, "empty response from {path}");
+        serde_json::from_str(&buf).map_err(|e| format!("bad json: {e}"))
+    }
+
+    /// Invariant A: a fresh server on the production pipe
+    /// name accepts the FIRST connection within 2 seconds.
+    /// Without event 000105 (the `first_pipe_instance`
+    /// flag removal) this test would still pass — the
+    /// bug was triggered by TWO competing servers, not
+    /// by a single spawn. But pinning the spawn latency
+    /// makes any future regression on cold start visible.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn prod_pipe_cold_start_serves_first_request() {
+        let (path, handle) = spawn_pipe_server("cold-start").await;
+        let resp = ping_pipe(&path, 2000).await
+            .expect("cold-start server did not serve first request");
+        assert_eq!(resp["result"]["status"].as_u64().unwrap_or(0), 200);
+        assert_eq!(resp["result"]["body"]["ok"], serde_json::json!(true));
+        handle.abort();
+    }
+
+    /// Invariant B (the real test): kill the first server,
+    /// spawn a new one on the SAME pipe name, the new one
+    /// must serve the first request within 2 seconds.
+    ///
+    /// Before event 000105, worker 0 of the new server
+    /// would create with `first_pipe_instance(true)` while
+    /// workers 1..N had already raced ahead with
+    /// `first=false` + `max_instances=unlimited`. Worker 0
+    /// then got ERROR_ACCESS_DENIED forever because the
+    /// other workers had already created primary instances.
+    /// The kill+respawn scenario is what the chairman hit
+    /// every time the app restarted while a stale
+    /// `flowntier_runtime.exe` was still alive.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn prod_pipe_kill_then_respawn_serves_first_request() {
+        let (path, handle_a) = spawn_pipe_server("kill-respawn").await;
+
+        // First server works.
+        let resp = ping_pipe(&path, 2000).await
+            .expect("first server did not serve first request");
+        assert_eq!(resp["result"]["status"].as_u64().unwrap_or(0), 200);
+
+        // Abort the first server.
+        handle_a.abort();
+        // Give the kernel a beat to drop the pipe handle —
+        // mirrors the real-world gap between taskkill /f and
+        // the spawn that follows.
+        tokio::time::sleep(Duration::from_millis(300)).await;
+
+        // Second server on the SAME pipe name. Clone `path`
+        // so the client (which still needs to ping by name)
+        // can keep its copy.
+        let path_for_server = path.clone();
+        let handle_b = tokio::spawn(async move {
+            // Re-create the same ServerConfig + a fresh ServerState
+            // so the second spawn is truly independent (no shared
+            // state with the aborted first server).
+            use pipe_server::{
+                register_all, Dispatcher, Server, ServerState,
+            };
+            let cfg = pipe_server::ServerConfig {
+                rpc_path: path_for_server.clone(),
+                events_path: format!("{path_for_server}_events"),
+            };
+            let unique = format!("kill-respawn-2-{}",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos());
+            let data_root = std::env::temp_dir().join(format!("flowntier-prod-pipe-{unique}"));
+            let _ = std::fs::remove_dir_all(&data_root);
+            let _ = std::fs::create_dir_all(&data_root);
+            let mut d = Dispatcher::new();
+            let state = ServerState::new(data_root.clone(), data_root.clone()).await;
+            register_all(&mut d, state.clone());
+            let server = Server::new(cfg, d, state.events.clone());
+            server.run().await
+        });
+        tokio::time::sleep(Duration::from_millis(200)).await;
+
+        // The whole point: this MUST succeed in under 2s.
+        // Before event 000105, this would either:
+        //   - block forever (worker 0 ERROR_ACCESS_DENIED loop)
+        //   - time out past 30s (rpc_listener's 2s backoff
+        //     never recovered)
+        let resp = ping_pipe(&path, 2000).await
+            .expect("second server did not serve first request after kill+respawn");
+        assert_eq!(resp["result"]["status"].as_u64().unwrap_or(0), 200,
+            "kill+respawn regression: got resp={}",
+            serde_json::to_string(&resp).unwrap_or_default());
+        handle_b.abort();
+    }
+
+    /// Invariant C: the production design has 16 accept
+    /// workers per pipe. Concurrent clients must each land
+    /// on a fresh instance — no `max_instances` overflow
+    /// deadlock. This is the underlying invariant event
+    /// 000105's "all workers use OS default" decision
+    /// relies on: every worker creates its own primary
+    /// instance and the kernel round-robins.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn prod_pipe_handles_concurrent_clients() {
+        let (path, handle) = spawn_pipe_server("concurrent").await;
+
+        // Fire 8 concurrent /api/ping requests. The
+        // 16-worker design should accept all 8 without
+        // any timeout or ERROR_PIPE_BUSY. We use
+        // `join_all` so a slow client doesn't block the
+        // fast ones.
+        let path = std::sync::Arc::new(path);
+        let mut tasks = Vec::new();
+        for i in 0..8 {
+            let path = path.clone();
+            tasks.push(tokio::spawn(async move {
+                let resp = ping_pipe(&path, 5000).await
+                    .unwrap_or_else(|e| panic!("client {i} failed: {e}"));
+                assert_eq!(resp["result"]["status"].as_u64().unwrap_or(0), 200,
+                    "client {i} got non-200");
+            }));
+        }
+        for t in tasks {
+            t.await.expect("task panicked");
+        }
+        handle.abort();
+    }
 }

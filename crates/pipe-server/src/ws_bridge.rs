@@ -80,10 +80,34 @@ pub async fn run_http_bridge(
 /// tests use `bind_listener("127.0.0.1:0")` to learn the
 /// OS-assigned port and then call this to start serving without
 /// the bind race.
+///
+/// event 000108: this delegates to
+/// `run_http_bridge_on_with_token` with `token_override = None`,
+/// so production behaviour is unchanged — the bridge still
+/// reads `FLOWNTIER_HTTP_BRIDGE_TOKEN` on every connection.
 pub async fn run_http_bridge_on(
     listener: TcpListener,
     dispatcher: Arc<Dispatcher>,
     events_tx: broadcast::Sender<AgentEvent>,
+) -> std::io::Result<()> {
+    run_http_bridge_on_with_token(listener, dispatcher, events_tx, None).await
+}
+
+/// Same as `run_http_bridge_on` but accepts an explicit bearer
+/// token. Production passes `None` (token comes from
+/// `FLOWNTIER_HTTP_BRIDGE_TOKEN`); tests pass `Some(token)`
+/// to keep each parallel test isolated from the global env var.
+///
+/// event 000108: this is the test-only escape hatch for the
+/// bearer-token gate that event 000091 fix #34 added. Without
+/// this, every `http_bridge_*` test would have to set the env
+/// var via `unsafe { std::env::set_var }` and serialise against
+/// the parallel test runner — the env var is process-global.
+pub async fn run_http_bridge_on_with_token(
+    listener: TcpListener,
+    dispatcher: Arc<Dispatcher>,
+    events_tx: broadcast::Sender<AgentEvent>,
+    token_override: Option<String>,
 ) -> std::io::Result<()> {
     let addr = listener.local_addr()?;
     info!(bind = %addr, "v0.4.21: HTTP+SSE bridge listening (loopback only)");
@@ -112,8 +136,9 @@ pub async fn run_http_bridge_on(
         }
         let d = dispatcher.clone();
         let tx = events_tx.clone();
+        let token_for_conn = token_override.clone();
         tokio::spawn(async move {
-            if let Err(e) = serve_http_connection(stream, d, tx).await {
+            if let Err(e) = serve_http_connection(stream, d, tx, token_for_conn.as_deref()).await {
                 warn!(peer = %peer, error = %e, "http_bridge: connection error");
             }
         });
@@ -128,10 +153,16 @@ pub async fn run_http_bridge_on(
 /// that could overshoot and silently swallow body bytes. The
 /// `split_off` then puts already-read body bytes into a
 /// `Leftover` buffer we keep in `ConnState`.
+///
+/// event 000108: `token_override` (when `Some`) shadows the
+/// `FLOWNTIER_HTTP_BRIDGE_TOKEN` env var. This is the test-only
+/// escape hatch — production passes `None` so the env var
+/// remains the single source of truth.
 async fn serve_http_connection(
     mut stream: TcpStream,
     dispatcher: Arc<Dispatcher>,
     events_tx: broadcast::Sender<AgentEvent>,
+    token_override: Option<&str>,
 ) -> std::io::Result<()> {
     eprintln!("[bridge] serve_http_connection started");
     use tokio::io::AsyncReadExt;
@@ -203,8 +234,14 @@ async fn serve_http_connection(
     // is a no-op for legitimate callers but blocks any other
     // process on the same machine. `/health` stays open so
     // the chairman can probe the runtime without auth.
+    //
+    // event 000108: `token_override` (when `Some`) wins over
+    // the env var. Tests pass it to keep parallel tests
+    // isolated; production passes `None`.
     if path != "/health" {
-        let expected = token_from_env();
+        let expected: Option<String> = token_override
+            .map(|s| s.to_string())
+            .or_else(token_from_env);
         match expected {
             None => {
                 return write_401(&mut stream, "FLOWNTIER_HTTP_BRIDGE_TOKEN not configured").await;
