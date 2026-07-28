@@ -343,6 +343,50 @@ impl Orchestrator {
         }
     }
 
+    /// v0.4.22 (event 000112): publish one critic's verdict as a
+    /// first-class `AgentEvent::ReviewerVerdict` so the webview
+    /// can replace its placeholder ReviewerCard with the real
+    /// PASS/REPAIR/REWRITE token + summary instead of a hardcoded
+    /// "通过 置信度 0.87".
+    ///
+    /// `phase` is `"plan-review"` or `"final-review"`. The verdict
+    /// comes from `verdict_of(&outcome)`; `confidence` is 0.0 until
+    /// event 000115 gives critics a structured JSON prompt;
+    /// `issues` is empty for the same reason.
+    fn emit_reviewer_verdict(
+        &self,
+        phase: &str,
+        outcome: &TaskOutcome,
+    ) {
+        let verdict = verdict_of(outcome);
+        // First sentence of the critic's text — used as the
+        // short rationale shown next to PASS/REPAIR/REWRITE on
+        // the webview's ReviewerCard.
+        let summary = {
+            let trimmed = outcome.text.trim();
+            if !trimmed.is_empty() {
+                trimmed
+                    .split(|c: char| c == '\n' || c == '。')
+                    .next()
+                    .unwrap_or("")
+                    .chars()
+                    .take(200)
+                    .collect::<String>()
+            } else {
+                outcome.summary.clone().unwrap_or_default()
+            }
+        };
+        let _ = self.events.send(AgentEvent::ReviewerVerdict {
+            wf_id: self.wf_id.clone(),
+            phase: phase.to_string(),
+            role: outcome.role_id.clone(),
+            verdict,
+            confidence: 0.0,
+            issues: Vec::new(),
+            summary,
+        });
+    }
+
     /// Spawn one agent run and return its outcome. The agent
     /// gets its own Workspace snapshot (so chief writing into
     /// workspace A doesn't leak into worker B's view — though
@@ -713,6 +757,12 @@ impl Orchestrator {
         );
         self.persist_task_row(&critic_a, "3-plan-review-criticA").await;
         self.persist_task_row(&critic_b, "3-plan-review-criticB").await;
+        // v0.4.22 (event 000112): publish each critic's verdict
+        // as an AgentEvent::ReviewerVerdict so the webview can
+        // render the real verdict (front-end also uses the
+        // final-review verdict to populate the ReviewerCard).
+        self.emit_reviewer_verdict("plan-review", &critic_a);
+        self.emit_reviewer_verdict("plan-review", &critic_b);
 
         // ── Phase 4: dispatch (chief declares worker list) ──
         phase_idx = 3;
@@ -781,6 +831,12 @@ impl Orchestrator {
         );
         self.persist_task_row(&final_a, "6-final-review-criticA").await;
         self.persist_task_row(&final_b, "6-final-review-criticB").await;
+        // v0.4.22 (event 000112): publish final-review verdicts.
+        // The webview's ReviewerCard listens for these and uses
+        // the last-seen final-review verdict to replace the
+        // placeholder "通过 / 置信度 0.87" panel.
+        self.emit_reviewer_verdict("final-review", &final_a);
+        self.emit_reviewer_verdict("final-review", &final_b);
 
         // ── Phase 7: repair (one pass — chief decides) ────
         phase_idx = 6;

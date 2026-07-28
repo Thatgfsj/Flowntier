@@ -6,7 +6,7 @@ import { kvGet, kvSet } from './lib/api.js';
 import { Welcome } from './components/Welcome';
 import { WorkdirSetup } from './components/WorkdirSetup';
 import { PhaseTimeline, AgentCard, Card, type PhaseState, type AgentStatus } from '@flowntier/ui';
-import type { WfEvent } from '@flowntier/shared';
+import type { WfEvent, ReviewerVerdictEvent } from '@flowntier/shared';
 import { TopBar } from './zones/TopBar.js';
 import { CenterPanel } from './zones/CenterPanel.js';
 import { LeftRoster } from './zones/LeftRoster.js';
@@ -186,6 +186,11 @@ export function App() {
     verdict: 'PASS' | 'REPAIR' | 'REWRITE';
     summary: string;
   } | null>(null);
+  // v0.4.22 (event 000112): append-only log of every critic
+  // verdict event emitted by the orchestrator. Drives the new
+  // ReviewerCard in place of the old hard-coded PASS/0.87
+  // panel; the last final-review entry wins the binding.
+  const [reviewerVerdicts, setReviewerVerdicts] = useState<ReviewerVerdictEvent[]>([]);
   const [finalReport, setFinalReport] = useState<string | null>(null);
   // v0.4.22 (event 000095): the orchestrator emits a Done
   // event with status='FAILED: <reason>' when an agent can't
@@ -453,6 +458,10 @@ export function App() {
     setCompleted(false);
     setMilestones([]);
     setReviewVerdict(null);
+    // v0.4.22 (event 000112): clear the verdict-event log so the
+    // next workflow doesn't briefly render the previous run's
+    // PASS/REPAIR verdict before its first critic emits.
+    setReviewerVerdicts([]);
     setFinalReport(null);
     setWorkflowError(null);
     setCurrentWfId(null);
@@ -482,7 +491,27 @@ export function App() {
       busyRef.current = false;
       setBusy(false);
       setCompleted(true);
-      setReviewVerdict({ verdict: 'PASS', summary: t('workflow.verdict.pass') });
+      // v0.4.22 (event 000112): if the orchestrator already fed
+      // us a `final-review` verdict before the workflow finished,
+      // keep it. Otherwise leave the placeholder "PASS" so the
+      // ReviewerCard stays stable. The real binding happens via
+      // the reviewer_verdict branch below.
+      setReviewVerdict((prev) => prev ?? { verdict: 'PASS', summary: t('workflow.verdict.pass') });
+    }
+    // v0.4.22 (event 000112): each critic emits one
+    // `reviewer_verdict` event per review phase (4 events per
+    // workflow in steady state: 2 plan-review, 2 final-review).
+    // The last final-review verdict wins the binding for the
+    // ReviewerCard and the i18n severity labels.
+    if ((event as { kind?: string }).kind === 'reviewer_verdict') {
+      const r = event as unknown as ReviewerVerdictEvent;
+      setReviewerVerdicts((prev) => [...prev, r]);
+      if (r.phase === 'final-review') {
+        const v = r.verdict;
+        const coerced: 'PASS' | 'REPAIR' | 'REWRITE' =
+          v === 'PASS' || v === 'REPAIR' || v === 'REWRITE' ? v : 'REPAIR';
+        setReviewVerdict({ verdict: coerced, summary: r.summary });
+      }
     }
     // v0.4.22 (event 000095): detect a globally-failed workflow.
     // The orchestrator emits Done { status: 'FAILED: <reason>' }
@@ -600,6 +629,8 @@ export function App() {
     setTasks([]);
     setMilestones([]);
     setReviewVerdict(null);
+    // v0.4.22 (event 000112): also drop the verdict log.
+    setReviewerVerdicts([]);
     setFinalReport(null);
     setWorkflowError(null);
     setActivePhase(0);
@@ -944,9 +975,43 @@ export function App() {
                     <ReviewVerdict
                       verdict={reviewVerdict.verdict}
                       verdictLabel={t(`reviewVerdict.verdict.${reviewVerdict.verdict}`)}
-                      confidenceLabel={t('reviewVerdict.confidence', { value: '1.00' })}
-                      confidence={1}
-                      issues={[]}
+                      // v0.4.22 (event 000112): display the real
+                      // confidence from the last reviewer_verdict
+                      // event (currently 0.0 placeholder). Falls
+                      // back to 1.00 when no critic has reported
+                      // yet and reviewVerdict was set by the
+                      // final-review binding path.
+                      confidenceLabel={t('reviewVerdict.confidence', {
+                        value: (() => {
+                          const last = [...reviewerVerdicts]
+                            .reverse()
+                            .find((r) => r.phase === 'final-review');
+                          if (last && last.confidence > 0) {
+                            return last.confidence.toFixed(2);
+                          }
+                          return '1.00';
+                        })()
+                      })}
+                      confidence={
+                        (() => {
+                          const last = [...reviewerVerdicts]
+                            .reverse()
+                            .find((r) => r.phase === 'final-review');
+                          return last && last.confidence > 0
+                            ? last.confidence
+                            : 1;
+                        })()
+                      }
+                      issues={
+                        // v0.4.22 (event 000112): the orchestrator
+                        // emits a list of plain strings (no severity),
+                        // but ReviewVerdict expects structured
+                        // ReviewIssue with severity. Mapping plain
+                        // → MAJOR strips semantics, so keep an
+                        // empty list until event 000115 (structured
+                        // JSON reviewer prompt) gives us severity.
+                        []
+                      }
                       summary={reviewVerdict.summary}
                     />
                   ) : (

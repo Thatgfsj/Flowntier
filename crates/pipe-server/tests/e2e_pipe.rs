@@ -2061,3 +2061,115 @@ async fn list_models_filters_disabled_pairs() {
 
     handle.abort();
 }
+
+// v0.4.22 (event 000112): agent_core::event::AgentEvent gets a
+// new `reviewer_verdict` variant. This file pins:
+//   1. serde's tag emit produces `kind:"reviewer_verdict"` (the
+//      Tauri event bridge filters by this discriminator — if the
+//      tag were misnamed, the webview would silently drop the
+//      verdict and the ReviewerCard would stay on the placeholder).
+//   2. All 6 fields survive a round-trip (the frontend relies on
+//      `phase`, `role`, `verdict`, `confidence`, `issues`,
+//      `summary` for binding the final-review payload).
+//
+// These tests live in pipe-server even though the type is in
+// agent-core because the full emit path (orchestrator -> events
+// pipe -> tauri bridge) is what the user-visible regression
+// hinges on; agent-core's own lib tests cover the pure-Rust
+// surface area.
+#[test]
+fn agent_event_reviewer_verdict_serializes_to_kind_tag() {
+    use agent_core::event::AgentEvent;
+    let v = AgentEvent::ReviewerVerdict {
+        wf_id: "wf_abc".into(),
+        phase: "final-review".into(),
+        role: "agent:critic:b".into(),
+        verdict: "PASS".into(),
+        confidence: 0.0,
+        issues: vec!["function too long".into()],
+        summary: "module boundaries are clean".into(),
+    };
+    let json = serde_json::to_value(&v).expect("serialize");
+    assert_eq!(json["kind"], serde_json::json!("reviewer_verdict"),
+        "tag must be snake_case 'reviewer_verdict' (rename_all = snake_case)");
+    assert_eq!(json["wf_id"], serde_json::json!("wf_abc"));
+    assert_eq!(json["phase"], serde_json::json!("final-review"));
+    assert_eq!(json["role"], serde_json::json!("agent:critic:b"));
+    assert_eq!(json["verdict"], serde_json::json!("PASS"));
+    assert_eq!(json["confidence"], serde_json::json!(0.0));
+    assert_eq!(json["issues"][0], serde_json::json!("function too long"));
+    assert_eq!(json["summary"], serde_json::json!("module boundaries are clean"));
+}
+
+#[test]
+fn agent_event_reviewer_verdict_round_trips_through_serde() {
+    use agent_core::event::AgentEvent;
+    let v = AgentEvent::ReviewerVerdict {
+        wf_id: "wf_xyz".into(),
+        phase: "plan-review".into(),
+        role: "agent:critic:a".into(),
+        verdict: "REPAIR".into(),
+        confidence: 0.0,
+        issues: Vec::new(),
+        summary: "Auth middleware leaks session id when error_path fires".into(),
+    };
+    let s = serde_json::to_string(&v).expect("serialize");
+    let back: AgentEvent = serde_json::from_str(&s).expect("deserialize");
+    match back {
+        AgentEvent::ReviewerVerdict { wf_id, phase, role, verdict, confidence, issues, summary } => {
+            assert_eq!(wf_id, "wf_xyz");
+            assert_eq!(phase, "plan-review");
+            assert_eq!(role, "agent:critic:a");
+            assert_eq!(verdict, "REPAIR");
+            assert_eq!(confidence, 0.0);
+            assert!(issues.is_empty());
+            assert!(summary.starts_with("Auth middleware"));
+        }
+        other => panic!("round-trip lost the variant; got {:?}", other),
+    }
+}
+
+// v0.4.22 (event 000112): the helper `emit_reviewer_verdict`
+// strips the first sentence of the critic's text (truncated at
+// 200 chars) and uses `verdict_of` to scan PASS/REPAIR/REWRITE.
+// We don't drive an LLM in unit tests, so this test only
+// pins the wire-level round-trip for the variant's payload by
+// exercising serde against a representative value. The
+// orchestrator's prose-scan logic is indirectly covered by
+// the existing e2e Pipe tests that exercise run_task; here
+// we focus on the new `events pipe -> Tauri bridge -> webview`
+// schema contract.
+#[test]
+fn reviewer_verdict_event_pipe_payload_matches_webview_expectation() {
+    use agent_core::event::AgentEvent;
+    // The wire format the Tauri event bridge (`events_bridge`
+    // in apps/desktop/src-tauri/src/lib.rs) forward to the
+    // webview under `wf:event` is just `serde_json::to_value`
+    // of the AgentEvent. The webview's `useEventStream()`
+    // hook casts it to `WfEvent` whose union now includes
+    // `ReviewerVerdictEvent { kind: 'reviewer_verdict' }`.
+    // Mismatches in field shape between the Rust enum's tag
+    // and the TS union silently break the binding — this
+    // test catches that drift early.
+    let v = AgentEvent::ReviewerVerdict {
+        wf_id: "wf_pipe".into(),
+        phase: "final-review".into(),
+        role: "agent:critic:b".into(),
+        verdict: "REPAIR".into(),
+        confidence: 0.0,
+        issues: vec!["three of five tests missing".into()],
+        summary: "测试覆盖不够，需要补 AuthMiddleware 三条 spec 的正常路径".into(),
+    };
+    let json = serde_json::to_value(&v).expect("serialize");
+    assert_eq!(json["kind"].as_str(), Some("reviewer_verdict"));
+    // The webview's narrow path `event.kind === 'reviewer_verdict'`
+    // expects these exact field names; a renamed field would
+    // silently degrade reviewVerdict binding.
+    assert!(json.get("wf_id").is_some(), "wf_id field missing");
+    assert!(json.get("phase").is_some(), "phase field missing");
+    assert!(json.get("role").is_some(), "role field missing");
+    assert!(json.get("verdict").is_some(), "verdict field missing");
+    assert!(json.get("confidence").is_some(), "confidence field missing");
+    assert!(json.get("issues").is_some(), "issues field missing");
+    assert!(json.get("summary").is_some(), "summary field missing");
+}

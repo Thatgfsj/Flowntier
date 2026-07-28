@@ -86,4 +86,37 @@ pub enum AgentEvent {
         /// Final summary, if any.
         summary: Option<String>,
     },
+
+    /// v0.4.22 (event 000112): reviewer (or bug-hunter) actor
+    /// finished a verdict pass. Orchestrator emits this once per
+    /// critic per review phase (plan-review + final-review), so
+    /// a single workflow produces up to four verdict events —
+    /// two per review phase, one per critic (agent:critic:a, b).
+    /// `verdict` is the prose-scanned PASS/REPAIR/REWRITE token
+    /// (see `verdict_of` in pipe-server/orchestrator.rs); the
+    /// front-end treats an event with `phase == "final-review"`
+    /// as the binding verdict and replaces the placeholder
+    /// "审核员 B — 架构审查" card with this verdict payload.
+    /// `confidence` is currently always 0.0; the actor loop does
+    /// not yet emit a structured score. `issues` is non-empty
+    /// only after event 000115 (JSON-structured reviewer output).
+    ReviewerVerdict {
+        /// Workflow id.
+        wf_id: String,
+        /// Review phase: `"plan-review"` or `"final-review"`.
+        phase: String,
+        /// Critic role id: `"agent:critic:a"` (BugHunter) or
+        /// `"agent:critic:b"` (Reviewer).
+        role: String,
+        /// Verdict token: `"PASS"`, `"REPAIR"`, or `"REWRITE"`.
+        verdict: String,
+        /// Confidence 0.0..=1.0 (currently 0.0 — placeholder until
+        /// event 000115 gives reviewers a structured JSON prompt).
+        confidence: f64,
+        /// Per-issue notes (currently empty — placeholder).
+        issues: Vec<String>,
+        /// One-sentence reviewer rationale (first sentence of the
+        /// critic's text, truncated to 200 chars).
+        summary: String,
+    },
 }

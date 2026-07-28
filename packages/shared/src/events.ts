@@ -18,7 +18,8 @@ export type WfEvent =
   | MilestoneEvent
   | UserQueryEvent
   | TaskStatusEvent
-  | WorkflowCompleteEvent;
+  | WorkflowCompleteEvent
+  | ReviewerVerdictEvent;
 
 export type TaskStatusKind =
   | 'PENDING'
@@ -104,4 +105,32 @@ export interface TaskStatusEvent {
   readonly task_status: TaskStatusKind;
   readonly task_summary?: string;
   readonly task_files?: readonly string[];
+}
+
+/** v0.4.22 (event 000112): reviewer / bug-hunter verdict, the
+ *  pipe that replaces the previous hard-coded
+ *  "PASS / 置信度 0.87" ReviewerCard on the webview. The
+ *  Rust orchestrator emits one of these per critic per
+ *  review phase (PlanReview + FinalReview), so a single
+ *  workflow can produce up to four events. The webview uses
+ *  the last-seen `phase === 'final-review'` event to bind.
+ *
+ *  Confidence is currently always 0.0 and `issues` is empty
+ *  pending event 000115 (structured JSON reviewer prompt). */
+export interface ReviewerVerdictEvent {
+  readonly kind: 'reviewer_verdict';
+  readonly wf_id: string;
+  /** `"plan-review"` | `"final-review"`. */
+  readonly phase: string;
+  /** Critic id: `"agent:critic:a"` (BugHunter) or
+   *  `"agent:critic:b"` (Reviewer). */
+  readonly role: string;
+  /** `"PASS"` | `"REPAIR"` | `"REWRITE"` (verbatim `verdict_of`). */
+  readonly verdict: string;
+  /** 0.0..=1.0. Currently 0.0 placeholder. */
+  readonly confidence: number;
+  /** Per-issue notes — empty pending event 000115. */
+  readonly issues: readonly string[];
+  /** First 200 chars of the critic's first sentence. */
+  readonly summary: string;
 }
