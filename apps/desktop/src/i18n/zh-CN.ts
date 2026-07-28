@@ -277,6 +277,8 @@ const zhCN = {
   'centerPanel.agoSeconds': '{{seconds}} 秒前',
   'centerPanel.reviewHeading': '审核员 B — 架构审查',
   'centerPanel.reviewSummary': '模块边界清晰，鉴权模块与路由处理器解耦，结构良好。',
+  'centerPanel.reviewPending': '等待审查员 B 评审…',
+  'centerPanel.reviewPendingHint': '完成 8 个交付阶段后会自动出评审意见；当前未生成。',
 
   // PerTaskConsole
   'perTask.agent.chief': '主理',

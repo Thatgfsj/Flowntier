@@ -280,6 +280,8 @@ const enUS: Translations = {
   'centerPanel.reviewHeading': 'Critic B — architecture review',
   'centerPanel.reviewSummary':
     'Module boundaries are clean; auth and route handlers are decoupled. Structure is solid.',
+  'centerPanel.reviewPending': 'Waiting for Critic B review…',
+  'centerPanel.reviewPendingHint': 'A review will be generated after all 8 delivery phases complete; none yet.',
 
   // PerTaskConsole
   'perTask.agent.chief': 'Chief',

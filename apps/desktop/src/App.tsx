@@ -490,11 +490,11 @@ export function App() {
     // 30-min timeout, etc.). Capture the last failure status so
     // the user sees the real error instead of the generic
     // "10-minute workflow timeout" the watchdog would show.
-    if (event.kind === 'done' && typeof event.status === 'string'
-        && event.status.startsWith('FAILED')) {
-      const summary = (event.summary ?? '') as string;
+    if ((event.kind as string) === 'done' && typeof (event as { status?: unknown }).status === 'string'
+        && ((event as { status: string }).status).startsWith('FAILED')) {
+      const summary = ((event as { summary?: unknown }).summary ?? '') as string;
       // Strip the "FAILED: " prefix for display
-      const clean = event.status.replace(/^FAILED:\s*/, '');
+      const clean = (event as { status: string }).status.replace(/^FAILED:\s*/, '');
       setWorkflowError(`${clean}\n\n${summary}`.trim());
     }
     if ((event.kind === 'transition' || (event as { kind?: string }).kind === 'phase_transition') && (event as { to?: string }).to) {
@@ -940,14 +940,28 @@ export function App() {
 
                 <Card>
                   <h3 className="mb-2 text-sm font-semibold">审核员 B — 架构审查</h3>
-<ReviewVerdict
-                verdict="PASS"
-                verdictLabel={t('reviewVerdict.verdict.PASS')}
-                confidenceLabel={t('reviewVerdict.confidence', { value: '0.87' })}
-                confidence={0.87}
-                issues={[]}
-                summary={t('centerPanel.reviewSummary')}
-              />
+                  {reviewVerdict ? (
+                    <ReviewVerdict
+                      verdict={reviewVerdict.verdict}
+                      verdictLabel={t(`reviewVerdict.verdict.${reviewVerdict.verdict}`)}
+                      confidenceLabel={t('reviewVerdict.confidence', { value: '1.00' })}
+                      confidence={1}
+                      issues={[]}
+                      summary={reviewVerdict.summary}
+                    />
+                  ) : (
+                    <div className="flex flex-col gap-1 text-xs text-text-secondary">
+                      <div className="flex items-center gap-2">
+                        <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-text-tertiary" />
+                        <span>{t('centerPanel.reviewPending', { defaultValue: '等待审查员 B 评审…' })}</span>
+                      </div>
+                      <p className="mt-1 text-[11px] text-text-tertiary">
+                        {t('centerPanel.reviewPendingHint', {
+                          defaultValue: '完成 8 个交付阶段后会自动出评审意见；当前未生成。'
+                        })}
+                      </p>
+                    </div>
+                  )}
                 </Card>
               </>
             }
