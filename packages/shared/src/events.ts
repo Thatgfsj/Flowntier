@@ -1,8 +1,24 @@
 /**
  * Event types emitted on the ACO event bus.
  *
- * Mirror of `crates/event-bus/src/lib.rs` `WfEvent` and the
- * Python `runtime/event_bus.py` `WfEvent`.
+ * v0.4.22 (event 000116): renamed from "WfEvent mirror of
+ * `crates/event-bus/src/lib.rs`" to a direct mirror of
+ * `crates/agent-core/src/event.rs::AgentEvent` — the runtime's
+ * named-pipe events stream carries `AgentEvent` (via
+ * `serde(tag = "kind", rename_all = "snake_case")`), not
+ * `WfEvent`. The `WfEvent` name is preserved for backward
+ * compatibility with downstream consumers that already imported
+ * the type. The previous `crates/event-bus/src/lib.rs::WfEvent`
+ * enum (Transition / TokenUsage / Console / Milestone /
+ * UserQuery / TaskStatus) is dead code that was removed in
+ * event 000116; the carrier is now `AgentEvent` directly.
+ *
+ * Cross-language schema contract — see
+ * `crates/agent-core/src/event.rs::AGENT_EVENT_KINDS` and the
+ * `tests/event_kind_set_matches_actual_serde_tags` test. The
+ * mirror on this side is [`WF_EVENT_KINDS`] plus the vitest
+ * suite at `tests/event-kinds.test.ts`. When you add a variant
+ * on either side, mirror it on the other in the same commit.
  *
  * Versioned as `workflow-event/v0.1`.
  */
@@ -11,6 +27,30 @@ export const PROTOCOL_VERSION = 'workflow-event/v0.1' as const;
 
 export type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error';
 
+/** v0.4.22 (event 000116): single source of truth for every
+ *  `kind` literal in the [`WfEvent`] union. Mirrors
+ *  `crates/agent-core/src/event.rs::AGENT_EVENT_KINDS` — when
+ *  adding an event, update BOTH sides in the same commit; the
+ *  Rust test `event_kind_set_matches_actual_serde_tags` and
+ *  the vitest `tests/event-kinds.test.ts` will fail otherwise.
+ *
+ *  `as const` so TypeScript narrows the array elements to
+ *  literal strings; the vitest compares sorted sets to the
+ *  Rust BTreeSet.
+ */
+export const WF_EVENT_KINDS = [
+  'text_delta',
+  'tool_started',
+  'tool_finished',
+  'phase_transition',
+  'token_usage',
+  'done',
+  'reviewer_verdict',
+  'repair_loop',
+] as const;
+
+export type WfEventKind = typeof WF_EVENT_KINDS[number];
+
 export type WfEvent =
   | TransitionEvent
   | TokenUsageEvent
@@ -18,7 +58,6 @@ export type WfEvent =
   | MilestoneEvent
   | UserQueryEvent
   | TaskStatusEvent
-  | WorkflowCompleteEvent
   | ReviewerVerdictEvent
   | RepairLoopEvent;
 
@@ -27,9 +66,27 @@ export type TaskStatusKind =
   | 'DISPATCHED'
   | 'RUNNING'
   | 'DONE'
-  | 'APPROVED'
   | 'FAILED'
   | 'REPAIRING'
+  /**
+   * v0.4.22 (event 000116): never emitted by the Rust
+   * orchestrator. The runtime's task_status column only
+   * carries the six kinds above; `APPROVED` was historically
+   * a UI-only state used by `RightPanel` / `PlanGraph` to
+   * colour code approved-after-review rows. Kept here as a
+   * literal so existing TS narrowing still works, but the
+   * runtime never sends it over the wire.
+   * @deprecated Use `'DONE'` — the runtime collapses approve
+   * into done. */
+  | 'APPROVED'
+  /**
+   * v0.4.22 (event 000116): also never emitted by the Rust
+   * orchestrator. The pre-event-000116 design called for a
+   * review-then-approve flow, but the implementation went
+   * straight from REPAIRING → DONE (or DONE → REPAIRING via
+   * the event 000113 loop). Kept here as a literal for
+   * backward compatibility.
+   * @deprecated Use `'RUNNING'` while the critic is reviewing. */
   | 'AWAITING_REVIEW';
 
 export interface TransitionEvent {
@@ -85,17 +142,13 @@ export interface UserQueryEvent {
   readonly options: readonly string[];
 }
 
-/** BUG-FRONTEND-RT-3 (event 000029): emitted by the Rust runtime
- *  once the agent finishes the report and the workflow is
- *  complete. Webview's applyEvent handler unblocks the cmd
- *  bar immediately on seeing this. Optional in the schema —
- *  Rust-side may not always emit it (e.g. on a hard crash). */
-export interface WorkflowCompleteEvent {
-  readonly kind: 'workflow_complete';
-  readonly wf_id: string;
-  readonly status: 'DONE' | 'FAILED' | 'ABORTED';
-  readonly summary?: string;
-}
+/** v0.4.22 (event 000116): REMOVED — `WorkflowCompleteEvent`
+ *  used to live here with `kind: 'workflow_complete'`, but no
+ *  Rust variant in `crates/agent-core/src/event.rs::AgentEvent`
+ *  ever emits it. The webview gets the equivalent signal from
+ *  `kind: 'done'` (event 000069 follow-up). Removing the orphan
+ *  prevents `applyEvent` from carrying a branch that can never
+ *  fire. */
 
 export interface TaskStatusEvent {
   readonly kind: 'task_status';

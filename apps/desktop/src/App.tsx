@@ -482,7 +482,12 @@ export function App() {
     // when the report is finalized) immediately resets busy so
     // the user can start a new workflow.
     const isCompletion =
-      event.kind === 'workflow_complete' ||
+      // v0.4.22 (event 000116): the historical
+      // `'workflow_complete'` branch was removed because no
+      // Rust variant in `AgentEvent` ever emits it. The
+      // runtime delivers completion via `kind: 'done'`
+      // (handled separately in this switch) — this fallback
+      // is now milestone-only.
       // Fallback: last milestone is delivery = "done"
       (event.kind === 'milestone' &&
        (event as { phase?: string }).phase === 'delivery' &&

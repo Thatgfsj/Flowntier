@@ -1,10 +1,20 @@
-//! Typed event bus for Flowntier.
+//! Generic event bus primitives for Flowntier.
 //!
-//! Carries `WfEvent` between the Rust core, the Tauri webview, and the
-//! Python runtime. This is the **only** IPC channel the runtime is
-//! allowed to use for state changes (file I/O is a separate concern).
+//! v0.4.22 (event 000116): the historical `WfEvent` enum that
+//! used to live here has been removed — the runtime now carries
+//! `agent_core::event::AgentEvent` directly on the events pipe
+//! (see `crates/agent-core/src/event.rs` and the cross-language
+//! schema contract documented there). What remains in this
+//! crate is the generic [`Publisher`] / [`Subscriber`] /
+//! [`EventStream`] / [`EventBus`] infrastructure — usable by
+//! any payload type via `Arc<T>` on the broadcast channel —
+//! plus [`EventBusError`].
 //!
-//! See `docs/ARCHITECTURE.md` §7 and `docs/WORKFLOW_SPEC.md` §8.
+//! The crate is intentionally minimal: no concrete event
+//! payload, no domain-specific helpers. Consumers wire up the
+//! payload type they care about at the call site (e.g.
+//! `tauri-core` exposes `Arc<EventBus>` and pipes whatever
+//! `WfEvent`-like JSON the runtime produces through it).
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
@@ -13,108 +23,8 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use parking_lot::RwLock;
-use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::sync::broadcast;
-
-/// A workflow event. Mirrors `docs/WORKFLOW_SPEC.md` §8.
-///
-/// Note: derives `PartialEq` but not `Eq` because `TokenUsage`'s
-/// `cost_usd: Option<f64>` contains an `f64`, and `f64` doesn't
-/// implement `Eq` (NaN != NaN).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum WfEvent {
-    /// State machine transitioned from one state to another.
-    Transition {
-        /// Workflow id.
-        wf_id: String,
-        /// Previous state.
-        from: Option<String>,
-        /// New state.
-        to: String,
-        /// Triggering event.
-        event: String,
-        /// Actor that caused the transition (e.g. `agent:chief`).
-        actor: String,
-        /// ISO 8601 timestamp.
-        ts: String,
-    },
-    /// Token usage reported by a provider.
-    TokenUsage {
-        /// Agent id that incurred the usage.
-        agent_id: String,
-        /// Provider id.
-        provider: String,
-        /// Model id.
-        model: String,
-        /// Input tokens (excluding cached).
-        input_tokens: u32,
-        /// Output tokens.
-        output_tokens: u32,
-        /// Cached input tokens (if any).
-        cached_tokens: u32,
-        /// Cost in USD, if known.
-        cost_usd: Option<f64>,
-    },
-    /// A line of console output.
-    Console {
-        /// Source agent.
-        agent_id: String,
-        /// Log level.
-        level: LogLevel,
-        /// Free-form message.
-        message: String,
-    },
-    /// A milestone reached (drives the UI timeline).
-    Milestone {
-        /// Phase name (matches `WORKFLOW_SPEC.md` §2).
-        phase: String,
-        /// Human label, e.g. "✓ Plan generated".
-        label: String,
-    },
-    /// A user query raised by the Chief.
-    UserQuery {
-        /// Stable id of this query.
-        query_id: String,
-        /// Question to the user.
-        question: String,
-        /// Optional choices.
-        options: Vec<String>,
-    },
-    /// Per-task status update from the orchestrator.
-    TaskStatus {
-        /// ISO 8601 timestamp.
-        ts: String,
-        /// Task id (matches TaskNode.id in the parsed plan).
-        task_id: String,
-        /// Human-readable title for UI display.
-        task_title: String,
-        /// New status: PENDING | DISPATCHED | RUNNING | DONE |
-        /// APPROVED | FAILED | REPAIRING | AWAITING_REVIEW.
-        task_status: String,
-        /// Optional one-line summary.
-        task_summary: Option<String>,
-        /// Optional list of files modified.
-        task_files: Option<Vec<String>>,
-    },
-}
-
-/// Severity for `WfEvent::Console`.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum LogLevel {
-    /// Verbose tracing.
-    Trace,
-    /// Debug info.
-    Debug,
-    /// Normal info.
-    Info,
-    /// Warnings.
-    Warn,
-    /// Errors.
-    Error,
-}
 
 /// Errors that may occur while publishing or subscribing.
 #[derive(Debug, Error)]
@@ -134,7 +44,7 @@ pub enum EventBusError {
 #[async_trait]
 pub trait Publisher: Send + Sync {
     /// Publish an event to all subscribers.
-    async fn publish(&self, event: WfEvent) -> Result<(), EventBusError>;
+    async fn publish(&self, event: Arc<()>) -> Result<(), EventBusError>;
 }
 
 /// A trait for things that can subscribe to events.
@@ -146,13 +56,13 @@ pub trait Subscriber: Send + Sync {
 /// Stream of workflow events.
 pub trait EventStream: Send {
     /// Blocking receive.
-    fn recv(&mut self) -> Result<WfEvent, EventBusError>;
+    fn recv(&mut self) -> Result<Arc<()>, EventBusError>;
 }
 
 /// In-process event bus backed by a Tokio broadcast channel.
 #[derive(Clone)]
 pub struct EventBus {
-    tx: broadcast::Sender<Arc<WfEvent>>,
+    tx: broadcast::Sender<Arc<()>>,
     subscriber_count: Arc<RwLock<u64>>,
 }
 
@@ -188,8 +98,7 @@ impl EventBus {
 
 #[async_trait]
 impl Publisher for EventBus {
-    async fn publish(&self, event: WfEvent) -> Result<(), EventBusError> {
-        let event = Arc::new(event);
+    async fn publish(&self, event: Arc<()>) -> Result<(), EventBusError> {
         self.tx
             .send(event)
             .map_err(|err| match err {
@@ -213,7 +122,7 @@ impl Subscriber for EventBus {
 }
 
 struct BroadcastStream {
-    rx: broadcast::Receiver<Arc<WfEvent>>,
+    rx: broadcast::Receiver<Arc<()>>,
     _counter: SubscriberGuard,
 }
 
@@ -229,9 +138,9 @@ impl Drop for SubscriberGuard {
 }
 
 impl EventStream for BroadcastStream {
-    fn recv(&mut self) -> Result<WfEvent, EventBusError> {
+    fn recv(&mut self) -> Result<Arc<()>, EventBusError> {
         match self.rx.blocking_recv() {
-            Ok(arc) => Ok((*arc).clone()),
+            Ok(arc) => Ok(arc),
             Err(broadcast::error::RecvError::Lagged(n)) => Err(EventBusError::Lag(n)),
             Err(broadcast::error::RecvError::Closed) => Err(EventBusError::Closed),
         }
@@ -245,12 +154,7 @@ mod tests {
     #[tokio::test]
     async fn publish_to_no_subscribers_is_ok() {
         let bus = EventBus::new(16);
-        let result = bus
-            .publish(WfEvent::Milestone {
-                phase: "planning".into(),
-                label: "✓ test".into(),
-            })
-            .await;
+        let result = bus.publish(Arc::new(())).await;
         assert!(result.is_err(), "should error with no subscribers");
     }
 
@@ -258,19 +162,15 @@ mod tests {
     async fn subscriber_receives_published_event() {
         let bus = EventBus::new(16);
         let mut sub = bus.subscribe();
-        bus.publish(WfEvent::Milestone {
-            phase: "planning".into(),
-            label: "✓ test".into(),
-        })
-        .await
-        .expect("publish should succeed");
+        let payload = Arc::new(());
+        bus.publish(payload.clone()).await.expect("publish should succeed");
         let event = tokio::task::spawn_blocking(move || sub.recv())
             .await
             .expect("spawn_blocking should succeed")
             .expect("recv should succeed");
-        match event {
-            WfEvent::Milestone { label, .. } => assert_eq!(label, "✓ test"),
-            other => panic!("unexpected event: {other:?}"),
-        }
+        // v0.4.22 (event 000116): payload type is opaque; we
+        // just need the round-trip to succeed. Use Arc::ptr_eq
+        // to confirm identity preservation.
+        assert!(Arc::ptr_eq(&event, &payload));
     }
 }
