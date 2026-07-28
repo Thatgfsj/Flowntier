@@ -2173,3 +2173,74 @@ fn reviewer_verdict_event_pipe_payload_matches_webview_expectation() {
     assert!(json.get("issues").is_some(), "issues field missing");
     assert!(json.get("summary").is_some(), "summary field missing");
 }
+
+// v0.4.22 (event 000114): orchestator-end terminal status used
+// to be hard-coded to "DONE" no matter what the critics said
+// (chairman's manual test: 3D-magic-cube task finished in 2
+// seconds and falsely reported PASS / 置信度 0.87).
+// `terminal_done_status` is the pure helper that translates
+// the final-review verdict pair into the AgentEvent::Done.status
+// string. The test pins:
+//
+//   1. Both PASS or any (PASS, UNKNOWN) mix  → "DONE".
+//      The frontend's applyEvent `event.kind === 'done' &&
+//      status.startsWith('FAILED')` branch stays silent (no
+//      workflowError banner shown).
+//
+//   2. Either REPAIR or REWRITE             →
+//      `"FAILED: reviewer_<verdict>_<role_id>"`. The frontend
+//      branch kicks in, sets `workflowError`, and the
+//      ReviewerCard (000112) already shows the verdict with
+//      its summary. REWRITE wins over REPAIR (severity rank 2
+//      > 1) when the two disagree.
+//
+//   3. Roles flip in the input order  → still attributes the
+//      failure to the higher-severity critic, not the first
+//      role by position. This pins the `pick` branch in
+//      `terminal_done_status`.
+//
+//   4. UNKNOWN from both sides  → still "DONE" (UNKNOWN is
+//      a non-actionable verdict; chief didn't raise anything
+//      actionable either, so report success).
+#[test]
+fn terminal_done_status_translates_review_verdict_pair() {
+    use pipe_server::orchestrator::terminal_done_status;
+    // PASS / PASS → DONE.
+    assert_eq!(
+        terminal_done_status("PASS", "PASS", "agent:critic:a", "agent:critic:b"),
+        "DONE",
+    );
+    // One REPAIR, one PASS → FAILED to the REPAIR side.
+    assert_eq!(
+        terminal_done_status("PASS", "REPAIR", "agent:critic:a", "agent:critic:b"),
+        "FAILED: reviewer_REPAIR_agent:critic:b",
+    );
+    // One REWRITE, one REPAIR → FAILED, attributed to REWRITE
+    // (severity > ).
+    assert_eq!(
+        terminal_done_status("REPAIR", "REWRITE", "agent:critic:a", "agent:critic:b"),
+        "FAILED: reviewer_REWRITE_agent:critic:b",
+    );
+    // Roles reversed: REPAIR for critic-b, PASS for critic-a;
+    // tie-break to the first arg (a) when severities are equal
+    // — but here they differ so REPAIR wins.
+    assert_eq!(
+        terminal_done_status("PASS", "REPAIR", "agent:critic:b", "agent:critic:a"),
+        "FAILED: reviewer_REPAIR_agent:critic:a",
+    );
+    // Both REWRITE → FAILED, pick goes to first arg.
+    assert_eq!(
+        terminal_done_status("REWRITE", "REWRITE", "agent:critic:a", "agent:critic:b"),
+        "FAILED: reviewer_REWRITE_agent:critic:a",
+    );
+    // UNKNOWN / UNKNOWN → DONE (no actionable concern).
+    assert_eq!(
+        terminal_done_status("UNKNOWN", "UNKNOWN", "agent:critic:a", "agent:critic:b"),
+        "DONE",
+    );
+    // Mixed UNKNOWN + PASS is still a DONE workflow.
+    assert_eq!(
+        terminal_done_status("UNKNOWN", "PASS", "agent:critic:a", "agent:critic:b"),
+        "DONE",
+    );
+}

@@ -873,20 +873,53 @@ impl Orchestrator {
         }).await;
         self.persist_task_row(&delivery, "8-delivery").await;
 
-        // v0.4.22 (event 000081): if the chief's LLM returned
-        // an empty summary AND an empty text, fall back to a
-        // synthetic one-line summary so the chairman sees
-        // something useful in the UI / status endpoint / log.
-        // Per the chairman's manual test (event 000080 log):
-        // three workflows all returned summary_len: 0 —
-        // the LLM was timing out or returning empty bodies
-        // (see NWT 000081 for the full bug writeup).
+        // v0.4.22 (event 000114): the workflow's terminal status
+        // must reflect the final-review verdict, not blindly
+        // report "DONE". If either critic replied REPAIR or
+        // REWRITE, the workflow has not actually shipped clean
+        // code — the chairman's manual test (event 000080 log:
+        // "input word 3D-magic-cube → 2-second run → 通过
+        // 置信度 0.87") surfaced exactly this lie. We translate
+        // the verdict-pair into a stable "FAILED: reviewer_<why>"
+        // status string so the frontend's existing
+        // `event.status.startsWith('FAILED')` branch (App.tsx
+        // applyEvent) reports the real error and the
+        // useAgentStream hook gets a meaningful terminal state.
+        let verdict_a = verdict_of(&final_a);
+        let verdict_b = verdict_of(&final_b);
+        // Whichever critic flagged the workflow, attribute the
+        // terminal failure to it. REWRITE > REPAIR so prefer
+        // the more-severe verdict when the two disagree.
+        // v0.4.22 (event 000114): extracted to pure
+        // `terminal_done_status` for unit testing.
+        let terminal_status = terminal_done_status(
+            &verdict_a,
+            &verdict_b,
+            &final_a.role_id,
+            &final_b.role_id,
+        );
+        // Diagnostic line the chairman sees at the top of the
+        // delivery summary — explicit so a "FAILED" outcome
+        // doesn't leave the user guessing which reviewer
+        // raised the concern.
+        let final_review_line = format!(
+            "[Final Review] Critic A ({}): {}. Critic B ({}): {}.\n",
+            final_a.role_id, verdict_a,
+            final_b.role_id, verdict_b,
+        );
+
+        // v0.4.22 (event 000114): prepend the [Final Review]
+        // line so the chairman sees the verdict pair at the top
+        // of the summary regardless of whether the LLM filled
+        // the rest in. Prepend — does not replace — so the
+        // existing fallback chain (chief text -> synthetic
+        // placeholder) still kicks in for empty deliveries.
         let effective_summary = match delivery.summary.as_deref() {
-            Some(s) if !s.is_empty() => s.to_string(),
+            Some(s) if !s.is_empty() => format!("{final_review_line}{s}"),
             _ => match delivery.text.as_str() {
-                t if !t.is_empty() => t.to_string(),
+                t if !t.is_empty() => format!("{final_review_line}{t}"),
                 _ => format!(
-                    "chief phase 8 returned empty summary; \
+                    "{final_review_line}chief phase 8 returned empty summary; \
                      workflow ran 8 phases ({} tasks planned, \
                      2 critic reviews, {} worker runs) but \
                      the LLM didn't produce text. Likely a \
@@ -900,19 +933,28 @@ impl Orchestrator {
 
         // Final Done event so subscribers' useAgentStream sees
         // the terminal state even if they were only listening to
-        // orchestrator-emitted events.
+        // orchestrator-emitted events. v0.4.22 (event 000114):
+        // status is no longer the hard-coded "DONE" — it
+        // reflects the final-review verdict pair.
+        let terminal_status_for_done = terminal_status.clone();
         let _ = self.events.send(AgentEvent::Done {
             wf_id: self.wf_id.clone(),
-            status: "DONE".into(),
+            status: terminal_status_for_done.clone(),
             summary: Some(effective_summary.clone()),
         });
-        // v0.4.22 (event 000069): mark the workflow as DONE in
-        // the workflows row so /api/workflow/{wf_id}/status
-        // can be polled by clients that didn't watch the
-        // events pipe.
+        // v0.4.22 (event 000069): mark the workflow in the
+        // workflows row so /api/workflow/{wf_id}/status can be
+        // polled by clients that didn't watch the events pipe.
+        // v0.4.22 (event 000114): the status column now follows
+        // the verdict-derived terminal status (was hard-coded
+        // "DONE" pre-event).
         let _ = self.state.repo.update_workflow_state(
-            &self.wf_id, "DONE", "8-delivery",
+            &self.wf_id, &terminal_status_for_done, "8-delivery",
         );
+        // Per the chairman's manual test (event 000080 log):
+        // three workflows all returned summary_len: 0 —
+        // the LLM was timing out or returning empty bodies
+        // (see NWT 000081 for the full bug writeup).
         // Also persist the final summary so status endpoint
         // returns it.
         if let Err(e) = self
@@ -1001,6 +1043,42 @@ fn verdict_of(o: &TaskOutcome) -> String {
         }
     }
     "UNKNOWN".into()
+}
+
+/// v0.4.22 (event 000114): translate a critic's verdict token
+/// into a 0..=2 severity rank used to pick the "worst" of two
+/// final-review verdicts. REWRITE > REPAIR > everything else.
+/// Pure function, exposed for unit tests in the e2e_pipe file.
+pub(crate) fn verdict_severity_rank(v: &str) -> u8 {
+    match v {
+        "REWRITE" => 2,
+        "REPAIR" => 1,
+        _ => 0,
+    }
+}
+
+/// v0.4.22 (event 000114): turn the (verdict_a, verdict_b)
+/// pair into a final terminal `AgentEvent::Done.status` string.
+/// Both PASS or UNKNOWN (or any mix where neither side
+/// triggered a non-PASS verdict) → "DONE". Any REPAIR or
+/// REWRITE → "FAILED: reviewer_<reason>_<role_id>" attributing
+/// the failure to whichever critic had the higher severity,
+/// REWRITE winning ties. Pure function; covered by e2e tests.
+pub fn terminal_done_status(
+    verdict_a: &str,
+    verdict_b: &str,
+    role_a: &str,
+    role_b: &str,
+) -> String {
+    let pick = if verdict_severity_rank(verdict_a) >= verdict_severity_rank(verdict_b) {
+        (verdict_a, role_a)
+    } else {
+        (verdict_b, role_b)
+    };
+    match pick.0 {
+        "PASS" | "UNKNOWN" => "DONE".to_string(),
+        other => format!("FAILED: reviewer_{}_{}", other, pick.1),
+    }
 }
 
 /// Small random suffix to make task ids unique within a single
