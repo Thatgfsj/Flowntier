@@ -2387,3 +2387,88 @@ fn parse_verdict_from_text_handles_lowercase_and_whitespace() {
     let (token, _) = parse_verdict_from_text(&outcome);
     assert_eq!(token, "REWRITE");
 }
+
+#[test]
+fn should_repair_decision_breaks_on_pass_pair() {
+    use pipe_server::orchestrator::should_repair_decision;
+    // Both PASS → never repair, regardless of loop count.
+    assert!(!should_repair_decision("PASS", "PASS", 0, 3));
+    assert!(!should_repair_decision("PASS", "PASS", 5, 3));
+    assert!(!should_repair_decision("PASS", "PASS", 0, 0));
+}
+
+#[test]
+fn should_repair_decision_repairs_while_under_cap() {
+    use pipe_server::orchestrator::should_repair_decision;
+    // One critic flagged REPAIR and we're still under the cap
+    // → repair.
+    assert!(should_repair_decision("PASS", "REPAIR", 0, 3));
+    assert!(should_repair_decision("REPAIR", "PASS", 1, 3));
+    // REWRITE counts too — the orchestrator treats any
+    // non-PASS verdict as a repair trigger.
+    assert!(should_repair_decision("REWRITE", "REWRITE", 2, 3));
+    // UNKNOWN (critic didn't emit the JSON block — see
+    // event 000115 fallback) also counts as non-PASS so the
+    // loop is conservative: a silent critic still triggers
+    // a re-run rather than silently accepting UNKNOWN.
+    assert!(should_repair_decision("UNKNOWN", "PASS", 0, 3));
+}
+
+#[test]
+fn should_repair_decision_bails_at_max_loops() {
+    use pipe_server::orchestrator::should_repair_decision;
+    // At the cap, even a persistent REPAIR stops the loop —
+    // the workflow proceeds to delivery with the last
+    // worker_results and the terminal status reflects the
+    // unrepaired verdict pair (event 000114).
+    assert!(!should_repair_decision("PASS", "REPAIR", 3, 3));
+    assert!(!should_repair_decision("REWRITE", "PASS", 5, 3));
+    // max_loops=0 disables repair entirely (chief wants a
+    // single-shot workflow with no retries).
+    assert!(!should_repair_decision("REPAIR", "REPAIR", 0, 0));
+}
+
+#[test]
+fn agent_event_repair_loop_serializes_to_kind_tag() {
+    use agent_core::event::AgentEvent;
+    // v0.4.22 (event 000113): serde `tag = "kind"` means the
+    // wire JSON carries a `kind: "repair_loop"` discriminator
+    // — the webview's applyEvent uses this to route the event
+    // to the repair panel.
+    let ev = AgentEvent::RepairLoop {
+        wf_id: "wf_test_001".into(),
+        loop_index: 2,
+        max_loops: 3,
+        verdict_a: "PASS".into(),
+        verdict_b: "REPAIR".into(),
+        issues_a: vec![],
+        issues_b: vec!["[HIGH] auth.rs:42 — token redaction missing".into()],
+    };
+    let json = serde_json::to_string(&ev).expect("serialize");
+    assert!(json.contains("\"kind\":\"repair_loop\""), "got: {json}");
+    assert!(json.contains("\"loop_index\":2"));
+    assert!(json.contains("\"max_loops\":3"));
+    assert!(json.contains("\"verdict_b\":\"REPAIR\""));
+    // Round-trip preserves all fields, including the empty
+    // issues_a (vs non-empty issues_b).
+    let parsed: AgentEvent = serde_json::from_str(&json).expect("deserialize");
+    match parsed {
+        AgentEvent::RepairLoop {
+            loop_index,
+            max_loops,
+            verdict_a,
+            verdict_b,
+            issues_a,
+            issues_b,
+            ..
+        } => {
+            assert_eq!(loop_index, 2);
+            assert_eq!(max_loops, 3);
+            assert_eq!(verdict_a, "PASS");
+            assert_eq!(verdict_b, "REPAIR");
+            assert!(issues_a.is_empty());
+            assert_eq!(issues_b.len(), 1);
+        }
+        other => panic!("expected RepairLoop, got {:?}", std::mem::discriminant(&other)),
+    }
+}

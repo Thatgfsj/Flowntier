@@ -119,4 +119,29 @@ pub enum AgentEvent {
         /// critic's text, truncated to 200 chars).
         summary: String,
     },
+    /// v0.4.22 (event 000113): emitted once each time the
+    /// orchestrator enters Phase 7 (repair) and decides to
+    /// re-run Phase 5 (develop). The webview's repair panel
+    /// listens for this to render "修复循环 N / max" instead of
+    /// guessing from repeated `5-develop-*` rows. Also carries
+    /// both critics' verdicts + their structured issues so the
+    /// panel can show "what to fix" without re-parsing
+    /// `ReviewerVerdict` history.
+    RepairLoop {
+        wf_id: String,
+        /// 1-based index of this repair round.
+        loop_index: u32,
+        /// Cap configured at workflow start (`max_repair_loops`).
+        max_loops: u32,
+        /// Verdict token from critic A (`"PASS"` / `"REPAIR"` /
+        /// `"REWRITE"` / `"UNKNOWN"`).
+        verdict_a: String,
+        /// Verdict token from critic B.
+        verdict_b: String,
+        /// Structured issues from critic A's JSON block (empty
+        /// when the critic didn't emit one — see event 000115).
+        issues_a: Vec<String>,
+        /// Structured issues from critic B's JSON block.
+        issues_b: Vec<String>,
+    },
 }

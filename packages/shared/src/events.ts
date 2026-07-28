@@ -19,7 +19,8 @@ export type WfEvent =
   | UserQueryEvent
   | TaskStatusEvent
   | WorkflowCompleteEvent
-  | ReviewerVerdictEvent;
+  | ReviewerVerdictEvent
+  | RepairLoopEvent;
 
 export type TaskStatusKind =
   | 'PENDING'
@@ -133,4 +134,22 @@ export interface ReviewerVerdictEvent {
   readonly issues: readonly string[];
   /** First 200 chars of the critic's first sentence. */
   readonly summary: string;
+}
+
+/** v0.4.22 (event 000113): emitted by the orchestrator once
+ *  each time it enters Phase 7 (repair) and decides to re-run
+ *  Phase 5 (develop). The webview's repair panel renders
+ *  "修复循环 N / max" from this event without having to
+ *  re-parse `ReviewerVerdict` history. */
+export interface RepairLoopEvent {
+  readonly kind: 'repair_loop';
+  readonly wf_id: string;
+  /** 1-based index of this repair round. */
+  readonly loop_index: number;
+  /** Cap configured at workflow start (`max_repair_loops`). */
+  readonly max_loops: number;
+  readonly verdict_a: string;
+  readonly verdict_b: string;
+  readonly issues_a: readonly string[];
+  readonly issues_b: readonly string[];
 }

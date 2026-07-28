@@ -261,6 +261,17 @@ pub struct Orchestrator {
     /// `phase_finished` log line so the chairman can match
     /// it to the `phase_started` they saw.
     current_phase: &'static str,
+    /// v0.4.22 (event 000113): max times Phase 5 (develop)
+    /// will re-run when Phase 6 reviewers return REPAIR /
+    /// REWRITE. The loop is bounded so a critic that
+    /// permanently flags REPAIR doesn't burn the chairman's
+    /// budget. Default 3 (matches tauri-core default). When
+    /// the cap is hit, the workflow proceeds to Phase 8 with
+    /// the last `worker_results` and the terminal `Done`
+    /// status reflects the unrepaired REPAIR / REWRITE
+    /// verdict pair (handled by event 000114's
+    /// `terminal_done_status`).
+    max_repair_loops: u32,
 }
 
 impl Orchestrator {
@@ -271,6 +282,7 @@ impl Orchestrator {
         state: Arc<ServerState>,
         events: broadcast::Sender<AgentEvent>,
         user_request: String,
+        max_repair_loops: u32,
     ) -> Self {
         // 12-char ulid-ish — collision-resistant enough for a
         // single process. Real wf_ids (legacy path) use full ULIDs.
@@ -284,6 +296,7 @@ impl Orchestrator {
             user_request,
             phase_started_at,
             current_phase: PHASES[0],
+            max_repair_loops,
         }
     }
 
@@ -407,6 +420,69 @@ impl Orchestrator {
             issues: structured.issues,
             summary: structured.summary,
         });
+    }
+
+    /// v0.4.22 (event 000113): Phase 5 (develop) runner
+    /// extracted from `run` so the repair loop can re-invoke
+    /// it with critic feedback appended. `repair_context`, when
+    /// `Some`, is appended to every worker prompt so they
+    /// know *what* to fix in this re-run; the original task
+    /// spec is unchanged so workers still target the same
+    /// plan.tasks[i] objective.
+    async fn run_phase_5_workers(
+        &self,
+        plan: &PlanDoc,
+        repair_context: Option<String>,
+    ) -> Vec<TaskOutcome> {
+        let mut worker_futures = Vec::new();
+        for t in &plan.tasks {
+            let mut task_text = format!(
+                "任务: {}\n目标: {}\n接口: {}\n依赖: {:?}\n要求: {}\n\n只做这一件事, 不要碰其他 worker 的文件。完成后用一句话汇报。",
+                t.title, t.objective, t.interfaces, t.dependencies, t.requirements,
+            );
+            if let Some(ctx) = &repair_context {
+                task_text.push_str("\n\n# 修复循环反馈 (event 000113)\n");
+                task_text.push_str(ctx);
+            }
+            worker_futures.push(self.run_agent(AgentRunSpec {
+                role: Role::Worker,
+                task: task_text,
+                context: None,
+            }));
+        }
+        futures::future::join_all(worker_futures).await
+    }
+
+    /// v0.4.22 (event 000113): Phase 6 (final review) runner
+    /// extracted from `run` for the same reason as
+    /// `run_phase_5_workers`. The repair loop calls this with
+    /// the freshly re-built `worker_results`.
+    async fn run_phase_6_final_review(
+        &self,
+        plan: &PlanDoc,
+        worker_results: &[TaskOutcome],
+    ) -> (TaskOutcome, TaskOutcome) {
+        let workers_summary: Vec<String> = worker_results.iter().enumerate().map(|(i, w)| {
+            let title = plan.tasks.get(i).map(|t| t.title.clone()).unwrap_or_default();
+            format!("[{}] {} ({}): {}\n  -> {}",
+                title, w.role_display, w.status,
+                w.text.chars().take(120).collect::<String>(),
+                w.summary.clone().unwrap_or_default(),
+            )
+        }).collect();
+        let review_ctx = workers_summary.join("\n\n");
+        tokio::join!(
+            self.run_agent(AgentRunSpec {
+                role: Role::BugHunter,
+                task: "评审上面所有 worker 的产出 (找 bug / runtime 风险)。给出: PASS / REPAIR / REWRITE。".into(),
+                context: Some(review_ctx.clone()),
+            }),
+            self.run_agent(AgentRunSpec {
+                role: Role::Reviewer,
+                task: "评审上面所有 worker 的产出 (架构 / 维护性)。给出: PASS / REPAIR / REWRITE。".into(),
+                context: Some(review_ctx),
+            }),
+        )
     }
 
     /// Spawn one agent run and return its outcome. The agent
@@ -739,7 +815,7 @@ impl Orchestrator {
             ),
             context: None,
         }).await;
-        self.persist_task_row(&chief_clarify, "1-requirement").await;
+        self.persist_task_row(&chief_clarify, "1-requirement", 0).await;
         phase_idx = 1;
         self.emit_phase(Some(PHASES[0]), PHASES[phase_idx]).await;
 
@@ -770,7 +846,7 @@ impl Orchestrator {
             ),
             context: None,
         }).await;
-        self.persist_task_row(&plan_round_a, "2-plan-A-summary").await;
+        self.persist_task_row(&plan_round_a, "2-plan-A-summary", 0).await;
         let mut plan = PlanDoc::from_chief_text(&plan_round_a.text, &self.user_request);
 
         let plan_round_b = self.run_agent(AgentRunSpec {
@@ -781,7 +857,7 @@ impl Orchestrator {
             ),
             context: None,
         }).await;
-        self.persist_task_row(&plan_round_b, "2-plan-B-backend").await;
+        self.persist_task_row(&plan_round_b, "2-plan-B-backend", 0).await;
         let plan_b = PlanDoc::from_chief_text(&plan_round_b.text, &self.user_request);
         plan.merge(&plan_b);
 
@@ -793,7 +869,7 @@ impl Orchestrator {
             ),
             context: None,
         }).await;
-        self.persist_task_row(&plan_round_c, "2-plan-C-frontend").await;
+        self.persist_task_row(&plan_round_c, "2-plan-C-frontend", 0).await;
         let plan_c = PlanDoc::from_chief_text(&plan_round_c.text, &self.user_request);
         plan.merge(&plan_c);
 
@@ -813,8 +889,8 @@ impl Orchestrator {
                 context: Some(plan_ctx),
             }),
         );
-        self.persist_task_row(&critic_a, "3-plan-review-criticA").await;
-        self.persist_task_row(&critic_b, "3-plan-review-criticB").await;
+        self.persist_task_row(&critic_a, "3-plan-review-criticA", 0).await;
+        self.persist_task_row(&critic_b, "3-plan-review-criticB", 0).await;
         // v0.4.22 (event 000112): publish each critic's verdict
         // as an AgentEvent::ReviewerVerdict so the webview can
         // render the real verdict (front-end also uses the
@@ -840,79 +916,109 @@ impl Orchestrator {
             ),
             context: Some(format!("PlanDoc: {}", serde_json::to_string_pretty(&plan).unwrap_or_default())),
         }).await;
-        self.persist_task_row(&dispatch, "4-dispatch").await;
+        self.persist_task_row(&dispatch, "4-dispatch", 0).await;
 
         // ── Phase 5: develop (workers in parallel) ─────────
         phase_idx = 4;
         self.emit_phase(Some(PHASES[3]), PHASES[phase_idx]).await;
-        let mut worker_futures = Vec::new();
-        for t in &plan.tasks {
-            let task_text = format!(
-                "任务: {}\n目标: {}\n接口: {}\n依赖: {:?}\n要求: {}\n\n只做这一件事, 不要碰其他 worker 的文件。完成后用一句话汇报。",
-                t.title, t.objective, t.interfaces, t.dependencies, t.requirements,
-            );
-            worker_futures.push(self.run_agent(AgentRunSpec {
-                role: Role::Worker,
-                task: task_text,
-                context: None,
-            }));
-        }
-        let worker_results = futures::future::join_all(worker_futures).await;
+        let mut worker_results = self.run_phase_5_workers(&plan, None).await;
         for (i, w) in worker_results.iter().enumerate() {
             let title = plan.tasks.get(i).map(|t| t.title.clone()).unwrap_or_default();
-            self.persist_task_row(w, &format!("5-develop-{}", title)).await;
+            self.persist_task_row(w, &format!("5-develop-{}", title), 0).await;
         }
 
-        // ── Phase 6: final review (parallel) ───────────────
+        // ── Phase 6 + 7: final review + repair loop ────────
+        // v0.4.22 (event 000113): the historical stub let chief
+        // emit a one-line "REPAIR needed on worker X" note and
+        // then proceeded straight to Phase 8 — workers never
+        // re-ran, the chairman saw a "DONE" status with the
+        // same broken artefacts. We now loop: if any critic
+        // returns REPAIR / REWRITE, rebuild worker prompts with
+        // the critic feedback appended and re-run Phase 5.
+        // Bounded by `max_repair_loops` (default 3) so a
+        // permanently-flagging critic can't burn the budget.
         phase_idx = 5;
         self.emit_phase(Some(PHASES[4]), PHASES[phase_idx]).await;
-        let workers_summary: Vec<String> = worker_results.iter().enumerate().map(|(i, w)| {
-            let title = plan.tasks.get(i).map(|t| t.title.clone()).unwrap_or_default();
-            format!("[{}] {} ({}): {}\n  -> {}",
-                title, w.role_display, w.status,
-                w.text.chars().take(120).collect::<String>(),
-                w.summary.clone().unwrap_or_default(),
-            )
-        }).collect();
-        let review_ctx = workers_summary.join("\n\n");
-        let (final_a, final_b) = tokio::join!(
-            self.run_agent(AgentRunSpec {
-                role: Role::BugHunter,
-                task: "评审上面所有 worker 的产出 (找 bug / runtime 风险)。给出: PASS / REPAIR / REWRITE。".into(),
-                context: Some(review_ctx.clone()),
-            }),
-            self.run_agent(AgentRunSpec {
-                role: Role::Reviewer,
-                task: "评审上面所有 worker 的产出 (架构 / 维护性)。给出: PASS / REPAIR / REWRITE。".into(),
-                context: Some(review_ctx),
-            }),
-        );
-        self.persist_task_row(&final_a, "6-final-review-criticA").await;
-        self.persist_task_row(&final_b, "6-final-review-criticB").await;
-        // v0.4.22 (event 000112): publish final-review verdicts.
-        // The webview's ReviewerCard listens for these and uses
-        // the last-seen final-review verdict to replace the
-        // placeholder "通过 / 置信度 0.87" panel.
-        self.emit_reviewer_verdict("final-review", &final_a);
-        self.emit_reviewer_verdict("final-review", &final_b);
-
-        // ── Phase 7: repair (one pass — chief decides) ────
-        phase_idx = 6;
-        self.emit_phase(Some(PHASES[5]), PHASES[phase_idx]).await;
-        let final_review = format!(
-            "Final Critic A: {} → {}\nFinal Critic B: {} → {}",
-            final_a.role_display, critic_verdict(&final_a),
-            final_b.role_display, critic_verdict(&final_b),
-        );
-        let _repair = self.run_agent(AgentRunSpec {
-            role: Role::Chief,
-            task: format!(
-                "Final review:\n{}\n\n决定: 如果两位 critic 都是 PASS, 说 PASS; 否则说明 REPAIR 的 worker 是哪些, 一句话即可。本 phase 只做决策, 不做实际修复。",
-                final_review,
-            ),
-            context: None,
-        }).await;
-        self.persist_task_row(&_repair, "7-repair").await;
+        let mut loop_count: u32 = 0;
+        let (final_a, final_b) = loop {
+            let (a, b) = self.run_phase_6_final_review(&plan, &worker_results).await;
+            self.persist_task_row(&a, &format!("6-final-review-criticA-loop{loop_count}"), loop_count + 1).await;
+            self.persist_task_row(&b, &format!("6-final-review-criticB-loop{loop_count}"), loop_count + 1).await;
+            // v0.4.22 (event 000112): publish final-review
+            // verdicts so the webview's ReviewerCard updates
+            // for every loop, not just the first.
+            self.emit_reviewer_verdict("final-review", &a);
+            self.emit_reviewer_verdict("final-review", &b);
+            let verdict_a = critic_verdict(&a);
+            let verdict_b = critic_verdict(&b);
+            if !should_repair_decision(&verdict_a, &verdict_b, loop_count, self.max_repair_loops) {
+                if loop_count >= self.max_repair_loops && !(verdict_a == "PASS" && verdict_b == "PASS") {
+                    warn!(
+                        target: "orchestrator",
+                        wf_id = %self.wf_id,
+                        loop_count,
+                        verdict_a = %verdict_a,
+                        verdict_b = %verdict_b,
+                        "v0.4.22 (event 000113): max_repair_loops reached; \
+                         proceeding to delivery with last worker_results"
+                    );
+                }
+                break (a, b);
+            }
+            // ── Phase 7: repair — re-run workers with feedback ──
+            phase_idx = 6;
+            self.emit_phase(Some(PHASES[5]), PHASES[phase_idx]).await;
+            // v0.4.22 (event 000113): persist a chief "repair
+            // decision" row so the dashboard 任务列表 shows the
+            // round-trip, not just the silent retry.
+            let repair_decision = self.run_agent(AgentRunSpec {
+                role: Role::Chief,
+                task: format!(
+                    "Repair decision loop {}:\nFinal Critic A: {} → {}\nFinal Critic B: {} → {}\n\n决定: 哪些 worker 需要重做, 一句话即可。",
+                    loop_count + 1,
+                    a.role_display, verdict_a,
+                    b.role_display, verdict_b,
+                ),
+                context: None,
+            }).await;
+            self.persist_task_row(&repair_decision, &format!("7-repair-loop{}", loop_count + 1), loop_count + 1).await;
+            // v0.4.22 (event 000113): emit a dedicated event so
+            // the webview can show "修复循环 2/3" instead of
+            // guessing from repeated 5-develop rows.
+            let _ = self.events.send(AgentEvent::RepairLoop {
+                wf_id: self.wf_id.clone(),
+                loop_index: loop_count + 1,
+                max_loops: self.max_repair_loops,
+                verdict_a: verdict_a.clone(),
+                verdict_b: verdict_b.clone(),
+                issues_a: a.structured_verdict.clone()
+                    .map(|v| v.issues)
+                    .unwrap_or_default(),
+                issues_b: b.structured_verdict.clone()
+                    .map(|v| v.issues)
+                    .unwrap_or_default(),
+            });
+            // Rebuild worker prompts with the critic feedback
+            // appended, then re-run Phase 5. The next loop
+            // iteration's Phase 6 will see the new outputs.
+            worker_results = self.run_phase_5_workers(
+                &plan,
+                Some(format!(
+                    "Critic A verdict ({}): {}\nCritic B verdict ({}): {}\nFix the issues above. Re-run your task.",
+                    a.role_display, verdict_a,
+                    b.role_display, verdict_b,
+                )),
+            ).await;
+            for (i, w) in worker_results.iter().enumerate() {
+                let title = plan.tasks.get(i).map(|t| t.title.clone()).unwrap_or_default();
+                self.persist_task_row(w, &format!("5-develop-loop{}-{}", loop_count + 1, title), loop_count + 1).await;
+            }
+            loop_count += 1;
+            // Re-emit Phase 6 transition so the webview's
+            // PhaseTimeline shows the loop back to "final-review".
+            phase_idx = 5;
+            self.emit_phase(Some(PHASES[6]), PHASES[phase_idx]).await;
+        };
 
         // ── Phase 8: delivery ─────────────────────────────
         phase_idx = 7;
@@ -929,7 +1035,7 @@ impl Orchestrator {
             ),
             context: None,
         }).await;
-        self.persist_task_row(&delivery, "8-delivery").await;
+        self.persist_task_row(&delivery, "8-delivery", 0).await;
 
         // v0.4.22 (event 000114): the workflow's terminal status
         // must reflect the final-review verdict, not blindly
@@ -1038,7 +1144,19 @@ impl Orchestrator {
     /// each worker + each critic review as a separate row
     /// (event 000064 follow-up; the legacy run_task only wrote
     /// one row per chief call which made the panel look empty).
-    async fn persist_task_row(&self, outcome: &TaskOutcome, phase_title: &str) {
+    ///
+    /// v0.4.22 (event 000113): `repair_count` records which
+    /// repair-loop round produced this row, so the dashboard
+    /// can group re-runs under a common parent. Pass 0 for
+    /// rows from the initial Phase 5 / 6 / 7 / 8 pass, and
+    /// the 1-based loop index for any re-run triggered by a
+    /// REPAIR / REWRITE verdict.
+    async fn persist_task_row(
+        &self,
+        outcome: &TaskOutcome,
+        phase_title: &str,
+        repair_count: u32,
+    ) {
         let task_id = format!("t_{}_{}", self.wf_id, rand_suffix());
         let now = chrono::Utc::now().timestamp();
         let title = if phase_title.len() > 60 {
@@ -1066,7 +1184,7 @@ impl Orchestrator {
             status: outcome.status.to_lowercase(),
             assigned_to: Some(outcome.role_id.clone()),
             model: None, // resolved model id is opaque from this layer
-            repair_count: 0,
+            repair_count: repair_count as i64,
             input_tokens: 0,
             output_tokens: 0,
             cost_usd: None,
@@ -1240,6 +1358,32 @@ fn first_sentence(text: &str, summary: &Option<String>) -> String {
 /// into a 0..=2 severity rank used to pick the "worst" of two
 /// final-review verdicts. REWRITE > REPAIR > everything else.
 /// Pure function, exposed for unit tests in the e2e_pipe file.
+/// v0.4.22 (event 000113): pure decision fn driving the
+/// Phase 5 ↔ Phase 7 repair loop. Given a (verdict_a,
+/// verdict_b) pair from the latest Phase 6 run and the current
+/// `loop_count` plus the configured `max_loops`, returns
+/// `true` iff the orchestrator should re-run Phase 5. Pure
+/// so it is fully covered by e2e tests without spinning up
+/// a real LLM loop.
+///
+/// Decision matrix:
+/// - both PASS  → never repair
+/// - any non-PASS and loop_count < max_loops → repair
+/// - any non-PASS and loop_count >= max_loops → bail
+///   (terminal status reflects the unrepaired verdict pair,
+///    handled by event 000114's `terminal_done_status`)
+pub fn should_repair_decision(
+    verdict_a: &str,
+    verdict_b: &str,
+    loop_count: u32,
+    max_loops: u32,
+) -> bool {
+    if verdict_a == "PASS" && verdict_b == "PASS" {
+        return false;
+    }
+    loop_count < max_loops
+}
+
 pub(crate) fn verdict_severity_rank(v: &str) -> u8 {
     match v {
         "REWRITE" => 2,

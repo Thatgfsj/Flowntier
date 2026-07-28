@@ -1084,6 +1084,13 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
                 s.clone(),
                 s.events.clone(),
                 task.to_string(),
+                // v0.4.22 (event 000113): bounded repair loop.
+                // Mirrors tauri-core's default (see
+                // crates/tauri-core/src/lib.rs:50); a future
+                // event will thread this through /api/run_workflow
+                // request body so the chairman can tune it from
+                // the desktop without rebuilding the runtime.
+                3,
             );
             let wf_id = orch.wf_id.clone();
             tracing::info!(target: "pipe_server", wf_id = %wf_id, "[TRACE] /api/run_workflow: spawning orch.run() on background tokio task");
