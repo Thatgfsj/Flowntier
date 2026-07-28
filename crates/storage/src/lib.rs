@@ -674,6 +674,87 @@ impl Repository {
         }))
     }
 
+    // ── Disabled models (event 000110 fix D1) ────────────────
+    //
+    // The user can hide a model from the provider's catalog (e.g.
+    // an expired tier). Persisted as (provider_id, model_id) pairs;
+    // absence = enabled, presence = disabled. The list_*/filter
+    // helpers in handlers.rs consult `list_disabled_models` so the
+    // disabled models disappear from the Settings UI AND from
+    // list_router_models (so the role router cannot pick them).
+
+    /// Record that `(provider_id, model_id)` should be hidden from
+    /// the catalog. Idempotent: re-inserting the same pair is a
+    /// no-op (the PRIMARY KEY guarantees uniqueness).
+    pub async fn disable_model(
+        &self,
+        provider_id: &str,
+        model_id: &str,
+    ) -> Result<(), StorageError> {
+        sqlx::query(
+            "INSERT INTO disabled_models (provider_id, model_id, disabled_at)
+             VALUES (?, ?, ?)
+             ON CONFLICT(provider_id, model_id) DO NOTHING",
+        )
+        .bind(provider_id)
+        .bind(model_id)
+        .bind(chrono::Utc::now().timestamp())
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Un-hide a previously disabled `(provider_id, model_id)`.
+    /// Returns `true` if a row was actually deleted, `false` if the
+    /// pair was not in the table (i.e. the user re-enabled a model
+    /// that was never disabled — harmless no-op).
+    pub async fn enable_model(
+        &self,
+        provider_id: &str,
+        model_id: &str,
+    ) -> Result<bool, StorageError> {
+        let r = sqlx::query(
+            "DELETE FROM disabled_models WHERE provider_id = ? AND model_id = ?",
+        )
+        .bind(provider_id)
+        .bind(model_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(r.rows_affected() > 0)
+    }
+
+    /// Return every `(provider_id, model_id)` pair the user has
+    /// hidden. Used by `list_models` / `list_router_models` /
+    /// `list_providers` to filter catalogs before sending them to
+    /// the webview.
+    pub async fn list_disabled_models(&self) -> Result<Vec<(String, String)>, StorageError> {
+        let rows: Vec<(String, String)> = sqlx::query_as(
+            "SELECT provider_id, model_id FROM disabled_models",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows)
+    }
+
+    /// Convenience: is this single `(provider_id, model_id)` in the
+    /// disabled set? Most callers want the bulk list and cache the
+    /// HashSet; this exists for the toggle handler so it can return
+    /// a precise 404 if the user re-enables a non-disabled row.
+    pub async fn is_model_disabled(
+        &self,
+        provider_id: &str,
+        model_id: &str,
+    ) -> Result<bool, StorageError> {
+        let r: Option<(i64,)> = sqlx::query_as(
+            "SELECT 1 FROM disabled_models WHERE provider_id = ? AND model_id = ?",
+        )
+        .bind(provider_id)
+        .bind(model_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(r.is_some())
+    }
+
     // ── Generic kv ──────────────────────────────────────────────
 
     pub async fn kv_get(&self, k: &str) -> Result<Option<String>, StorageError> {

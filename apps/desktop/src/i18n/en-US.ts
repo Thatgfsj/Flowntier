@@ -96,6 +96,8 @@ const enUS: Translations = {
   'settings.quickAdd.title': 'Add AI provider',
   'settings.customProvider.title': 'Add custom relay station',
   'settings.models.available': 'Available models',
+  'settings.models.deleteAria': 'Hide {{name}} from the list',
+  'settings.models.deleteTitle': 'Hide from list (recoverable)',
   'settings.roles.title': 'Role -> model assignment',
 
   // ── Buttons / actions ──────────────────────────

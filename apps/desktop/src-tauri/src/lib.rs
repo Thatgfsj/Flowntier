@@ -798,6 +798,36 @@ async fn remove_custom_provider(id: String) -> Result<serde_json::Value, String>
     pipe_request("DELETE", &format!("/api/providers/custom/{}", id), None).await
 }
 
+// event 000110 (fix D1): hide / unhide a (provider, model) pair.
+// Both commands are idempotent on the sidecar — disabling an
+// already-disabled model returns 200; enabling a never-disabled
+// model returns was_disabled:false.
+#[tauri::command]
+async fn disable_provider_model(
+    provider_id: String,
+    model_id: String,
+) -> Result<serde_json::Value, String> {
+    pipe_request(
+        "PUT",
+        &format!("/api/providers/{}/models/{}/disable", provider_id, model_id),
+        None,
+    )
+    .await
+}
+
+#[tauri::command]
+async fn enable_provider_model(
+    provider_id: String,
+    model_id: String,
+) -> Result<serde_json::Value, String> {
+    pipe_request(
+        "DELETE",
+        &format!("/api/providers/{}/models/{}/disable", provider_id, model_id),
+        None,
+    )
+    .await
+}
+
 #[tauri::command]
 async fn invoke_plugin(
     name: String,
@@ -1887,6 +1917,7 @@ pub fn run() {
             get_quota_status, reset_quota, get_role_quota_status,
             list_plugins, invoke_plugin, fetch_provider_models,
             add_custom_provider, remove_custom_provider,
+            disable_provider_model, enable_provider_model,
             start_workflow_cmd, get_workflow, cancel_workflow,
             run_agent_task, run_workflow,
             draw_i_ching,

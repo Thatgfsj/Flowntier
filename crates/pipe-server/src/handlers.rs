@@ -807,6 +807,17 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
                 .unwrap_or_default();
             let custom = s.repo.list_custom_providers().await
                 .unwrap_or_default();
+            // event 000110 (fix D1): filter out any model the user
+            // has hidden via disable_model. Keyed by raw provider_id
+            // for presets and by `custom:<id>` for custom providers
+            // (matches the keys we emit below).
+            let disabled_pairs: std::collections::HashSet<(String, String)> = s
+                .repo
+                .list_disabled_models()
+                .await
+                .unwrap_or_default()
+                .into_iter()
+                .collect();
             let mut by_id = std::collections::HashMap::new();
             for p in providers {
                 if let Ok(Some(c)) = s.repo.get_model_cache(&p.id).await {
@@ -839,6 +850,14 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
                             serde_json::from_str::<Vec<Value>>(&cache.models_json)
                         {
                             for mm in m {
+                                // event 000110 (fix D1): skip
+                                // user-disabled models so the role
+                                // router cannot pick them.
+                                if let Some(mid) = mm.get("id").and_then(|v| v.as_str()) {
+                                    if disabled_pairs.contains(&(preset.id.to_string(), mid.to_string())) {
+                                        continue;
+                                    }
+                                }
                                 models.push(json!({
                                     "provider_id": preset.id,
                                     "models": mm,
@@ -855,6 +874,9 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
                             .find(|(pid, _)| *pid == preset.id)
                         {
                             for entry in *entries {
+                                if disabled_pairs.contains(&(preset.id.to_string(), entry.id.to_string())) {
+                                    continue;
+                                }
                                 models.push(json!({
                                     "provider_id": preset.id,
                                     "models": json!({
@@ -883,6 +905,7 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
             // resolver can look it up via
             // `state.repo.get_custom_provider(&provider_short)`.
             for c in custom {
+                let custom_pid = format!("custom:{}", c.id);
                 if let Ok(Some(cache)) = s.repo.get_model_cache(&c.id).await {
                     by_id.insert(c.id.clone(), cache);
                 }
@@ -891,23 +914,34 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
                         serde_json::from_str::<Vec<Value>>(&cache.models_json)
                     {
                         for mm in m {
+                            if let Some(mid) = mm.get("id").and_then(|v| v.as_str()) {
+                                if disabled_pairs.contains(&(custom_pid.clone(), mid.to_string())) {
+                                    continue;
+                                }
+                            }
                             models.push(json!({
-                                "provider_id": format!("custom:{}", c.id),
+                                "provider_id": custom_pid,
                                 "models": mm,
                             }));
                         }
                     }
                 } else if let Some(dm) = c.default_model.as_ref() {
-                    models.push(json!({
-                        "provider_id": format!("custom:{}", c.id),
-                        "models": json!({
-                            "id": dm,
-                            "display_name": dm,
-                            "thinking_strength": "medium",
-                            "context_length": null,
-                            "source": "fallback",
-                        }),
-                    }));
+                    // event 000110 (fix D1): also honor the disabled
+                    // set for the custom provider's stored
+                    // default_model — a hidden default_model is a
+                    // contradiction, so don't surface it.
+                    if !disabled_pairs.contains(&(custom_pid.clone(), dm.clone())) {
+                        models.push(json!({
+                            "provider_id": custom_pid,
+                            "models": json!({
+                                "id": dm,
+                                "display_name": dm,
+                                "thinking_strength": "medium",
+                                "context_length": null,
+                                "source": "fallback",
+                            }),
+                        }));
+                    }
                 }
             }
             Ok((200, json!({
@@ -963,6 +997,23 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
     d.register("PATCH", "/api/providers/{id}", move |body| {
         let s = patch_state.clone();
         Box::pin(async move { patch_provider(body, s).await })
+    });
+
+    // event 000110 (fix D1): PUT /api/providers/{id}/models/{model}/disable
+    //   hide (provider_id, model_id) from the catalog so the user
+    //   can remove expired/unused models from Settings AND from the
+    //   role-router's selectable models. Idempotent.
+    // DELETE /api/providers/{id}/models/{model}/disable
+    //   re-enable a previously hidden model.
+    let disable_state = state.clone();
+    d.register("PUT", "/api/providers/{id}/models/{model}/disable", move |body| {
+        let s = disable_state.clone();
+        Box::pin(async move { disable_model(body, s).await })
+    });
+    let enable_state = state.clone();
+    d.register("DELETE", "/api/providers/{id}/models/{model}/disable", move |body| {
+        let s = enable_state.clone();
+        Box::pin(async move { enable_model(body, s).await })
     });
 
     // GET /api/providers/{id}/models — list models. Tries the
@@ -1604,6 +1655,36 @@ async fn list_models(
     let id = body.get("id").and_then(|v| v.as_str())
         .ok_or_else(|| "missing 'id' in path".to_string())?.to_string();
 
+    // event 000110 (fix D1): the user may have hidden some models
+    // via `PUT /api/providers/{id}/models/{model}/disable`. Load
+    // the set once per request and apply it to every return path
+    // below so the catalog the webview sees always excludes the
+    // user's hidden models.
+    let disabled: std::collections::HashSet<String> = state
+        .repo
+        .list_disabled_models()
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|(pid, _)| pid == &id)
+        .map(|(_, mid)| mid)
+        .collect();
+    let filter_disabled = |models: Vec<Value>| -> Vec<Value> {
+        if disabled.is_empty() {
+            models
+        } else {
+            models
+                .into_iter()
+                .filter(|m| {
+                    m.get("id")
+                        .and_then(|v| v.as_str())
+                        .map(|mid| !disabled.contains(mid))
+                        .unwrap_or(true)
+                })
+                .collect()
+        }
+    };
+
     // Check cache first.
     if let Ok(Some(cached)) = state.repo.get_model_cache(&id).await {
         let now = chrono::Utc::now().timestamp();
@@ -1613,7 +1694,7 @@ async fn list_models(
             return Ok((200, json!({
                 "ok": true,
                 "provider_id": id,
-                "models": models,
+                "models": filter_disabled(models),
                 "cached": true,
                 "fetched_at": cached.fetched_at,
             })));
@@ -1667,7 +1748,7 @@ async fn list_models(
         return Ok((200, json!({
             "ok": true,
             "provider_id": id,
-            "models": models,
+            "models": filter_disabled(models),
             "cached": false,
             "fallback": true,
         })));
@@ -1756,12 +1837,99 @@ async fn list_models(
     Ok((200, json!({
         "ok": true,
         "provider_id": id,
-        "models": models,
+        "models": filter_disabled(models),
         "cached": false,
         "fallback": false,
         "url": url,
     })))
     }
+
+// ── event 000110 (fix D1): disable / enable a model ──────────
+//
+// PUT /api/providers/{id}/models/{model}/disable
+//   Path fields: id, model (URL-encoded).
+//   Body: empty.
+//   Returns: 200 {disabled: true, provider_id, model_id}
+//            404 if the provider id is unknown (preset or custom).
+//
+// DELETE /api/providers/{id}/models/{model}/disable
+//   Re-enable a previously hidden model.
+//   Returns: 200 {enabled: true, was_disabled: bool, provider_id, model_id}
+//            200 {enabled: true, was_disabled: false, ...} when the
+//            model was not in the disabled set (idempotent no-op).
+//
+// Both handlers validate that the provider id exists (preset OR
+// custom) — they refuse to write a `disabled_models` row for a
+// provider that does not exist, so the table cannot drift from the
+// provider catalog.
+async fn disable_model(
+    body: Value,
+    state: Arc<ServerState>,
+) -> Result<(u16, Value), String> {
+    let provider_id = body.get("provider_id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "missing 'provider_id' in path".to_string())?
+        .to_string();
+    let model_id = body.get("model_id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "missing 'model_id' in path".to_string())?
+        .to_string();
+    if model_id.is_empty() || model_id.len() > 256 {
+        return Ok((400, json!({ "error": "model_id must be 1..=256 chars" })));
+    }
+    if !provider_exists(&state, &provider_id).await {
+        return Ok((404, json!({
+            "error": format!("unknown provider: {provider_id}"),
+        })));
+    }
+    state.repo.disable_model(&provider_id, &model_id).await
+        .map_err(|e| format!("disable_model: {e}"))?;
+    Ok((200, json!({
+        "disabled": true,
+        "provider_id": provider_id,
+        "model_id": model_id,
+    })))
+}
+
+async fn enable_model(
+    body: Value,
+    state: Arc<ServerState>,
+) -> Result<(u16, Value), String> {
+    let provider_id = body.get("provider_id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "missing 'provider_id' in path".to_string())?
+        .to_string();
+    let model_id = body.get("model_id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "missing 'model_id' in path".to_string())?
+        .to_string();
+    if !provider_exists(&state, &provider_id).await {
+        return Ok((404, json!({
+            "error": format!("unknown provider: {provider_id}"),
+        })));
+    }
+    let was_disabled = state.repo.enable_model(&provider_id, &model_id).await
+        .map_err(|e| format!("enable_model: {e}"))?;
+    Ok((200, json!({
+        "enabled": true,
+        "was_disabled": was_disabled,
+        "provider_id": provider_id,
+        "model_id": model_id,
+    })))
+}
+
+/// Returns true if `provider_id` resolves to either a preset (built-in)
+/// or a `custom_provider` row. Used by disable_model/enable_model
+/// to refuse writes that would orphan `disabled_models` rows.
+async fn provider_exists(state: &Arc<ServerState>, provider_id: &str) -> bool {
+    if crate::providers::get(provider_id).is_some() {
+        return true;
+    }
+    match state.repo.get_custom_provider(provider_id).await {
+        Ok(Some(_)) => true,
+        _ => false,
+    }
+}
 
 /// POST /api/providers/custom — add a relay-station / private-gateway
 /// provider. The api_key lives in the encrypted secret store under

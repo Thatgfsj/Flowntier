@@ -257,6 +257,35 @@ export async function removeCustomProvider(id: string): Promise<{ ok: boolean }>
   return invoke<{ ok: boolean }>('remove_custom_provider', { id });
 }
 
+// ── event 000110 (fix D1): disable / enable a model ──────────
+//
+// The user can hide a (provider_id, model_id) pair from the
+// catalog so expired / unused models don't clutter the Settings
+// UI or the role-router's selectable options. `disableProviderModel`
+// is idempotent (re-disabling is a no-op). `enableProviderModel`
+// also clears a row that was never in the table — the response
+// distinguishes the two via `was_disabled`.
+
+export async function disableProviderModel(
+  provider_id: string,
+  model_id: string,
+): Promise<{ disabled: boolean; provider_id: string; model_id: string }> {
+  return invoke<{ disabled: boolean; provider_id: string; model_id: string }>(
+    'disable_provider_model',
+    { provider_id, model_id },
+  );
+}
+
+export async function enableProviderModel(
+  provider_id: string,
+  model_id: string,
+): Promise<{ enabled: boolean; was_disabled: boolean; provider_id: string; model_id: string }> {
+  return invoke<{ enabled: boolean; was_disabled: boolean; provider_id: string; model_id: string }>(
+    'enable_provider_model',
+    { provider_id, model_id },
+  );
+}
+
 // ── Workflow ─────────────────────────────────────────────────────
 
 export async function startWorkflow(text: string): Promise<{ id: string }> {

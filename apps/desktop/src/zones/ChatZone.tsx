@@ -45,10 +45,17 @@ const ROLE_DEFS: RoleSpec[] = [
 ];
 
 export interface ChatZoneProps {
-  /** No props now — provider/model/api_key are server-resolved. */
+  /**
+   * event 000110 (fix A): ChatZone now owns its own collapse button
+   * instead of an absolutely-positioned overlay floating over the
+   * header (which made "清空" and "▾ 折叠" overlap visually in the
+   * top-right corner). Pass `setChatOpen(false)` so the header
+   * button can collapse the panel itself.
+   */
+  onCollapse?: () => void;
 }
 
-export function ChatZone(_: ChatZoneProps = {}) {
+export function ChatZone({ onCollapse }: ChatZoneProps = {}) {
   const { t } = useTranslation();
   const [task, setTask] = useState('');
   const [role, setRole] = useState<string>('agent:chief');
@@ -175,19 +182,34 @@ export function ChatZone(_: ChatZoneProps = {}) {
       className="flex h-full flex-col border-t border-border bg-surface-1"
       aria-label="ChatZone 跟角色对话"
     >
-      {/* Header */}
+      {/* Header — event 000110 (fix A): collapse button now lives
+          inline (left of clear), so the top-right corner only
+          carries ONE action button ("清空") instead of two
+          ("清空" + floating "▾ 折叠") that visually overlapped. */}
       <header className="flex shrink-0 items-center justify-between gap-3 border-b border-border bg-surface-2 px-4 py-2">
         <div className="flex items-center gap-2">
           <span className="font-mono text-xs text-text-secondary">ChatZone ▸</span>
           <span className="text-sm text-text-secondary">{t('chatZone.subtitle', { defaultValue: '由设置中的角色分配配置驱动' })}</span>
         </div>
-        <button
-          type="button"
-          onClick={reset}
-          className="rounded border border-border px-2 py-0.5 text-xs text-text-secondary hover:bg-surface-1"
-        >
-          {t('chatZone.clear', { defaultValue: '清空' })}
-        </button>
+        <div className="flex items-center gap-1">
+          {onCollapse && (
+            <button
+              type="button"
+              onClick={onCollapse}
+              className="rounded border border-border px-2 py-0.5 text-xs text-text-secondary hover:bg-surface-1"
+              aria-label={t('app.aria.chatCollapse', { defaultValue: '折叠 ChatZone' })}
+            >
+              {t('app.chatCollapse', { defaultValue: '▾ 折叠' })}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={reset}
+            className="rounded border border-border px-2 py-0.5 text-xs text-text-secondary hover:bg-surface-1"
+          >
+            {t('chatZone.clear', { defaultValue: '清空' })}
+          </button>
+        </div>
       </header>
 
       {/* Controls — only the role picker remains; everything else

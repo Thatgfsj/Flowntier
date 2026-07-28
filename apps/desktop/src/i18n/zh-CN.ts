@@ -94,6 +94,8 @@ const zhCN = {
   'settings.quickAdd.title': '添加 AI 供应商',
   'settings.customProvider.title': '添加自定义中转站',
   'settings.models.available': '可用模型',
+  'settings.models.deleteAria': '从列表中隐藏 {{name}}',
+  'settings.models.deleteTitle': '隐藏（可恢复）',
   'settings.roles.title': '角色 → 模型 分配',
 
   // ── Buttons / actions ──────────────────────────

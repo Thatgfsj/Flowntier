@@ -1018,26 +1018,22 @@ export function App() {
         recent={recentCmds}
       />
 
-      {/* v0.3 ChatZone — progressive. Collapsed by default; toggle via TopBar. */}
+      {/* v0.3 ChatZone — progressive. Collapsed by default; toggle via TopBar.
+          event 000110 (fix A): collapse button moved INTO ChatZone header
+          (see ChatZone.tsx) so the top-right corner no longer carries
+          two visually overlapping buttons ("清空" + floating "▾ 折叠").
+          event 000110 (fix B): collapsed bar's subtitle now mirrors
+          the expanded header so users don't see two different taglines
+          for the same panel. */}
       <div
         className={`relative flex shrink-0 border-t border-border transition-[height] ${
           chatOpen ? 'h-[420px]' : 'h-9'
         }`}
       >
         {chatOpen ? (
-          <>
-            <div className="h-full w-full">
-              <ChatZone />
-            </div>
-            <button
-              type="button"
-              onClick={() => setChatOpen(false)}
-              className="absolute right-2 top-1 rounded border border-border bg-surface-2 px-2 py-0.5 text-xs text-text-secondary hover:bg-surface-1"
-              aria-label={t('app.aria.chatCollapse')}
-            >
-              {t('app.chatCollapse')}
-            </button>
-          </>
+          <div className="h-full w-full">
+            <ChatZone onCollapse={() => setChatOpen(false)} />
+          </div>
         ) : (
           <button
             type="button"
@@ -1046,7 +1042,7 @@ export function App() {
             aria-label={t('app.aria.chatExpand')}
           >
             <span className="font-mono">ChatZone ▸</span>
-            <span>{t('app.chatExpand')}</span>
+            <span>{t('chatZone.subtitle', { defaultValue: '由设置 → 角色 → 模型 分配驱动' })}</span>
           </button>
         )}
       </div>

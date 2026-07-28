@@ -14,6 +14,7 @@ import {
   type QuotaStatusEntry,
 } from '../lib/api.js';
 import { useCustomModels } from '../hooks/useCustomModels.js';
+import { useDisabledModels } from '../hooks/useDisabledModels.js';
 import { appVersion, buildSha } from '../lib/version.js';
 import { SearchBugPanel } from '../components/SearchBugPanel.js';
 import { tErr } from '../lib/errs.js';
@@ -204,6 +205,11 @@ export function Settings({ open, onClose, workdir }: SettingsProps) {
   const [deletePhrase, setDeletePhrase] = useState('');
   const [deleteBusy, setDeleteBusy] = useState(false);
   const customModels = useCustomModels();
+  // v0.4.22 (event 000110): per-provider model deletion. Renders
+  // an × button next to each `sel.models` entry; backend persists
+  // via `PUT /api/providers/{id}/models/{model}/disable` and
+  // filters the entry out of subsequent role/catalog reads.
+  const disabledModels = useDisabledModels();
 
   // BUG-FRONTEND-RT-6 (event 000038): the destructive "Clear
   // local data" action. The dialog has its own phrase check;
@@ -509,9 +515,23 @@ export function Settings({ open, onClose, workdir }: SettingsProps) {
                       <div className="mt-3">
                         <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-text-secondary">{t('settings.models.available')}</h4>
                         <ul className="grid grid-cols-2 gap-1 text-xs">
-                          {sel.models.map((m) => (
-                            <li key={m.id} className="rounded bg-surface-2 px-2 py-1 font-mono">
-                              {m.display_name} <span className="ml-1 text-text-secondary">({m.id})</span>
+                          {sel.models
+                            .filter((m) => !disabledModels.isDisabled(sel.id, m.id))
+                            .map((m) => (
+                            <li key={m.id} className="flex items-center justify-between rounded bg-surface-2 px-2 py-1 font-mono">
+                              <span className="truncate">
+                                {m.display_name} <span className="ml-1 text-text-secondary">({m.id})</span>
+                              </span>
+                              <button
+                                type="button"
+                                aria-label={t('settings.models.deleteAria', { name: m.display_name ?? m.id })}
+                                title={t('settings.models.deleteTitle', { defaultValue: '从列表中隐藏（可恢复）' })}
+                                disabled={disabledModels.busy}
+                                onClick={() => disabledModels.disable(sel.id, m.id)}
+                                className="ml-1 rounded px-1 text-text-secondary hover:bg-status-fail/20 hover:text-status-fail"
+                              >
+                                ×
+                              </button>
                             </li>
                           ))}
                         </ul>
