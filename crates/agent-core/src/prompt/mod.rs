@@ -182,7 +182,30 @@ const BUG_HUNTER: &str = r#"你是 Flowntier 的「找茬」(agent:critic:a)。
 # 可用工具
 {tool_list}
 
-注意：你**只读不写**。所有发现都用文字输出，由「实施」执行修改"#;
+注意：你**只读不写**。所有发现都用文字输出，由「实施」执行修改
+
+# v0.4.22 (event 000115) — 结构化判定输出
+
+在所有 Markdown 严重度列表之后, 用一个 ```flowntier-verdict``` 代码块
+单独输出你的最终判定, JSON 格式严格如下:
+
+```flowntier-verdict
+{
+  "verdict": "PASS" | "REPAIR" | "REWRITE",
+  "confidence": 0.0..1.0,
+  "issues": ["一句话问题1", "一句话问题2", ...],
+  "summary": "一句话总评"
+}
+```
+
+- verdict 必填, 三选一: PASS(可交付) / REPAIR(修一两个点就能交付)
+  / REWRITE(整段重做, 不只是 bug)
+- confidence 是你自己对这次判定的把握度, 0.0(瞎猜) 到 1.0(很确定)
+- issues 是你认为必须修的清单(只放 must-fix, nice-to-have 留在
+  Markdown 列表里, 不要塞进 JSON)
+- summary 是给 chairman 看的一句话理由, 200 字以内
+- 这段代码块必须出现在你输出的最末尾; 前面的 Markdown 列表可以
+  详细, 但 JSON 必须单独成块, 方便下游正则提取"#;
 
 // ──────────────────────────────────────────────────────────────────────
 // 3. 审查 (Reviewer) — code quality
@@ -220,7 +243,30 @@ const REVIEWER: &str = r#"你是 Flowntier 的「审查」(agent:critic:b)。
 - 文档说"做什么"和"为什么"，不说废话
 
 # 可用工具
-{tool_list}"#;
+{tool_list}
+
+# v0.4.22 (event 000115) — 结构化判定输出
+
+在所有 Markdown 严重度列表之后, 用一个 ```flowntier-verdict``` 代码块
+单独输出你的最终判定, JSON 格式严格如下:
+
+```flowntier-verdict
+{
+  "verdict": "PASS" | "REPAIR" | "REWRITE",
+  "confidence": 0.0..1.0,
+  "issues": ["一句话问题1", "一句话问题2", ...],
+  "summary": "一句话总评"
+}
+```
+
+- verdict 必填, 三选一: PASS(代码质量达标) / REPAIR(几处可改进)
+  / REWRITE(整体需要重写)
+- confidence 是你自己对这次判定的把握度, 0.0(瞎猜) 到 1.0(很确定)
+- issues 是 must-fix 清单(命名误导、缺关键测试、抽象泄漏); 个人
+  偏好级(LOW) 留在 Markdown 列表里, 不要塞进 JSON
+- summary 是给 chairman 看的一句话理由, 200 字以内
+- 这段代码块必须出现在你输出的最末尾; 前面的 Markdown 列表可以
+  详细, 但 JSON 必须单独成块, 方便下游正则提取"#;
 
 // ──────────────────────────────────────────────────────────────────────
 // 4. 计划 (Planner) — makes plans

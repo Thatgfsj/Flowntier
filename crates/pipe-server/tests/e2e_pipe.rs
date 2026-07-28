@@ -2244,3 +2244,146 @@ fn terminal_done_status_translates_review_verdict_pair() {
         "DONE",
     );
 }
+
+#[test]
+fn parse_verdict_from_text_extracts_structured_json_block() {
+    use pipe_server::orchestrator::{critic_verdict, parse_verdict_from_text, TaskOutcome};
+    // v0.4.22 (event 000115): the JSON block critics are
+    // instructed to emit is the primary source — full
+    // confidence + issues + summary come through.
+    let outcome = TaskOutcome {
+        role_id: "agent:critic:a".into(),
+        role_display: "BugHunter".into(),
+        status: "DONE".into(),
+        summary: None,
+        text: r#"Found two bugs.
+
+```flowntier-verdict
+{
+  "verdict": "REPAIR",
+  "confidence": 0.82,
+  "issues": ["[HIGH] auth.rs:42 — token redaction missing", "[MEDIUM] log.rs:18 — log spam"],
+  "summary": "Two must-fix issues; mostly clean otherwise."
+}
+```"#
+        .into(),
+        elapsed_ms: 1234,
+        structured_verdict: None,
+    };
+    let (token, structured) = parse_verdict_from_text(&outcome);
+    assert_eq!(token, "REPAIR");
+    assert_eq!(structured.verdict, "REPAIR");
+    assert!((structured.confidence - 0.82).abs() < 1e-9);
+    assert_eq!(structured.issues.len(), 2);
+    assert!(structured.issues[0].contains("auth.rs:42"));
+    assert!(structured.summary.contains("Two must-fix"));
+    // critic_verdict is the same single-source accessor used by
+    // the orchestrator's terminal-status path.
+    assert_eq!(critic_verdict(&outcome), "REPAIR");
+}
+
+#[test]
+fn parse_verdict_from_text_falls_back_to_prose_scan_when_no_block() {
+    use pipe_server::orchestrator::{parse_verdict_from_text, TaskOutcome};
+    // No JSON block → prose scan (legacy verdict_of path)
+    // kicks in. Confidence is 0.0 because there's no signal;
+    // issues is empty because the prose scan can't tell what
+    // the must-fix list is.
+    let outcome = TaskOutcome {
+        role_id: "agent:critic:b".into(),
+        role_display: "Reviewer".into(),
+        status: "DONE".into(),
+        summary: None,
+        text: "Code looks clean. PASS on all checks.".into(),
+        elapsed_ms: 0,
+        structured_verdict: None,
+    };
+    let (token, structured) = parse_verdict_from_text(&outcome);
+    assert_eq!(token, "PASS");
+    assert_eq!(structured.verdict, "PASS");
+    assert!((structured.confidence - 0.0).abs() < 1e-9);
+    assert!(structured.issues.is_empty());
+    assert!(!structured.summary.is_empty());
+}
+
+#[test]
+fn parse_verdict_from_text_avoids_prose_scan_false_positive_when_block_present() {
+    use pipe_server::orchestrator::{parse_verdict_from_text, TaskOutcome};
+    // The historical bug: prose scan picked up "PASS" inside
+    // a question like "should we PASS?" and returned PASS even
+    // when the real verdict was REPAIR. With a JSON block,
+    // the structured path wins and the question is irrelevant.
+    let outcome = TaskOutcome {
+        role_id: "agent:critic:a".into(),
+        role_display: "BugHunter".into(),
+        status: "DONE".into(),
+        summary: None,
+        text: r#"I considered whether to PASS this — the API is fine — but the worker missed redaction.
+
+```flowntier-verdict
+{
+  "verdict": "REPAIR",
+  "confidence": 0.91,
+  "issues": ["[HIGH] log.rs:18"],
+  "summary": "One must-fix redaction bug"
+}
+```"#
+            .into(),
+        elapsed_ms: 0,
+        structured_verdict: None,
+    };
+    let (token, _) = parse_verdict_from_text(&outcome);
+    // Despite "PASS" appearing 5x in the prose, the JSON block
+    // wins and returns REPAIR.
+    assert_eq!(token, "REPAIR");
+}
+
+#[test]
+fn parse_verdict_from_text_normalises_unknown_verdict_token() {
+    use pipe_server::orchestrator::{parse_verdict_from_text, TaskOutcome};
+    // A critic that emits a typo or non-standard token must
+    // not crash the orchestrator. The parser maps anything
+    // outside the known set to UNKNOWN.
+    let outcome = TaskOutcome {
+        role_id: "agent:critic:b".into(),
+        role_display: "Reviewer".into(),
+        status: "DONE".into(),
+        summary: None,
+        text: r#"```flowntier-verdict
+{
+  "verdict": "MAYBE",
+  "confidence": 0.4,
+  "issues": [],
+  "summary": "Not sure"
+}
+```"#
+            .into(),
+        elapsed_ms: 0,
+        structured_verdict: None,
+    };
+    let (token, structured) = parse_verdict_from_text(&outcome);
+    assert_eq!(token, "UNKNOWN");
+    assert_eq!(structured.verdict, "UNKNOWN");
+    // Confidence is clamped to [0, 1] even when the model
+    // returns a value outside the range.
+    assert!((0.0..=1.0).contains(&structured.confidence));
+}
+
+#[test]
+fn parse_verdict_from_text_handles_lowercase_and_whitespace() {
+    use pipe_server::orchestrator::{parse_verdict_from_text, TaskOutcome};
+    let outcome = TaskOutcome {
+        role_id: "agent:critic:a".into(),
+        role_display: "BugHunter".into(),
+        status: "DONE".into(),
+        summary: None,
+        text: r#"```flowntier-verdict
+{ "verdict" : "rewrite" , "confidence" : 0.5 , "issues" : [] , "summary" : "ok" }
+```"#
+            .into(),
+        elapsed_ms: 0,
+        structured_verdict: None,
+    };
+    let (token, _) = parse_verdict_from_text(&outcome);
+    assert_eq!(token, "REWRITE");
+}

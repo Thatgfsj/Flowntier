@@ -175,6 +175,14 @@ pub struct AgentRunSpec {
 
 /// Outcome of a single agent run. The orchestrator collects
 /// these into `Vec<TaskOutcome>` per phase.
+///
+/// v0.4.22 (event 000115): `structured_verdict` carries a
+/// JSON-block-parsed reviewer verdict when the role was a
+/// critic (BugHunter / Reviewer) and the model emitted a
+/// ```flowntier-verdict ... ``` block. Non-critic roles leave
+/// this `None`. `verdict_of()` (and its replacement
+/// `parse_verdict_from_text()`) always have `text` / `summary`
+/// as fallback inputs, so the field is opt-in only.
 pub struct TaskOutcome {
     pub role_id: String,
     pub role_display: String,
@@ -182,6 +190,27 @@ pub struct TaskOutcome {
     pub summary: Option<String>,
     pub text: String,
     pub elapsed_ms: u64,
+    pub structured_verdict: Option<ReviewerVerdictJson>,
+}
+
+/// v0.4.22 (event 000115): shape of the JSON block the critic
+/// roles are instructed to emit at the end of their output.
+/// Parsed out of ```flowntier-verdict ... ``` fences; if the
+/// fence is missing or malformed we fall back to prose scan.
+///
+/// `confidence` is the critic's own self-rated confidence in
+/// the verdict (0.0..1.0). `issues` is a flat list of one-line
+/// problems ordered by severity — frontend's ReviewerCard
+/// renders each as a bullet. `summary` is a one-sentence
+/// rationale shown next to the verdict token.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReviewerVerdictJson {
+    pub verdict: String,
+    pub confidence: f64,
+    #[serde(default)]
+    pub issues: Vec<String>,
+    #[serde(default)]
+    pub summary: String,
 }
 
 /// v0.4.22 (event 000091 fix #23): one resolved candidate for
@@ -349,41 +378,34 @@ impl Orchestrator {
     /// PASS/REPAIR/REWRITE token + summary instead of a hardcoded
     /// "通过 置信度 0.87".
     ///
-    /// `phase` is `"plan-review"` or `"final-review"`. The verdict
-    /// comes from `verdict_of(&outcome)`; `confidence` is 0.0 until
-    /// event 000115 gives critics a structured JSON prompt;
-    /// `issues` is empty for the same reason.
+    /// `phase` is `"plan-review"` or `"final-review"`. v0.4.22
+    /// (event 000115): the verdict, confidence, issues and
+    /// summary now come from the JSON block critics are
+    /// instructed to emit (parsed by `parse_verdict_from_text`),
+    /// not the legacy prose scan.
     fn emit_reviewer_verdict(
         &self,
         phase: &str,
         outcome: &TaskOutcome,
     ) {
-        let verdict = verdict_of(outcome);
-        // First sentence of the critic's text — used as the
-        // short rationale shown next to PASS/REPAIR/REWRITE on
-        // the webview's ReviewerCard.
-        let summary = {
-            let trimmed = outcome.text.trim();
-            if !trimmed.is_empty() {
-                trimmed
-                    .split(|c: char| c == '\n' || c == '。')
-                    .next()
-                    .unwrap_or("")
-                    .chars()
-                    .take(200)
-                    .collect::<String>()
-            } else {
-                outcome.summary.clone().unwrap_or_default()
-            }
+        // v0.4.22 (event 000115): prefer the structured verdict
+        // parsed out of the critic's JSON block. If the critic
+        // didn't emit one (older model, timeout before reaching
+        // the verdict, prose-only output), fall back to the
+        // verdict_of() prose scan so the event still carries a
+        // usable verdict token — confidence is 0.0 in that case.
+        let (verdict, structured) = match outcome.structured_verdict.clone() {
+            Some(v) => (v.verdict.clone(), v),
+            None => parse_verdict_from_text(outcome),
         };
         let _ = self.events.send(AgentEvent::ReviewerVerdict {
             wf_id: self.wf_id.clone(),
             phase: phase.to_string(),
             role: outcome.role_id.clone(),
             verdict,
-            confidence: 0.0,
-            issues: Vec::new(),
-            summary,
+            confidence: structured.confidence,
+            issues: structured.issues,
+            summary: structured.summary,
         });
     }
 
@@ -414,6 +436,7 @@ impl Orchestrator {
                     summary: None,
                     text: String::new(),
                     elapsed_ms: 0,
+                    structured_verdict: None,
                 };
             }
             Err(e) => {
@@ -424,6 +447,7 @@ impl Orchestrator {
                     summary: None,
                     text: String::new(),
                     elapsed_ms: 0,
+                    structured_verdict: None,
                 };
             }
         };
@@ -497,6 +521,7 @@ impl Orchestrator {
             summary: None,
             text: String::new(),
             elapsed_ms: 0,
+            structured_verdict: None,
         })
     }
 
@@ -658,10 +683,43 @@ impl Orchestrator {
             last_status
         };
 
+        // v0.4.22 (event 000115): only BugHunter + Reviewer are
+        // expected to emit a verdict block. Chief / Planner /
+        // Worker / Reporter leave this None — the orchestrator
+        // only consults structured_verdict on critic outcomes
+        // (event 000112 emit + final terminal status mapping),
+        // and a non-critic with a verdict block is treated as
+        // advisory prose.
+        //
+        // We match on `role_id` (a `String` propagated up from
+        // `run_agent`) rather than `Role` because this fn
+        // `drive_single_agent` only receives the id — re-binding
+        // the Role would mean re-deciding a routing choice
+        // already made by `run_agent`'s caller. The id set is
+        // stable (see `Role::id` in agent-core/src/prompt).
+        let is_critic = role_id == "agent:critic:a" || role_id == "agent:critic:b";
+        let structured_verdict = if is_critic {
+            Some(
+                parse_verdict_from_text(&TaskOutcome {
+                    role_id: role_id.clone(),
+                    role_display: role_display.clone(),
+                    status: status.clone(),
+                    summary: summary.clone(),
+                    text: text.clone(),
+                    elapsed_ms: 0,
+                    structured_verdict: None,
+                })
+                .1,
+            )
+        } else {
+            None
+        };
+
         TaskOutcome {
             role_id, role_display,
             status, summary,
             text, elapsed_ms: start.elapsed().as_millis() as u64,
+            structured_verdict,
         }
     }
 
@@ -770,9 +828,9 @@ impl Orchestrator {
         let plan_review = format!(
             "Critic A: {} → {}\nCritic B: {} → {}",
             critic_a.role_display,
-            verdict_of(&critic_a),
+            critic_verdict(&critic_a),
             critic_b.role_display,
-            verdict_of(&critic_b),
+            critic_verdict(&critic_b),
         );
         let dispatch = self.run_agent(AgentRunSpec {
             role: Role::Chief,
@@ -843,8 +901,8 @@ impl Orchestrator {
         self.emit_phase(Some(PHASES[5]), PHASES[phase_idx]).await;
         let final_review = format!(
             "Final Critic A: {} → {}\nFinal Critic B: {} → {}",
-            final_a.role_display, verdict_of(&final_a),
-            final_b.role_display, verdict_of(&final_b),
+            final_a.role_display, critic_verdict(&final_a),
+            final_b.role_display, critic_verdict(&final_b),
         );
         let _repair = self.run_agent(AgentRunSpec {
             role: Role::Chief,
@@ -866,8 +924,8 @@ impl Orchestrator {
                 self.user_request,
                 plan.summary,
                 plan.tasks.len(),
-                verdict_of(&final_a),
-                verdict_of(&final_b),
+                critic_verdict(&final_a),
+                critic_verdict(&final_b),
             ),
             context: None,
         }).await;
@@ -885,8 +943,8 @@ impl Orchestrator {
         // `event.status.startsWith('FAILED')` branch (App.tsx
         // applyEvent) reports the real error and the
         // useAgentStream hook gets a meaningful terminal state.
-        let verdict_a = verdict_of(&final_a);
-        let verdict_b = verdict_of(&final_b);
+        let verdict_a = critic_verdict(&final_a);
+        let verdict_b = critic_verdict(&final_b);
         // Whichever critic flagged the workflow, attribute the
         // terminal failure to it. REWRITE > REPAIR so prefer
         // the more-severe verdict when the two disagree.
@@ -1025,8 +1083,20 @@ impl Orchestrator {
 }
 
 /// Pull a PASS / REPAIR / REWRITE token out of an agent's text.
-/// Looks at the last 200 chars for the most recent verdict; if
-/// none found, returns "UNKNOWN".
+///
+/// v0.4.22 (event 000115): deprecated as the *primary* extractor
+/// — superseded by `parse_verdict_from_text` which reads the
+/// ```flowntier-verdict``` JSON block critics are now instructed
+/// to emit. Kept as the prose-scan fallback when the JSON block
+/// is missing or malformed, so old models (or a critic that
+/// timed out before reaching the verdict block) still produce
+/// a usable verdict instead of "UNKNOWN".
+///
+/// Looks at the text and summary for the most recent verdict
+/// token; if none found, returns "UNKNOWN". Note the priority
+/// order PASS → REWRITE → REPAIR — historically this gave
+/// false positives when a reviewer said "是否应该 PASS?" mid-
+/// paragraph. The structured JSON path avoids that entirely.
 fn verdict_of(o: &TaskOutcome) -> String {
     let s = o.text.to_uppercase();
     for v in &["PASS", "REWRITE", "REPAIR"] {
@@ -1043,6 +1113,127 @@ fn verdict_of(o: &TaskOutcome) -> String {
         }
     }
     "UNKNOWN".into()
+}
+
+/// v0.4.22 (event 000115): convenience wrapper around
+/// `parse_verdict_from_text` that drops the structured payload
+/// and returns just the verdict token. Used in the chief's
+/// repair-decision prompt + the final-review summary line +
+/// the terminal-status mapping — all of which only need the
+/// PASS/REPAIR/REWRITE/UNKNOWN label.
+///
+/// Prefer this over calling `verdict_of` directly so all six
+/// former `verdict_of()` call sites agree on the source-of-
+/// truth: structured JSON block first, prose scan fallback.
+pub fn critic_verdict(outcome: &TaskOutcome) -> String {
+    parse_verdict_from_text(outcome).0
+}
+
+/// v0.4.22 (event 000115): extract a structured reviewer
+/// verdict from the agent's final text. Two-layer strategy:
+///
+/// 1. Try to find a ```flowntier-verdict ... ``` fenced JSON
+///    block anywhere in the text. If found, deserialize into
+///    `ReviewerVerdictJson` and validate the verdict token is
+///    one of PASS / REPAIR / REWRITE. The fenced block wins
+///    because it is the format critics are explicitly told to
+///    emit at the end of their output.
+/// 2. Fall back to the legacy prose scan (`verdict_of`).
+///    Confidence / issues / summary are filled with sensible
+///    defaults so callers that expect a fully-populated struct
+///    always get one.
+///
+/// Returns a tuple of `(verdict_token, structured_verdict)` so
+/// callers that only need the verdict can ignore the second
+/// element, and callers that want the rich fields (event emit,
+/// review card) can use it directly. When the fallback path
+/// fires, the returned `ReviewerVerdictJson` carries
+/// `verdict = verdict_of(...)`, `confidence = 0.0` (we have
+/// no signal), `issues = []`, `summary = first sentence of
+/// text`.
+pub fn parse_verdict_from_text(o: &TaskOutcome) -> (String, ReviewerVerdictJson) {
+    if let Some(parsed) = extract_fenced_verdict_block(&o.text) {
+        let verdict = normalize_verdict_token(&parsed.verdict);
+        let confidence = parsed.confidence.clamp(0.0, 1.0);
+        return (
+            verdict.clone(),
+            ReviewerVerdictJson {
+                verdict,
+                confidence,
+                issues: parsed.issues,
+                summary: parsed.summary,
+            },
+        );
+    }
+    // Fallback — prose scan, confidence unknown.
+    let verdict = verdict_of(o);
+    let summary = first_sentence(&o.text, &o.summary);
+    (
+        verdict.clone(),
+        ReviewerVerdictJson {
+            verdict,
+            confidence: 0.0,
+            issues: Vec::new(),
+            summary,
+        },
+    )
+}
+
+/// Look for a ```flowntier-verdict ... ``` fenced block anywhere
+/// in the text and try to parse its body as JSON. Returns None
+/// when the fence is absent or the JSON is malformed. The fence
+/// marker is intentionally distinct from common languages
+/// (rust, json, ts, ...) so it cannot be confused with code the
+/// critic is reviewing.
+fn extract_fenced_verdict_block(text: &str) -> Option<ReviewerVerdictJson> {
+    const MARKER: &str = "```flowntier-verdict";
+    let start = text.find(MARKER)?;
+    // Skip past the opening fence line (and any trailing
+    // language tag — our marker carries no tag, but tolerate
+    // one for future-proofing).
+    let after_fence = start + MARKER.len();
+    let after_fence = text[after_fence..]
+        .find('\n')
+        .map(|i| after_fence + i + 1)?;
+    // Find the closing ``` (start of line, optionally indented).
+    let body_start = after_fence;
+    let body_end_rel = text[body_start..]
+        .find("```")
+        .map(|i| body_start + i)?;
+    let body = text[body_start..body_end_rel].trim();
+    serde_json::from_str::<ReviewerVerdictJson>(body).ok()
+}
+
+/// Map any case-variant of the verdict token to its canonical
+/// uppercase form. Anything outside the known set is treated
+/// as UNKNOWN so downstream severity logic (REWRITE > REPAIR)
+/// never crashes on a typo.
+fn normalize_verdict_token(raw: &str) -> String {
+    match raw.trim().to_uppercase().as_str() {
+        "PASS" => "PASS".into(),
+        "REPAIR" => "REPAIR".into(),
+        "REWRITE" => "REWRITE".into(),
+        _ => "UNKNOWN".into(),
+    }
+}
+
+/// First non-empty sentence of the text, falling back to the
+/// summary when text is empty. Used as the rationale shown
+/// next to the verdict token on the webview's ReviewerCard
+/// when no JSON `summary` was provided.
+fn first_sentence(text: &str, summary: &Option<String>) -> String {
+    let trimmed = text.trim();
+    if !trimmed.is_empty() {
+        trimmed
+            .split(|c: char| c == '\n' || c == '。')
+            .next()
+            .unwrap_or("")
+            .chars()
+            .take(200)
+            .collect::<String>()
+    } else {
+        summary.clone().unwrap_or_default()
+    }
 }
 
 /// v0.4.22 (event 000114): translate a critic's verdict token
