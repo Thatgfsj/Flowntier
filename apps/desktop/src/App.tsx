@@ -1189,11 +1189,22 @@ interface TaskProgressPanelProps {
 
 function TaskProgressPanel({ summary, phases, phaseStates }: TaskProgressPanelProps) {
   const { t } = useTranslation();
-  const req = summary.userRequest ?? '';
+  // v0.4.22 (event 000118, follow-up): even though
+  // useWorkflowState already coalesces user_request/tasks_* to
+  // ''/0, this component also defends against summary itself
+  // being a half-populated object (e.g. Tauri IPC returns a
+  // barebones shape on certain pipe failures). Every field is
+  // read with a safeStr/safeNum guard so a missing key never
+  // becomes `undefined.includes(...)` somewhere downstream.
+  const req = typeof summary.userRequest === 'string' ? summary.userRequest : '';
   const reqShort = req.length > 240 ? req.slice(0, 240) + '…' : req;
-  const done = phases.filter((p) => phaseStates[p.name] === 'done').length;
-  const tasksDone = summary.tasksDone ?? 0;
-  const tasksTotal = summary.tasksTotal ?? 0;
+  const tasksDone = typeof summary.tasksDone === 'number' ? summary.tasksDone : 0;
+  const tasksTotal = typeof summary.tasksTotal === 'number' ? summary.tasksTotal : 0;
+  // v0.4.22 (follow-up): phaseStates can be missing keys if a
+  // phase is added server-side but not yet known to this
+  // frontend build. Default every lookup to 'pending'.
+  const getPhaseState = (name: Phase['name']): PhaseState => phaseStates[name] ?? 'pending';
+  const done = phases.filter((p) => getPhaseState(p.name) === 'done').length;
   const phaseNameLabel: Record<Phase['name'], string> = {
     requirement: t('phases.requirement'),
     plan: t('phases.planning'),
@@ -1206,12 +1217,18 @@ function TaskProgressPanel({ summary, phases, phaseStates }: TaskProgressPanelPr
   };
   // The orchestrator's `phase` field is the prefixed string
   // "1-requirement" / "2-plan" / etc. — strip the leading "N-"
-  // when matching against Phase['name'].
-  const activeIdx = phases.findIndex((p) => {
-    const stored = summary.phase || '';
-    const suffix = stored.replace(/^\d+-/, '');
-    return suffix === p.name || stored === p.name;
-  });
+  // when matching against Phase['name']. Defensive: summary.phase
+  // can be undefined on the very first poll, and the previous
+  // version passed `summary.phase || ''` straight into the
+  // String.prototype.replace call which was fine, but the findIndex
+  // callback was not null-safe on `p` itself.
+  const activePhaseName =
+    typeof summary.phase === 'string' && summary.phase.length > 0
+      ? summary.phase.replace(/^\d+-/, '')
+      : '';
+  const activeIdx = phases.findIndex((p) => p && (p.name === activePhaseName || p.name === summary.phase));
+  // activePhase is guarded everywhere it is dereferenced below.
+  const activePhase = activeIdx >= 0 ? phases[activeIdx] : undefined;
   // v0.4.22 (event 000118): live elapsed counter for the
   // active phase. Updates every 1s so the user can SEE that
   // the workflow isn't hung — without it, a 2-minute develop
@@ -1251,7 +1268,7 @@ function TaskProgressPanel({ summary, phases, phaseStates }: TaskProgressPanelPr
       {/* 8-phase progress strip */}
       <div className="mb-2 flex items-center gap-1">
         {phases.map((p, i) => {
-          const s = phaseStates[p.name];
+          const s = getPhaseState(p.name);
           const isActive = i === activeIdx;
           const cls =
             s === 'done'
@@ -1272,7 +1289,7 @@ function TaskProgressPanel({ summary, phases, phaseStates }: TaskProgressPanelPr
       <div className="flex items-center justify-between text-[10px] text-text-secondary">
         <span>
           {t('workbench.phaseProgress', {
-            current: activeIdx >= 0 && phases[activeIdx] ? phases[activeIdx].label : '?',
+            current: activePhase?.label ?? '?',
             done,
             total: phases.length,
           })}
@@ -1282,9 +1299,9 @@ function TaskProgressPanel({ summary, phases, phaseStates }: TaskProgressPanelPr
             {t('workbench.taskProgress', { done: tasksDone, total: tasksTotal })}
           </span>
         )}
-        {phaseNameLabel && activeIdx >= 0 && phases[activeIdx] && (
+        {activePhase && (
           <span className="ml-auto font-mono">
-            {t('workbench.phaseName', { name: phaseNameLabel[phases[activeIdx]!.name] })}
+            {t('workbench.phaseName', { name: phaseNameLabel[activePhase.name] ?? activePhase.name })}
           </span>
         )}
       </div>
@@ -1294,7 +1311,7 @@ function TaskProgressPanel({ summary, phases, phaseStates }: TaskProgressPanelPr
         truncated on narrow screens. Resets to 0 when the
         phase changes (activeIdx effect above).
       */}
-      {activeIdx >= 0 && phases[activeIdx] && phaseStates[phases[activeIdx]!.name] !== 'done' && (
+      {activePhase && getPhaseState(activePhase.name) !== 'done' && (
         <div className="mt-1 font-mono text-[10px] text-text-secondary">
           {t('workbench.elapsed', { time: elapsedLabel })}
         </div>

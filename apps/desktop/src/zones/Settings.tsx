@@ -159,6 +159,76 @@ interface RuntimeSnapshot {
 
 const EMPTY: RuntimeSnapshot = { providers: [], roles: [], available_models: [] };
 
+// v0.4.22 (event 000118, follow-up): the live /v1/models path on
+// a non-curated provider can come back with `display_name` /
+// `provider_display` / `model` missing — the Rust side serializes
+// each as JSON `null` and Tauri's IPC drops those into TS
+// `undefined`. The previous build hard-asserted those fields as
+// `string` in the type, so the runtime crash
+//   `Cannot read properties of undefined (reading 'includes')`
+// slipped through `tsc --noEmit` and only blew up inside the
+// React render. We now normalize every model row in a single
+// pass at the network boundary, so all downstream code can
+// trust that `m.display_name`, `m.model`, `m.provider_display`,
+// `m.thinking_strength` are either string or null/undefined —
+// never a `undefined` that someone forgot to guard.
+//
+// `safeStr` is intentionally permissive: `null`, `undefined`,
+// numbers, and booleans all collapse to a human-readable
+// placeholder so the user always sees SOMETHING in the dropdown
+// rather than an empty option or a literal "undefined".
+function safeStr(v: unknown): string {
+  if (v === null || v === undefined) return '';
+  if (typeof v === 'string') return v;
+  if (typeof v === 'number' || typeof v === 'boolean') return String(v);
+  return '';
+}
+function normalizeModel(m: AvailableModel): AvailableModel {
+  const id = safeStr(m.model);
+  const displayName = safeStr(m.display_name) || id;
+  const provider = safeStr(m.provider);
+  const providerDisplay = safeStr(m.provider_display) || provider || '(unknown provider)';
+  // thinking_strength comes back as either a free string or an
+  // enum ('low'|'medium'|'high'). Anything else is meaningless
+  // to the badge, so collapse to ''.
+  const ts = typeof m.thinking_strength === 'string' && m.thinking_strength.length > 0
+    ? m.thinking_strength
+    : undefined;
+  const ctx = typeof m.context_length === 'number' && m.context_length > 0
+    ? m.context_length
+    : null;
+  // v0.4.22 (follow-up): exactOptionalPropertyTypes is on,
+  // so we cannot pass `undefined` into a `?: string` slot —
+  // build the result via spread, omitting optional keys when
+  // they're undefined.
+  const base: AvailableModel = {
+    provider,
+    provider_display: providerDisplay,
+    model: id,
+    display_name: displayName,
+    context_length: ctx,
+  };
+  return ts ? { ...base, thinking_strength: ts } : base;
+}
+function normalizeSnapshotModels(s: RuntimeSnapshot): RuntimeSnapshot {
+  return {
+    providers: s.providers,
+    roles: s.roles,
+    available_models: s.available_models.map(normalizeModel),
+  };
+}
+
+// Module-scope lookup so both `modelOptionLabel` and
+// `modelShortLabel` share the same canonical mapping and we
+// don't allocate a new object on every render.
+const MODEL_FRIENDLY: Record<string, string> = {
+  'MiniMax-M3': 'MiniMax M3 (reasoning)',
+  'MiniMax-Text-01': 'MiniMax Text-01 (text, recommended)',
+  'MiniMax-VL-01': 'MiniMax VL-01 (vision+text)',
+  'abab-6.5s-chat': 'abab-6.5s (fast)',
+  'abab-7-chat': 'abab-7 (general)',
+};
+
 // ROLE_LABELS is module-scope (no React hook access). Use
 // getRoleLabel(t, role) below to look up the localized string.
 const ROLE_KEYS: Record<string, string> = {
@@ -285,7 +355,7 @@ export function Settings({ open, onClose, workdir }: SettingsProps) {
             merged.push(um);
           }
         }
-        setSnapshot({ providers: prov.providers, roles: roles.roles, available_models: merged });
+        setSnapshot(normalizeSnapshotModels({ providers: prov.providers, roles: roles.roles, available_models: merged }));
         setSavedAt(new Date().toLocaleTimeString());
       }
     } catch (e) {
@@ -453,7 +523,13 @@ export function Settings({ open, onClose, workdir }: SettingsProps) {
                     const usable = p.has_secret || p.is_local;
                     const handleDeleteCustom = async (e: React.MouseEvent) => {
                       e.stopPropagation();
-                      if (!confirm(t('settings.confirm.deleteCustom.title', {name: p.display_name}))) return;
+                      // v0.4.22 (event 000118, follow-up): `p.display_name`
+                      // is typed as `string` but the runtime can hand
+                      // us `undefined` when the server omits the key.
+                      // i18next's interpolation coerces undefined to
+                      // the string "undefined" — better to substitute
+                      // the id as a stable fallback.
+                      if (!confirm(t('settings.confirm.deleteCustom.title', { name: p.display_name ?? p.id }))) return;
                       try {
                         await removeCustomProvider(p.id);
                         if (selected === p.id) setSelected(null);
@@ -771,9 +847,16 @@ interface AvailableModel {
 // each option so the user can pick the right model without
 // leaving the page. Returns "" when the model has no metadata
 // (e.g. live-catalog entries without metadata fields).
+// v0.4.22 (event 000118, follow-up): even though every model row
+// is pre-normalized in `refresh()`, this helper stays defensive
+// — the only string ops it does are template interpolation
+// (which is null/undefined-safe in JS), so there's no `.includes`
+// to break, but we still type-guard `thinking_strength` so a
+// malformed JSON value (`null`, `0`, `false`, a non-string) can
+// never reach `${…}` and render as `null`.
 function modelBadge(m: AvailableModel): string {
   const parts: string[] = [];
-  if (m.thinking_strength) {
+  if (typeof m.thinking_strength === 'string' && m.thinking_strength.length > 0) {
     parts.push(`[think: ${m.thinking_strength}]`);
   }
   if (typeof m.context_length === 'number' && m.context_length > 0) {
@@ -798,46 +881,34 @@ function modelBadge(m: AvailableModel): string {
 //        `MiniMax · MiniMax M3 (reasoning)         ┄ MiniMax-M3`
 //        `OpenAI · GPT-4o (recommended)            ┄ gpt-4o`
 function modelOptionLabel(m: AvailableModel): string {
-  const FRIENDLY: Record<string, string> = {
-    'MiniMax-M3': 'MiniMax M3 (reasoning)',
-    'MiniMax-Text-01': 'MiniMax Text-01 (text, recommended)',
-    'MiniMax-VL-01': 'MiniMax VL-01 (vision+text)',
-    'abab-6.5s-chat': 'abab-6.5s (fast)',
-    'abab-7-chat': 'abab-7 (general)',
-  };
   // v0.4.22 (event 000118, post-fix): guard against undefined
   // fields. Custom-model entries / live-cache rows that
   // omitted `display_name` previously threw
   // `Cannot read properties of undefined (reading 'includes')`
-  // inside this helper. Coalesce each field to '' first so
-  // the helper can never throw on a malformed row.
-  const id = m.model ?? '';
-  const displayName = m.display_name ?? id;
-  const provider = m.provider_display ?? m.provider ?? '';
+  // inside this helper. `safeStr` collapses every kind of
+  // missing value to '' so the helper can never throw on a
+  // malformed row.
+  const id = safeStr(m.model);
+  const displayName = safeStr(m.display_name) || id;
+  const provider = safeStr(m.provider_display) || safeStr(m.provider) || '(unknown provider)';
   // If display_name was just the id (live path), swap in the
   // friendly label. Otherwise keep the curated display_name.
   const isUnannotated = !m.display_name || displayName === id;
-  const name = (isUnannotated && id && FRIENDLY[id]) || displayName || id || '(unknown model)';
+  const name = (isUnannotated && id && MODEL_FRIENDLY[id]) || displayName || id || '(unknown model)';
   // Hide the model id tail if display_name already contains it.
   const idTail = id && name.includes(id) ? '' : (id ? `  ┄ ${id}` : '');
-  return `${provider} · ${name}${idTail}${modelBadge(m) ? '  ' + modelBadge(m) : ''}`;
+  const badge = modelBadge(m);
+  return `${provider} · ${name}${idTail}${badge ? '  ' + badge : ''}`;
 }
 
 // Companion to `modelOptionLabel` for compact surfaces (selected
 // chain entries, tooltips). Strips the id tail and metadata badge.
 function modelShortLabel(m: AvailableModel): string {
-  const FRIENDLY: Record<string, string> = {
-    'MiniMax-M3': 'MiniMax M3 (reasoning)',
-    'MiniMax-Text-01': 'MiniMax Text-01 (text, recommended)',
-    'MiniMax-VL-01': 'MiniMax VL-01 (vision+text)',
-    'abab-6.5s-chat': 'abab-6.5s (fast)',
-    'abab-7-chat': 'abab-7 (general)',
-  };
-  const id = m.model ?? '';
-  const displayName = m.display_name ?? id;
-  const provider = m.provider_display ?? m.provider ?? '';
+  const id = safeStr(m.model);
+  const displayName = safeStr(m.display_name) || id;
+  const provider = safeStr(m.provider_display) || safeStr(m.provider) || '(unknown provider)';
   const isUnannotated = !m.display_name || displayName === id;
-  const name = (isUnannotated && id && FRIENDLY[id]) || displayName || id || '(unknown model)';
+  const name = (isUnannotated && id && MODEL_FRIENDLY[id]) || displayName || id || '(unknown model)';
   return `${provider} · ${name}`;
 }
 

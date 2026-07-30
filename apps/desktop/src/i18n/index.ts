@@ -62,6 +62,14 @@ void i18n
     // translator reads the raw key, which is at least visible
     // and findable.
     saveMissing: false,
+    // v0.4.22 (event 000118, follow-up): when BOTH the active
+    // language and the fallback (zh-CN) miss a key, return
+    // the raw key string instead of an empty string. The old
+    // default was empty string, which made the UI render
+    // literal empty spans in place of every missing label —
+    // far worse than showing "phases.requirement" so the user
+    // can spot the gap.
+    returnEmptyString: false,
     interpolation: { escapeValue: false }, // React already escapes
     react: { useSuspense: false },
   })
