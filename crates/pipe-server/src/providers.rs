@@ -180,9 +180,18 @@ pub const ANTHROPIC_FALLBACK_MODELS: &[ModelEntry] = &[
 // defaults — the user can override per-model in the custom-models UI.
 pub const OPENAI_FALLBACK_MODELS: &[(&str, &[ModelEntry])] = &[
     ("minimax", &[
-        ModelEntry { id: "MiniMax-Text-01",  display_name: "MiniMax M3 (recommended)",    thinking_strength: "high",   context_length: 128_000 },
-        ModelEntry { id: "abab-6.5s-chat",   display_name: "abab-6.5s (fast)",            thinking_strength: "low",    context_length:  32_000 },
-        ModelEntry { id: "abab-7-chat",      display_name: "abab-7",                      thinking_strength: "medium", context_length:  64_000 },
+        // v0.4.22 (event 000118): the previous fallback mis-labelled
+        // `MiniMax-Text-01` as "MiniMax M3 (recommended)" — which
+        // contradicted the id and confused users who later saw the
+        // live cache surface `MiniMax-M3` as a separate model.
+        // Fix: use the canonical MiniMax naming. `Text-01` is the
+        // general text model; `VL-01` adds vision; `M3` is the
+        // MiniMax-M3 family exposed on api.minimaxi.com.
+        ModelEntry { id: "MiniMax-Text-01", display_name: "MiniMax Text-01 (text, recommended)", thinking_strength: "high",   context_length: 128_000 },
+        ModelEntry { id: "MiniMax-VL-01",   display_name: "MiniMax VL-01 (vision+text)",         thinking_strength: "medium", context_length: 128_000 },
+        ModelEntry { id: "MiniMax-M3",      display_name: "MiniMax M3 (reasoning)",              thinking_strength: "high",   context_length: 128_000 },
+        ModelEntry { id: "abab-6.5s-chat",  display_name: "abab-6.5s (fast)",                    thinking_strength: "low",    context_length:  32_000 },
+        ModelEntry { id: "abab-7-chat",     display_name: "abab-7",                              thinking_strength: "medium", context_length:  64_000 },
     ]),
     ("kimi", &[
         ModelEntry { id: "moonshot-v1-128k", display_name: "Moonshot v1 128k (Kimi K2)", thinking_strength: "medium", context_length: 128_000 },

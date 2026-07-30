@@ -323,17 +323,33 @@ const enUS: Translations = {
   'workdir.pickTitle': 'Pick work directory',
 
   // ── Phases + workflow status ─────────────────────────
+  // v0.4.22 (event 000118): the PhaseTimeline was rendering
+  // half-translated / half-key labels because App.tsx looks
+  // up `phases.${phase.name}` directly while the i18n bundle
+  // used underscore-separated keys. Add aliases matching
+  // the actual PhaseName string values so every cell of the
+  // 8-step timeline is translated.
   'phases.requirement': 'Requirement',
   'phases.planning': 'Planning',
   'phases.plan_review': 'Plan review',
+  'phases.plan': 'Planning',
+  'phases.plan-review': 'Plan review',
   'phases.dispatch': 'Dispatch',
   'phases.development': 'Development',
+  'phases.develop': 'Development',
   'phases.review': 'Review',
+  'phases.final-review': 'Final review',
   'phases.repair': 'Repair',
   'phases.delivery': 'Delivery',
   'workflow.status.idle': 'Waiting for your command in the bar below.',
   'workflow.status.running': 'Running the current phase… (full plan in the 8-phase timeline on the left)',
   'workflow.status.done': 'Workflow complete. See the delivery summary on the right.',
+  'workbench.currentTask': 'Current task',
+  'workbench.noTask': '(task text is empty)',
+  'workbench.phaseProgress': '{{current}} ({{done}} / {{total}} phases)',
+  'workbench.taskProgress': 'tasks {{done}} / {{total}}',
+  'workbench.phaseName': 'Now in: {{name}}',
+  'workbench.elapsed': 'elapsed {{time}}',
   'workflow.verdict.pass': 'Workflow complete',
   'workflow.verdict.timeout': 'Workflow timed out',
   'workflow.cmd.fallback': 'Implement POST /auth/login',

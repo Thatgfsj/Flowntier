@@ -777,6 +777,53 @@ function modelBadge(m: AvailableModel): string {
   return parts.length > 0 ? '· ' + parts.join(' ') : '';
 }
 
+// v0.4.22 (event 000118): the live /v1/models path stores
+// `display_name = id`, so the dropdown used to render e.g.
+// `MiniMax · MiniMax-M3` with no human-readable hint about what
+// the model actually is. This helper produces a label that:
+//
+//   1. Uses the curated display_name when it provides info beyond
+//      the id (e.g. "MiniMax Text-01 (text, recommended)").
+//   2. Falls back to a canonical friendly name for well-known
+//      MiniMax-family ids when display_name is just the id.
+//   3. Always appends the model id in muted monospace so the
+//      user can read both the friendly name AND the id.
+//
+// Result: `MiniMax · MiniMax Text-01 (recommended)  ┄ MiniMax-Text-01`
+//        `MiniMax · MiniMax M3 (reasoning)         ┄ MiniMax-M3`
+//        `OpenAI · GPT-4o (recommended)            ┄ gpt-4o`
+function modelOptionLabel(m: AvailableModel): string {
+  const FRIENDLY: Record<string, string> = {
+    'MiniMax-M3': 'MiniMax M3 (reasoning)',
+    'MiniMax-Text-01': 'MiniMax Text-01 (text, recommended)',
+    'MiniMax-VL-01': 'MiniMax VL-01 (vision+text)',
+    'abab-6.5s-chat': 'abab-6.5s (fast)',
+    'abab-7-chat': 'abab-7 (general)',
+  };
+  // If display_name was just the id (live path), swap in the
+  // friendly label. Otherwise keep the curated display_name.
+  const isUnannotated = m.display_name === m.model;
+  const name = (isUnannotated && FRIENDLY[m.model]) || m.display_name;
+  // Hide the model id tail if display_name already contains it.
+  const idTail = name.includes(m.model) ? '' : `  ┄ ${m.model}`;
+  return `${m.provider_display} · ${name}${idTail}${modelBadge(m) ? '  ' + modelBadge(m) : ''}`;
+}
+
+// Companion to `modelOptionLabel` for compact surfaces (selected
+// chain entries, tooltips). Strips the id tail and metadata badge.
+function modelShortLabel(m: AvailableModel): string {
+  const FRIENDLY: Record<string, string> = {
+    'MiniMax-M3': 'MiniMax M3 (reasoning)',
+    'MiniMax-Text-01': 'MiniMax Text-01 (text, recommended)',
+    'MiniMax-VL-01': 'MiniMax VL-01 (vision+text)',
+    'abab-6.5s-chat': 'abab-6.5s (fast)',
+    'abab-7-chat': 'abab-7 (general)',
+  };
+  const isUnannotated = m.display_name === m.model;
+  const name = (isUnannotated && FRIENDLY[m.model]) || m.display_name;
+  return `${m.provider_display} · ${name}`;
+}
+
 interface RoleAssignmentCardProps {
   role: import('../lib/api.js').RoleInfo;
   availableModels: AvailableModel[];
@@ -853,7 +900,7 @@ function RoleAssignmentCard({
                 const ref = `${m.provider}:${m.model}`;
                 return (
                   <option key={ref} value={ref}>
-                    {m.provider_display} · {m.display_name}  {modelBadge(m)}
+                    {modelOptionLabel(m)}
                   </option>
                 );
               })
@@ -884,7 +931,7 @@ function RoleAssignmentCard({
                 const ref = `${m.provider}:${m.model}`;
                 return (
                   <option key={ref} value={ref}>
-                    {m.provider_display} · {m.display_name}  {modelBadge(m)}
+                    {modelOptionLabel(m)}
                   </option>
                 );
               })}
@@ -898,7 +945,7 @@ function RoleAssignmentCard({
           <ol className="space-y-1">
             {role.fallback_chain.map((ref, idx) => {
               const m = availableModels.find((x) => `${x.provider}:${x.model}` === ref);
-              const label = m ? `${m.provider_display} · ${m.display_name}` : ref;
+              const label = m ? modelShortLabel(m) : ref;
               return (
                 <li
                   key={`${ref}-${idx}`}

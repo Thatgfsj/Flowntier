@@ -19,6 +19,7 @@ import { ReasoningBubble } from '@flowntier/ui';
 import { ReviewVerdict } from '@flowntier/ui';
 import { PlanGraph, type PlanTaskNode, type PlanEdge } from './components/PlanGraph.js';
 import { useEventStream } from './hooks/useEventStream.js';
+import { useWorkflowState } from './hooks/useWorkflowState.js';
 import { invoke } from '@tauri-apps/api/core';
 import { ChatZone } from './zones/ChatZone.js';
 
@@ -207,6 +208,13 @@ export function App() {
   const [showPlanGraph, setShowPlanGraph] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
   const busyRef = useRef(false);
+
+  // v0.4.22 (event 000118): poll /api/workflow/{id} so the workbench
+  // can show the user-provided task description ("what am I asking
+  // the agent to do?") plus a per-phase progress bar. Without this
+  // the user only sees the chief's static "1-需求" label and the
+  // 8-phase timeline, with no clue what the actual request was.
+  const workflowSummary = useWorkflowState(currentWfId);
 
   // v0.4: first-run gate. Reads the kv table on mount; if
   // first_run is true (default) we render <Welcome> instead
@@ -658,10 +666,17 @@ export function App() {
       const data = await invoke<{ id: string }>('start_workflow_cmd', { text });
       setCurrentWfId(data.id);
 
-      // Poll for completion using invoke. The busy flag can also
-      // be flipped false by an event handler (see applyEvent's
-      // completion branch) — we early-break in that case too.
-      const deadline = Date.now() + 600000;
+      // v0.4.22 (event 000118): the previous 10-minute watchdog
+      // (600_000 ms) was too tight for real MiniMax-based
+      // workflows — observed run time for a small task was
+      // ~7 min (chief ~30s, plan-review 30-60s, develop
+      // 2m22s, final-review 1m46s, repair 4s, delivery 6s).
+      // Bump to 30 min so a slow but valid run isn't killed
+      // mid-phase. The user now sees elapsed time in the
+      // workbench's TaskProgressPanel (added in this event),
+      // so the watchdog is purely a safety net for the case
+      // where the runtime actually hangs.
+      const deadline = Date.now() + 30 * 60 * 1000;
       while (Date.now() < deadline) {
         await new Promise(r => setTimeout(r, 2000));
         if (!busyRef.current) break;  // event handler completed us
@@ -917,6 +932,15 @@ export function App() {
             </Card>
           )}
 
+          {/* v0.4.22 (event 000118): show the user what task they
+              submitted AND where in the 8-phase pipeline the
+              orchestrator currently is. Hidden when no workflow
+              has ever been started so the empty-state isn't
+              polluted. */}
+          {workflowSummary?.userRequest && (
+            <TaskProgressPanel summary={workflowSummary} phases={PHASES} phaseStates={phaseStates} />
+          )}
+
           {/* CenterPanel: empty-state vs live chief+reviewer. */}
           <CenterPanel
             hasActiveWorkflow={busy || milestones.length > 0 || currentWfId !== null}
@@ -963,7 +987,12 @@ export function App() {
                 <ReasoningBubble
                   agentName={t('perTask.agent.chief')}
                   roleColorClass="border-t-chief"
-                  step={`${t('phases.delivery')} ${activePhase + 1} / 8`}
+                  // v0.4.22 (event 000118): previous text was
+                  // hard-coded as `phases.delivery + idx/8`, which
+                  // always read "交付 N / 8" regardless of the
+                  // actual phase. Show the real label for the
+                  // current active phase from the PHASES table.
+                  step={`${PHASES[activePhase]?.label ?? t('phases.requirement')} ${activePhase + 1} / ${PHASES.length}`}
                   body={
                     completed
                       ? t('workflow.status.done')
@@ -1135,5 +1164,141 @@ export function App() {
 
       <Settings open={settingsOpen} onClose={() => setSettingsOpen(false)} workdir={workdir} />
     </div>
+  );
+}
+
+// ── v0.4.22 (event 000118): TaskProgressPanel ───────────────────────
+//
+// Surfaces two pieces of context the user couldn't see before:
+//
+//   1. The actual task they asked the agent to do (the raw
+//      `user_request` text the orchestrator stored when
+//      `start_workflow` was called). The previous UI only showed
+//      "1-需求" / "5-开发" labels — users had no idea what the
+//      current workflow was actually trying to accomplish.
+//
+//   2. A live progress bar driven by the per-phase `PhaseState`
+//      map. 8 dots, one per phase; the active one pulses. Below
+//      the dots we show a compact "X / 8 phase · Y tasks done"
+//      counter so the user can see forward motion at a glance.
+interface TaskProgressPanelProps {
+  summary: import('./hooks/useWorkflowState.js').WorkflowSummary;
+  phases: ReadonlyArray<{ name: Phase['name']; label: string }>;
+  phaseStates: Record<Phase['name'], PhaseState>;
+}
+
+function TaskProgressPanel({ summary, phases, phaseStates }: TaskProgressPanelProps) {
+  const { t } = useTranslation();
+  const req = summary.userRequest ?? '';
+  const reqShort = req.length > 240 ? req.slice(0, 240) + '…' : req;
+  const done = phases.filter((p) => phaseStates[p.name] === 'done').length;
+  const tasksDone = summary.tasksDone ?? 0;
+  const tasksTotal = summary.tasksTotal ?? 0;
+  const phaseNameLabel: Record<Phase['name'], string> = {
+    requirement: t('phases.requirement'),
+    plan: t('phases.planning'),
+    'plan-review': t('phases.plan_review'),
+    dispatch: t('phases.dispatch'),
+    develop: t('phases.development'),
+    'final-review': t('phases.review'),
+    repair: t('phases.repair'),
+    delivery: t('phases.delivery'),
+  };
+  // The orchestrator's `phase` field is the prefixed string
+  // "1-requirement" / "2-plan" / etc. — strip the leading "N-"
+  // when matching against Phase['name'].
+  const activeIdx = phases.findIndex((p) => {
+    const stored = summary.phase || '';
+    const suffix = stored.replace(/^\d+-/, '');
+    return suffix === p.name || stored === p.name;
+  });
+  // v0.4.22 (event 000118): live elapsed counter for the
+  // active phase. Updates every 1s so the user can SEE that
+  // the workflow isn't hung — without it, a 2-minute develop
+  // phase looks indistinguishable from a stuck run, and the
+  // user concludes "workflow timed out". Use a ref-driven
+  // tick so React doesn't re-render the whole panel just to
+  // refresh the counter.
+  const [elapsedSec, setElapsedSec] = useState(0);
+  useEffect(() => {
+    setElapsedSec(0);
+    const startedAt = Date.now();
+    const id = window.setInterval(() => {
+      setElapsedSec(Math.floor((Date.now() - startedAt) / 1000));
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [activeIdx]);
+  const elapsedLabel =
+    elapsedSec < 60
+      ? `${elapsedSec}s`
+      : `${Math.floor(elapsedSec / 60)}m${elapsedSec % 60}s`;
+  return (
+    <Card className="!p-3">
+      <div className="mb-2 flex items-start gap-3">
+        <div className="shrink-0 rounded-md bg-chief/10 px-2 py-1 font-mono text-[10px] uppercase tracking-wide text-chief">
+          {t('workbench.currentTask')}
+        </div>
+        <div className="min-w-0 flex-1">
+          <p
+            className="break-words text-sm text-text-primary"
+            title={req}
+          >
+            {reqShort || t('workbench.noTask')}
+          </p>
+        </div>
+      </div>
+
+      {/* 8-phase progress strip */}
+      <div className="mb-2 flex items-center gap-1">
+        {phases.map((p, i) => {
+          const s = phaseStates[p.name];
+          const isActive = i === activeIdx;
+          const cls =
+            s === 'done'
+              ? 'bg-status-done'
+              : isActive
+                ? 'bg-chief flt-anim-pulse'
+                : 'bg-surface-3';
+          return (
+            <div
+              key={p.name}
+              className={`h-1.5 flex-1 rounded-full transition-colors ${cls}`}
+              title={`${p.label}${isActive ? ' · 当前' : ''}`}
+            />
+          );
+        })}
+      </div>
+
+      <div className="flex items-center justify-between text-[10px] text-text-secondary">
+        <span>
+          {t('workbench.phaseProgress', {
+            current: activeIdx >= 0 && phases[activeIdx] ? phases[activeIdx].label : '?',
+            done,
+            total: phases.length,
+          })}
+        </span>
+        {tasksTotal > 0 && (
+          <span>
+            {t('workbench.taskProgress', { done: tasksDone, total: tasksTotal })}
+          </span>
+        )}
+        {phaseNameLabel && activeIdx >= 0 && phases[activeIdx] && (
+          <span className="ml-auto font-mono">
+            {t('workbench.phaseName', { name: phaseNameLabel[phases[activeIdx]!.name] })}
+          </span>
+        )}
+      </div>
+      {/*
+        v0.4.22 (event 000118): live elapsed counter for the
+        active phase. Placed on its own line so it doesn't get
+        truncated on narrow screens. Resets to 0 when the
+        phase changes (activeIdx effect above).
+      */}
+      {activeIdx >= 0 && phases[activeIdx] && phaseStates[phases[activeIdx]!.name] !== 'done' && (
+        <div className="mt-1 font-mono text-[10px] text-text-secondary">
+          {t('workbench.elapsed', { time: elapsedLabel })}
+        </div>
+      )}
+    </Card>
   );
 }

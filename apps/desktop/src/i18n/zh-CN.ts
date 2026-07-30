@@ -320,17 +320,33 @@ const zhCN = {
   'workdir.pickTitle': '选择工作目录',
 
   // ── Phases + workflow status ─────────────────────────
+  // v0.4.22 (event 000118): the PhaseTimeline was rendering
+  // half-translated / half-key labels because App.tsx looks
+  // up `phases.${phase.name}` directly while the i18n bundle
+  // used underscore-separated keys. Add aliases matching
+  // the actual PhaseName string values so every cell of the
+  // 8-step timeline is translated.
   'phases.requirement': '需求',
   'phases.planning': '规划',
   'phases.plan_review': '计划审核',
+  'phases.plan': '规划',
+  'phases.plan-review': '计划审核',
   'phases.dispatch': '派发',
   'phases.development': '开发',
+  'phases.develop': '开发',
   'phases.review': '评审',
+  'phases.final-review': '终审',
   'phases.repair': '修复',
   'phases.delivery': '交付',
   'workflow.status.idle': '等待用户在下方的命令栏输入指令。',
   'workflow.status.running': '正在执行当前阶段…（完整规划在左侧 8 阶段时间线上）',
   'workflow.status.done': '工作流已完成。请查看右侧交付摘要。',
+  'workbench.currentTask': '当前任务',
+  'workbench.noTask': '（任务文本为空）',
+  'workbench.phaseProgress': '{{current}}（{{done}} / {{total}} 阶段）',
+  'workbench.taskProgress': '子任务 {{done}} / {{total}}',
+  'workbench.phaseName': '当前阶段：{{name}}',
+  'workbench.elapsed': '已用 {{time}}',
   'workflow.verdict.pass': '工作流已完成',
   'workflow.verdict.timeout': '工作流超时',
   'workflow.cmd.fallback': '实现 POST /auth/login 接口',

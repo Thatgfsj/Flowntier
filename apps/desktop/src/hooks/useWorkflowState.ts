@@ -7,6 +7,15 @@ export interface WorkflowSummary {
   finalStatus: 'DONE' | 'FAILED' | 'ABORTED' | null;
   createdAt: number;
   updatedAt: number;
+  // v0.4.22 (event 000118): the orchestrator's /api/workflow/{id}
+  // response now also includes user_request (the original task text)
+  // and a per-phase progress count. We expose them so the workbench
+  // can show "what the task actually is" and "X / N tasks done".
+  // Coalesced to empty string / 0 in useWorkflowState so consumers
+  // don't have to handle `undefined`.
+  userRequest: string;
+  tasksDone: number;
+  tasksTotal: number;
 }
 
 /**
@@ -31,9 +40,39 @@ export function useWorkflowState(wfId: string | null): WorkflowSummary | null {
       try {
         const { invoke } = await import('@tauri-apps/api/core');
         if (cancelled) return;
-        const result = await invoke<WorkflowSummary | null>('get_workflow', { id: wfId });
+        // The Tauri shell forwards to GET /api/workflow/{id} which
+        // returns { ok, wf_id, status, phase, summary, user_request,
+        // tasks_done, tasks_total }. Normalize to WorkflowSummary.
+        const result = await invoke<{
+          wf_id: string;
+          status: string;
+          phase: string;
+          summary?: string;
+          user_request?: string;
+          tasks_done?: number;
+          tasks_total?: number;
+        } | null>('get_workflow', { id: wfId });
         if (cancelled) return;
-        setSummary(result);
+        if (!result) {
+          setSummary(null);
+          return;
+        }
+        // v0.4.22 (event 000118): the orchestrator returns
+        // optional `user_request`, `tasks_done`, `tasks_total`
+        // — coalesce undefined to empty / 0 here so the
+        // consumer sees a stable shape (exactOptionalPropertyTypes
+        // rejects passing undefined into a `?: string` slot).
+        setSummary({
+          id: result.wf_id,
+          state: result.status,
+          phase: result.phase,
+          finalStatus: null,
+          createdAt: 0,
+          updatedAt: 0,
+          userRequest: result.user_request ?? '',
+          tasksDone: result.tasks_done ?? 0,
+          tasksTotal: result.tasks_total ?? 0,
+        });
       } catch (err) {
         // eslint-disable-next-line no-console
         console.warn('Tauri invoke unavailable:', err);

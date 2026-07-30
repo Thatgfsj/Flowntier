@@ -1167,7 +1167,7 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
             let wf_row = s.repo.get_workflow(&wf_id).await.unwrap_or(None);
             // If workflows row missing, orchestrator hasn't
             // started yet (or never persisted — fall through).
-            let (state, phase, summary) = match &wf_row {
+            let (state, phase, summary, user_request) = match &wf_row {
                 Some(w) => {
                     // WorkflowState + WorkflowPhase enums aren't
                     // `pub` re-exported across the workspace,
@@ -1177,9 +1177,9 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
                     // a simple string suffix match works.
                     let state_str = format!("{:?}", w.state).to_lowercase();
                     let phase_str = format!("{:?}", w.phase).to_lowercase();
-                    (state_str, phase_str, w.summary.clone())
+                    (state_str, phase_str, w.summary.clone(), w.user_request.clone())
                 }
-                None => ("unknown".to_string(), "unknown".to_string(), None),
+                None => ("unknown".to_string(), "unknown".to_string(), None, String::new()),
             };
             // Count tasks for this wf_id to show progress.
             let (done, total) = s.repo.count_tasks(&wf_id).await.unwrap_or((0, 0));
@@ -1189,6 +1189,7 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
                 "status": state,
                 "phase": phase,
                 "summary": summary,
+                "user_request": user_request,
                 "tasks_done": done,
                 "tasks_total": total,
             })))
