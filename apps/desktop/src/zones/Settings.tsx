@@ -444,7 +444,12 @@ export function Settings({ open, onClose, workdir }: SettingsProps) {
                     // emits `note` (singular). The old key was
                     // undefined, so custom-provider rows never
                     // showed the ✕ delete button.
-                    const isCustom = p.note.includes('Custom relay');
+                    // v0.4.22 (event 000118, post-fix): coalesce
+                    // `p.note` to '' so a missing field can't
+                    // throw `Cannot read properties of undefined
+                    // (reading 'includes')` and crash the whole
+                    // Settings panel.
+                    const isCustom = (p.note ?? '').includes('Custom relay');
                     const usable = p.has_secret || p.is_local;
                     const handleDeleteCustom = async (e: React.MouseEvent) => {
                       e.stopPropagation();
@@ -800,13 +805,22 @@ function modelOptionLabel(m: AvailableModel): string {
     'abab-6.5s-chat': 'abab-6.5s (fast)',
     'abab-7-chat': 'abab-7 (general)',
   };
+  // v0.4.22 (event 000118, post-fix): guard against undefined
+  // fields. Custom-model entries / live-cache rows that
+  // omitted `display_name` previously threw
+  // `Cannot read properties of undefined (reading 'includes')`
+  // inside this helper. Coalesce each field to '' first so
+  // the helper can never throw on a malformed row.
+  const id = m.model ?? '';
+  const displayName = m.display_name ?? id;
+  const provider = m.provider_display ?? m.provider ?? '';
   // If display_name was just the id (live path), swap in the
   // friendly label. Otherwise keep the curated display_name.
-  const isUnannotated = m.display_name === m.model;
-  const name = (isUnannotated && FRIENDLY[m.model]) || m.display_name;
+  const isUnannotated = !m.display_name || displayName === id;
+  const name = (isUnannotated && id && FRIENDLY[id]) || displayName || id || '(unknown model)';
   // Hide the model id tail if display_name already contains it.
-  const idTail = name.includes(m.model) ? '' : `  ┄ ${m.model}`;
-  return `${m.provider_display} · ${name}${idTail}${modelBadge(m) ? '  ' + modelBadge(m) : ''}`;
+  const idTail = id && name.includes(id) ? '' : (id ? `  ┄ ${id}` : '');
+  return `${provider} · ${name}${idTail}${modelBadge(m) ? '  ' + modelBadge(m) : ''}`;
 }
 
 // Companion to `modelOptionLabel` for compact surfaces (selected
@@ -819,9 +833,12 @@ function modelShortLabel(m: AvailableModel): string {
     'abab-6.5s-chat': 'abab-6.5s (fast)',
     'abab-7-chat': 'abab-7 (general)',
   };
-  const isUnannotated = m.display_name === m.model;
-  const name = (isUnannotated && FRIENDLY[m.model]) || m.display_name;
-  return `${m.provider_display} · ${name}`;
+  const id = m.model ?? '';
+  const displayName = m.display_name ?? id;
+  const provider = m.provider_display ?? m.provider ?? '';
+  const isUnannotated = !m.display_name || displayName === id;
+  const name = (isUnannotated && id && FRIENDLY[id]) || displayName || id || '(unknown model)';
+  return `${provider} · ${name}`;
 }
 
 interface RoleAssignmentCardProps {
