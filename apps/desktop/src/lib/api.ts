@@ -298,6 +298,38 @@ export async function getWorkflowPlan(id: string): Promise<Record<string, unknow
   return invoke('get_workflow', { id });
 }
 
+// v0.4.22 (event 000118, fix 6): single-agent chat run.
+// Sends one user message (plus optional prior chat_history)
+// directly to /api/run_task, bypassing the 8-phase orchestrator.
+// The orchestrator workflow remains available via
+// `run_workflow_cmd` above.
+export interface ChatTurnMessage {
+  role: 'user' | 'assistant' | 'system' | 'tool';
+  content: string;
+  /** Tool-call payload (assistant role only). Unused for chat-mode
+   *  today but kept so a future replay could re-inject tool_calls. */
+  tool_calls?: unknown[];
+  /** tool_call_id for tool-role messages. */
+  tool_call_id?: string;
+}
+
+export async function runAgentTask(args: {
+  task: string;
+  role?: string;
+  chat_history?: ChatTurnMessage[];
+}): Promise<unknown> {
+  return invoke('run_agent_task', { body: args });
+}
+
+// v0.4.22 (event 000118, fix 7): stop a running workflow.
+// Returns ok:true once the orchestrator's cancel_token fired.
+// The Tauri command (lib.rs:898) accepts `id: String` and
+// internally wraps it into the {wf_id} body the pipe-server
+// expects at /api/workflow/cancel.
+export async function cancelWorkflow(wfId: string): Promise<void> {
+  await invoke('cancel_workflow', { id: wfId });
+}
+
 // ── KV (Phase 4 onboarding state) ───────────────────────────────
 // Generic key/value store backed by the SQLite `kv` table.
 // Used for the first_run flag that gates the Welcome screen,

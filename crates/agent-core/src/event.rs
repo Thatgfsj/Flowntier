@@ -47,6 +47,13 @@ pub enum AgentEvent {
         agent_display: String,
         /// Fragment of text.
         delta: String,
+        /// v0.4.22 (event 000118, fix 3): per-task id when this
+        /// delta belongs to a Phase-5 worker. Format is the
+        /// orchestrator's `t{idx}` (e.g. `t0`, `t1`). `None`
+        /// for non-Phase-5 agents (chief, critic, planner).
+        /// Frontend uses it to render N worker cards instead
+        /// of collapsing them into one.
+        task_id: Option<String>,
     },
 
     /// Assistant emitted one or more tool calls.
@@ -58,6 +65,8 @@ pub enum AgentEvent {
         /// The call. `args` may be partial during streaming;
         /// the UI should re-render on each update.
         call: ToolCall,
+        /// v0.4.22 (event 000118, fix 3): same as TextDelta.
+        task_id: Option<String>,
     },
 
     /// Tool execution finished.
@@ -74,6 +83,8 @@ pub enum AgentEvent {
         is_error: bool,
         /// Wall-clock duration in milliseconds.
         elapsed_ms: u64,
+        /// v0.4.22 (event 000118, fix 3): same as TextDelta.
+        task_id: Option<String>,
     },
 
     /// The loop transitioned between high-level phases.
@@ -101,6 +112,8 @@ pub enum AgentEvent {
         output_tokens: u64,
         /// USD cost if computable; `None` for local models.
         cost_usd: Option<f64>,
+        /// v0.4.22 (event 000118, fix 3): same as TextDelta.
+        task_id: Option<String>,
     },
 
     /// Final event of an agent run.
@@ -211,6 +224,7 @@ mod tests {
                     agent_id: "agent:worker".into(),
                     agent_display: "实施".into(),
                     delta: "hello".into(),
+                    task_id: Some("t0".into()),
                 },
             ),
             (
@@ -223,6 +237,7 @@ mod tests {
                         name: "read".into(),
                         args: json!({"path": "/x"}),
                     },
+                    task_id: Some("t0".into()),
                 },
             ),
             (
@@ -234,6 +249,7 @@ mod tests {
                     preview: "ok".into(),
                     is_error: false,
                     elapsed_ms: 42,
+                    task_id: Some("t0".into()),
                 },
             ),
             (
@@ -253,6 +269,7 @@ mod tests {
                     input_tokens: 100,
                     output_tokens: 50,
                     cost_usd: None,
+                    task_id: Some("t0".into()),
                 },
             ),
             (

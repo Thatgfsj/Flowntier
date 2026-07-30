@@ -276,6 +276,52 @@ rolled forward to a v0.4.22 RFC in a future event).
   + the event 000078 boundary text in the NSIS welcome
   dialog (so the chairman can tell which build is
   installed).
+
+---
+
+## Event 000118 — 4 个 fix 一锅端 (post-0.4.22 维护)
+
+> 主席实跑 v0.4.22 后报的 4 个 UX 问题, 一并修掉。
+
+### fix3 — Phase 5 多 worker 区分
+- **症状**: Phase 5 实际跑了 3 个 worker, UI 只显示 1 张 worker 卡
+- **根因**: 后端 `agent:worker` agent_id 固定不变, N 个 worker collapse 成 1 张
+- **修法**: `AgentEvent::{TextDelta,ToolStarted,ToolFinished,TokenUsage}` 加 `task_id: Option<String>`, phase 5 用 `format!("t{idx}")` 标, 前端按 task_id 渲染 N 张 worker 卡
+
+### fix5 — Phase 8 汇报失败
+- **症状**: Phase 8 chief 5 秒跑完, transcript 一片空白
+- **根因**: SSE chunk 全进同一个 React render batch, 用户感知不到 streaming
+- **修法 (双重保障)**:
+  - A. `ChatZone` 加 `fallbackSummary`: text 为空 + done.summary 非空时显示 snapshot + "汇报快照(未流式)" 徽章
+  - B. orchestrator 加 trace 日志: `delta_count`, `last_delta_len` 让调试一眼能看
+  - C. phase 8 prompt 从"一段中文"改成"4-6 段中文, 每段先讲结果再讲关键证据", 拉长 streaming 窗口
+
+### fix6 — ChatZone 工具没记忆 / 澄清循环
+- **症状**: 主理收到单句"打开给我看看"就反复追问, 不调工具不查上下文
+- **根因** (3 个并存):
+  1. ChatZone 任何输入都走 8 阶段 orchestrator
+  2. phase 1 prompt 钳制"判断 + 追问", 还谎称"主理没文件工具"
+  3. `run_task` 不接 `chat_history`
+- **修法 (完整方案)**:
+  - 后端: `Agent::run_with_history_and_task_id(task, chat_history, task_id)`, `drive_loop` 接受 chat_history, 拼到 system + user(task) 之间
+  - 后端: `run_task` handler 解析 `body.chat_history: Vec<Message>`, 传给 agent
+  - 主理 prompt: 删"没文件工具"硬约束, 改成"可 grep/read 探查项目根目录"
+  - phase 1 task 模板: 加 "先用 1-2 次 grep/read 看项目根目录判断上下文, 再判断需求是否清楚"
+  - 前端: ChatZone 加 "对话 / 启动工作流" toggle, 对话模式 → `runAgentTask({task, role, chat_history})`, 维护 `chatHistory` state, done 时 append 助手轮
+
+### fix7 — 没有停止按钮
+- **症状**: 卡死后无法中断, 等 5 分钟 timeout
+- **根因** (4 个 gap):
+  1. 后端 `Orchestrator` 没接 `CancellationToken`
+  2. URL 错配: Tauri 发 `/api/workflow/cancel` 后端路由 `/api/workflow/{id}/cancel` (segment 数不匹配)
+  3. 前端无 Stop 按钮
+  4. `api.ts` 无 `cancelWorkflow()`
+- **修法**:
+  - 后端: `Orchestrator` 加 `cancel_token` 字段, `Orchestrator::new` 接 token, `drive_single_agent` 用 `tokio::select!` 跑 cancel_token.cancelled() 和 agent.run, 1 秒内退出
+  - 后端: 新路由 `POST /api/workflow/cancel`, body 读 wf_id, 取消注册错配路由
+  - 前端: `cancelWorkflow(wfId)` wrapper
+  - 前端: TopBar 加红色 "停止" 按钮 + 二次确认 modal
+  - App.tsx: `handleCancel` 调 `cancelWorkflow` + 乐观 reset busy
 - v0.5: re-enable macOS + Linux NSIS bundle targets in
   the Tauri config (currently set to NSIS only). Block
   on the chairman's iOS-signing story first.

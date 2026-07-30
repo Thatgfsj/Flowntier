@@ -185,9 +185,17 @@ function safeStr(v: unknown): string {
 }
 function normalizeModel(m: AvailableModel): AvailableModel {
   const id = safeStr(m.model);
-  const displayName = safeStr(m.display_name) || id;
+  // v0.4.22 (event 000118, follow-up 2): the chairman
+  // reported that the previous fallback chain collapsed every
+  // live /v1/models row to `(unknown provider) · (unknown model)`
+  // — `(unknown provider)` is hostile noise: the user has
+  // perfectly usable `id` and `provider` strings, the
+  // upstream just omitted `display_name` / `provider_display`.
+  // Prefer the raw id + provider as the human-readable fallback
+  // so the user always sees SOMETHING meaningful.
+  const displayName = safeStr(m.display_name) || id || '(unnamed model)';
   const provider = safeStr(m.provider);
-  const providerDisplay = safeStr(m.provider_display) || provider || '(unknown provider)';
+  const providerDisplay = safeStr(m.provider_display) || provider || id || '(unnamed provider)';
   // thinking_strength comes back as either a free string or an
   // enum ('low'|'medium'|'high'). Anything else is meaningless
   // to the badge, so collapse to ''.
@@ -889,12 +897,12 @@ function modelOptionLabel(m: AvailableModel): string {
   // missing value to '' so the helper can never throw on a
   // malformed row.
   const id = safeStr(m.model);
-  const displayName = safeStr(m.display_name) || id;
-  const provider = safeStr(m.provider_display) || safeStr(m.provider) || '(unknown provider)';
+  const displayName = safeStr(m.display_name) || id || '(unnamed model)';
+  const provider = safeStr(m.provider_display) || safeStr(m.provider) || id || '(unnamed provider)';
   // If display_name was just the id (live path), swap in the
   // friendly label. Otherwise keep the curated display_name.
   const isUnannotated = !m.display_name || displayName === id;
-  const name = (isUnannotated && id && MODEL_FRIENDLY[id]) || displayName || id || '(unknown model)';
+  const name = (isUnannotated && id && MODEL_FRIENDLY[id]) || displayName || id || '(unnamed model)';
   // Hide the model id tail if display_name already contains it.
   const idTail = id && name.includes(id) ? '' : (id ? `  ┄ ${id}` : '');
   const badge = modelBadge(m);
@@ -905,10 +913,10 @@ function modelOptionLabel(m: AvailableModel): string {
 // chain entries, tooltips). Strips the id tail and metadata badge.
 function modelShortLabel(m: AvailableModel): string {
   const id = safeStr(m.model);
-  const displayName = safeStr(m.display_name) || id;
-  const provider = safeStr(m.provider_display) || safeStr(m.provider) || '(unknown provider)';
+  const displayName = safeStr(m.display_name) || id || '(unnamed model)';
+  const provider = safeStr(m.provider_display) || safeStr(m.provider) || id || '(unnamed provider)';
   const isUnannotated = !m.display_name || displayName === id;
-  const name = (isUnannotated && id && MODEL_FRIENDLY[id]) || displayName || id || '(unknown model)';
+  const name = (isUnannotated && id && MODEL_FRIENDLY[id]) || displayName || id || '(unnamed model)';
   return `${provider} · ${name}`;
 }
 
@@ -1125,8 +1133,12 @@ function ProviderModelManager({
   const [manualOpen, setManualOpen] = useState(false);
   const [manualId, setManualId] = useState('');
   const [manualDisplay, setManualDisplay] = useState('');
-  const [manualThinking, setManualThinking] = useState<'low' | 'medium' | 'high'>('medium');
-  const [manualContext, setManualContext] = useState<number>(128000);
+  // v0.4.22 (fix 4): '' = 未设置. Defaulted to '' so the
+  // chairman isn't forced to pick a thinking strength on every
+  // model entry.
+  const [manualThinking, setManualThinking] = useState<'' | 'low' | 'medium' | 'high'>('');
+  // context_length is nullable; '' = not specified.
+  const [manualContext, setManualContext] = useState<number | null>(null);
   const [manualErr, setManualErr] = useState<string | null>(null);
 
   const submitManual = () => {
@@ -1142,21 +1154,31 @@ function ProviderModelManager({
       setManualErr(t('settings.models.modelExists', { id: idTrim }));
       return;
     }
-    if (!Number.isFinite(manualContext) || manualContext < 1 || manualContext > 2_000_000) {
-      setManualErr(t('settings.models.invalidContextLength'));
-      return;
+    // v0.4.22 (fix 4): context_length is now optional. null
+    // (= "未设置") is fine; only validate when the user typed
+    // something.
+    let ctx: number | null = null;
+    if (manualContext !== null) {
+      if (!Number.isFinite(manualContext) || manualContext < 1 || manualContext > 2_000_000) {
+        setManualErr(t('settings.models.invalidContextLength'));
+        return;
+      }
+      ctx = manualContext;
     }
-    onAdd([{
+    // thinking_strength is also optional — pass it through
+    // only when the user picked one.
+    const row: ProviderModel = {
       id: idTrim,
       display_name: display,
-      thinking_strength: manualThinking,
-      context_length: manualContext,
-    }]);
+      context_length: ctx,
+    };
+    if (manualThinking) row.thinking_strength = manualThinking;
+    onAdd([row]);
     // Reset form for next entry.
     setManualId('');
     setManualDisplay('');
-    setManualThinking('medium');
-    setManualContext(128000);
+    setManualThinking('');
+    setManualContext(null);
     setManualOpen(false);
   };
 
@@ -1258,9 +1280,13 @@ function ProviderModelManager({
               <span className="text-text-secondary">{t('settings.models.manualAdd.thinking')}</span>
               <select
                 value={manualThinking}
-                onChange={(e) => setManualThinking(e.target.value as 'low' | 'medium' | 'high')}
+                onChange={(e) => setManualThinking(e.target.value as '' | 'low' | 'medium' | 'high')}
                 className="rounded border border-border bg-surface-0 px-1.5 py-0.5 text-[11px]"
               >
+                {/* v0.4.22 (fix 4): empty value = "未设置".
+                    The chairman asked us to stop forcing a
+                    thinking strength on every model entry. */}
+                <option value="">{t('settings.models.thinking.default', { defaultValue: '未设置' })}</option>
                 <option value="low">low</option>
                 <option value="medium">medium</option>
                 <option value="high">high</option>
@@ -1272,8 +1298,17 @@ function ProviderModelManager({
                 type="number"
                 min={1}
                 max={2000000}
-                value={manualContext}
-                onChange={(e) => setManualContext(Number(e.target.value))}
+                // v0.4.22 (fix 4): empty string when unset so
+                // the input doesn't show "0" by default and
+                // the user can leave the field blank.
+                value={manualContext ?? ''}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v === '') { setManualContext(null); return; }
+                  const n = Number(v);
+                  setManualContext(Number.isFinite(n) ? n : null);
+                }}
+                placeholder={t('settings.models.contextPlaceholder')}
                 className="rounded border border-border bg-surface-0 px-1.5 py-0.5 text-[11px]"
               />
             </label>
@@ -1463,15 +1498,23 @@ function ProviderModelManager({
 // required thinking_strength enum. The chairman's directive
 // was: "let the user fill in the model name + context length,
 // and pick thinking strength from a list".
-type ThinkingStrength = 'low' | 'medium' | 'high';
+// v0.4.22 (event 000118, fix 4): chairman observed that
+// `+ 添加 AI 供应商` forced him to fill in 思考强度 + 上下文
+// for every model. Both fields are best-effort metadata; the
+// runtime falls back to provider defaults when they're
+// missing. We now accept an empty string and only persist the
+// key when the user picked an actual value.
+type ThinkingStrength = '' | 'low' | 'medium' | 'high';
 interface ModelRow {
   id: string;
   display_name: string;
   /** Context window size in tokens. null = use the runtime default. */
   context_length: number | null;
+  /** '' = not specified (use runtime default). */
   thinking_strength: ThinkingStrength;
 }
 const THINKING_OPTIONS: { value: ThinkingStrength; labelKey: string }[] = [
+  { value: '',      labelKey: 'settings.models.thinking.default' },
   { value: 'low',    labelKey: 'settings.models.thinking.low' },
   { value: 'medium', labelKey: 'settings.models.thinking.medium' },
   { value: 'high',   labelKey: 'settings.models.thinking.high' },
@@ -1499,7 +1542,11 @@ function CustomProviderForm({ onSaved }: { onSaved: () => void }) {
   const [newModelId, setNewModelId] = useState('');
   const [newModelName, setNewModelName] = useState('');
   const [newModelContext, setNewModelContext] = useState('');
-  const [newModelThinking, setNewModelThinking] = useState<ThinkingStrength>('medium');
+  // v0.4.22 (fix 4): default to '' ("未设置") so the user can
+  // skip both fields entirely and let the runtime pick the
+  // provider default. The previous default of 'medium' was
+  // indistinguishable from a deliberate choice in the dropdown.
+  const [newModelThinking, setNewModelThinking] = useState<ThinkingStrength>('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
@@ -1507,7 +1554,10 @@ function CustomProviderForm({ onSaved }: { onSaved: () => void }) {
   const reset = () => {
     setId(''); setDisplayName(''); setKind('openai'); setBaseUrl('');
     setApiKey(''); setModels([]); setNewModelId(''); setNewModelName('');
-    setNewModelContext(''); setNewModelThinking('medium');
+    // v0.4.22 (fix 4): reset back to the empty / unset default
+    // so the chairman's next entry is also "未设置", not the
+    // previously-defaulted medium.
+    setNewModelContext(''); setNewModelThinking('');
     setError(null); setSuccess(false);
   };
 
@@ -1537,8 +1587,11 @@ function CustomProviderForm({ onSaved }: { onSaved: () => void }) {
         thinking_strength: newModelThinking,
       },
     ]);
+    // v0.4.22 (fix 4): after adding the row, reset thinking
+    // back to '' so consecutive adds don't carry over a stale
+    // value. newModelContext is already reset below.
     setNewModelId(''); setNewModelName(''); setNewModelContext('');
-    setNewModelThinking('medium');
+    setNewModelThinking('');
     setError(null);
   };
 
@@ -1567,13 +1620,26 @@ function CustomProviderForm({ onSaved }: { onSaved: () => void }) {
       }
 
       // 2. Register custom provider
+      // v0.4.22 (fix 4): strip empty thinking_strength from
+      // each model row so the backend doesn't persist a forced
+      // default. context_length is already nullable, so we
+      // just pass through.
+      const modelsPayload = models.map((m) => {
+        const base: { id: string; display_name: string; context_length: number | null; thinking_strength?: 'low' | 'medium' | 'high' } = {
+          id: m.id,
+          display_name: m.display_name,
+          context_length: m.context_length,
+        };
+        if (m.thinking_strength) base.thinking_strength = m.thinking_strength;
+        return base;
+      });
       await addCustomProvider({
         id: idTrim,
         display_name: displayName.trim(),
         kind,
         base_url: baseUrl.trim().replace(/\/+$/, ''),
         api_key_env: envVarName,
-        models,
+        models: modelsPayload,
       });
 
       setSuccess(true);

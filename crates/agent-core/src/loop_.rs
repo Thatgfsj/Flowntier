@@ -81,9 +81,41 @@ impl Agent {
 
     /// Run the agent against a task envelope. Returns a stream
     /// of [`AgentEvent`]s.
+    ///
+    /// v0.4.22 (event 000118, fix 3): the caller can pass
+    /// `task_id` to tag every event emitted from this run with
+    /// a per-task id. Phase 5 uses this so the frontend can
+    /// render N worker cards instead of collapsing them. `None`
+    /// for any non-Phase-5 caller (chief, critic, planner).
     pub fn run(
         self,
         task: impl Into<String>,
+    ) -> mpsc::UnboundedReceiver<AgentEvent> {
+        self.run_with_task_id(task, None)
+    }
+
+    /// Like [`Self::run`] but with an explicit `task_id` tag
+    /// (see event 000118 fix 3).
+    pub fn run_with_task_id(
+        self,
+        task: impl Into<String>,
+        task_id: Option<String>,
+    ) -> mpsc::UnboundedReceiver<AgentEvent> {
+        self.run_with_history_and_task_id(task, Vec::new(), task_id)
+    }
+
+    /// v0.4.22 (event 000118, fix 6): run with an explicit
+    /// chat history prepended before the new task. ChatZone
+    /// (对话 mode) sends `chat_history: [{role, text}, ...]`
+    /// so the chief sees prior turns + tool calls and stops
+    /// re-asking "运行什么? 看什么效果?" on every fresh chat
+    /// request. Phase 5 callers should still use the simpler
+    /// `run_with_task_id` — chat history is irrelevant there.
+    pub fn run_with_history_and_task_id(
+        self,
+        task: impl Into<String>,
+        chat_history: Vec<Message>,
+        task_id: Option<String>,
     ) -> mpsc::UnboundedReceiver<AgentEvent> {
         let (tx, rx) = mpsc::unbounded_channel();
         let task = task.into();
@@ -96,10 +128,11 @@ impl Agent {
         let cfg = self.cfg;
         let ctx_mgr = self.ctx;
         let cancel = self.cancel;
+        let chat_history = chat_history;
 
         tokio::spawn(async move {
             if let Err(e) =
-                drive_loop(tx.clone(), agent_id, display, task, provider, tools, workspace, cfg, ctx_mgr, cancel)
+                drive_loop(tx.clone(), agent_id, display, task, task_id, chat_history, provider, tools, workspace, cfg, ctx_mgr, cancel)
                     .await
             {
                 // v0.4.22 (event 000081): include the error
@@ -130,6 +163,8 @@ async fn drive_loop(
     agent_id: String,
     display: String,
     task: String,
+    task_id: Option<String>,
+    chat_history: Vec<Message>,
     provider: Arc<dyn Provider>,
     tools: Arc<ToolRegistry>,
     workspace: Workspace,
@@ -153,11 +188,15 @@ async fn drive_loop(
     // every tool's JSON schema, which adds up over many rounds.)
     let tool_schemas_cached = tools.schemas();
 
-    // Initial history: system + user task envelope.
-    let mut history: Vec<Message> = vec![
-        Message::system(derive_system(&agent_id, tools.schemas())),
-        Message::user(task.clone()),
-    ];
+    // Initial history: system + chat_history + user task envelope.
+    // v0.4.22 (event 000118, fix 6): callers (ChatZone "对话" mode)
+    // can pass prior user/assistant turns via `chat_history` so the
+    // agent has memory of the conversation instead of re-asking
+    // clarifying questions. Empty Vec → behaves like the old shape.
+    let mut history: Vec<Message> = Vec::with_capacity(2 + chat_history.len());
+    history.push(Message::system(derive_system(&agent_id, tools.schemas())));
+    history.extend(chat_history.into_iter());
+    history.push(Message::user(task.clone()));
 
     let tool_ctx = ToolContext {
         workspace: workspace.clone(),
@@ -196,6 +235,7 @@ async fn drive_loop(
                             agent_id: agent_id.clone(),
                             agent_display: display.clone(),
                             delta,
+                            task_id: task_id.clone(),
                         });
                     }
                 }
@@ -204,6 +244,7 @@ async fn drive_loop(
                         agent_id: agent_id.clone(),
                         agent_display: display.clone(),
                         call: call.clone(),
+                        task_id: task_id.clone(),
                     });
                     tool_calls.push(call);
                 }
@@ -239,6 +280,7 @@ async fn drive_loop(
                 preview,
                 is_error,
                 elapsed_ms: started.elapsed().as_millis() as u64,
+                task_id: task_id.clone(),
             });
             history.push(Message::tool(call.id.clone(), content.clone()));
 

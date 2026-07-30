@@ -59,7 +59,11 @@ export type WfEvent =
   | UserQueryEvent
   | TaskStatusEvent
   | ReviewerVerdictEvent
-  | RepairLoopEvent;
+  | RepairLoopEvent
+  | TextDeltaEvent
+  | ToolStartedEvent
+  | ToolFinishedEvent
+  | AgentDoneEvent;
 
 export type TaskStatusKind =
   | 'PENDING'
@@ -205,4 +209,45 @@ export interface RepairLoopEvent {
   readonly verdict_b: string;
   readonly issues_a: readonly string[];
   readonly issues_b: readonly string[];
+}
+
+/** v0.4.22 (event 000118, fix 3): the agent loop streams
+ *  text-delta events on the `wf:event` channel; previously
+ *  the TS mirror never declared them so the frontend had no
+ *  way to receive streaming text. Now `task_id` is set for
+ *  Phase-5 worker events (orchestrator's `t{idx}` form) so
+ *  N worker cards can render independently. */
+export interface TextDeltaEvent {
+  readonly kind: 'text_delta';
+  readonly agent_id: string;
+  readonly agent_display: string;
+  readonly delta: string;
+  /** `Some('t{idx}')` for Phase-5 worker; `null` otherwise. */
+  readonly task_id?: string | null;
+}
+
+export interface ToolStartedEvent {
+  readonly kind: 'tool_started';
+  readonly agent_id: string;
+  readonly agent_display: string;
+  readonly call: { id: string; name: string; args: unknown };
+  readonly task_id?: string | null;
+}
+
+export interface ToolFinishedEvent {
+  readonly kind: 'tool_finished';
+  readonly agent_id: string;
+  readonly agent_display: string;
+  readonly tool_call_id: string;
+  readonly preview: string;
+  readonly is_error: boolean;
+  readonly elapsed_ms: number;
+  readonly task_id?: string | null;
+}
+
+export interface AgentDoneEvent {
+  readonly kind: 'done';
+  readonly wf_id: string;
+  readonly status: string;
+  readonly summary: string | null;
 }

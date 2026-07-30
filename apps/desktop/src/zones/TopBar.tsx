@@ -7,7 +7,13 @@
  * 10s and lights up red/yellow when the runtime emits any.
  * Chairman's directive: "日志弄详细一点" — this gives the
  * transient errors a UI affordance so they aren't lost.
+ *
+ * v0.4.22 (event 000118, fix 7): added a Stop button that's
+ * only visible while a workflow is running. Clicking it shows
+ * a confirmation modal; confirming fires onCancel which
+ * delegates to App.tsx (which calls cancelWorkflow).
  */
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { UpdateBanner } from '../lib/updater';
 import { SUPPORTED } from '../i18n/index.js';
@@ -27,6 +33,14 @@ export interface TopBarProps {
   updateBanner?: UpdateBanner;
   /** Click handler for the update banner. */
   onUpdateClick?: () => void;
+  /**
+   * v0.4.22 (event 000118, fix 7): click handler for the Stop
+   * button. Only present when a workflow is running. App.tsx
+   * implements this by calling `cancelWorkflow(currentWfId)`.
+   */
+  onCancel?: () => void | Promise<void>;
+  /** True while we're waiting on cancelWorkflow() to resolve. */
+  cancelling?: boolean;
 }
 
 export function TopBar({
@@ -37,10 +51,17 @@ export function TopBar({
   chatOpen,
   updateBanner,
   onUpdateClick,
+  onCancel,
+  cancelling,
 }: TopBarProps) {
   const { t } = useTranslation();
   const showUpdate =
     updateBanner?.available === true && typeof updateBanner.version === 'string';
+  // v0.4.22 (event 000118, fix 7): two-step confirmation.
+  // First click opens the modal, second click (in the modal)
+  // actually fires onCancel. Accidental clicks shouldn't kill
+  // a 4-minute workflow.
+  const [confirmOpen, setConfirmOpen] = useState(false);
   return (
     <header className="flex h-14 shrink-0 items-center gap-4 border-b border-border bg-surface-2 px-4">
       <div className="flex items-baseline gap-2">
@@ -60,6 +81,64 @@ export function TopBar({
         >
           {t('update.available', { version: updateBanner!.version })}
         </button>
+      )}
+      {onCancel && (
+        <>
+          <button
+            type="button"
+            onClick={() => setConfirmOpen(true)}
+            disabled={!!cancelling}
+            aria-label={t('topbar.stopAria', { defaultValue: '停止当前工作流' })}
+            className="rounded-md border border-red-500/60 bg-red-500/10 px-3 py-1.5 text-xs font-medium text-red-400 transition-colors hover:bg-red-500/20 focus:outline-none focus:ring-2 focus:ring-red-500/50 disabled:opacity-50"
+            title={t('topbar.stopHint', { defaultValue: '立即中断当前工作流' })}
+          >
+            {cancelling
+              ? t('topbar.stopping', { defaultValue: '停止中…' })
+              : t('topbar.stop', { defaultValue: '停止' })}
+          </button>
+          {confirmOpen && (
+            // Modal — overlays the entire app. Uses the same
+            // surface palette as the Settings modal so it feels
+            // native.
+            <div
+              className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="topbar-cancel-title"
+            >
+              <div className="w-80 max-w-[90vw] rounded-md border border-border bg-surface-1 p-4 shadow-xl">
+                <h2 id="topbar-cancel-title" className="text-sm font-semibold text-primary">
+                  {t('topbar.cancelTitle', { defaultValue: '中断当前工作流？' })}
+                </h2>
+                <p className="mt-2 text-xs leading-relaxed text-text-secondary">
+                  {t('topbar.cancelBody', {
+                    defaultValue:
+                      '正在跑的工作流会立刻停下 (1 秒内), 已经写好的文件会保留。',
+                  })}
+                </p>
+                <div className="mt-4 flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setConfirmOpen(false)}
+                    className="rounded border border-border bg-surface-2 px-3 py-1 text-xs text-text-secondary hover:bg-surface-3"
+                  >
+                    {t('topbar.cancelDismiss', { defaultValue: '继续运行' })}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      setConfirmOpen(false);
+                      if (onCancel) await onCancel();
+                    }}
+                    className="rounded bg-red-500 px-3 py-1 text-xs font-semibold text-white hover:bg-red-600"
+                  >
+                    {t('topbar.cancelConfirm', { defaultValue: '确认停止' })}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </>
       )}
       {onChatClick && (
         <button

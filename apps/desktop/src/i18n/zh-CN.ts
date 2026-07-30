@@ -166,6 +166,10 @@ const zhCN = {
   'settings.models.thinking.low': '低',
   'settings.models.thinking.medium': '中',
   'settings.models.thinking.high': '高',
+  // v0.4.22 (event 000118, fix 4): explicit "未设置" option so
+  // the chairman can skip thinking_strength entirely. The
+  // runtime falls back to the model default.
+  'settings.models.thinking.default': '未设置',
   'settings.models.manualAdd.title': '手动添加模型',
   'settings.models.manualAdd.id': '模型 ID',
   'settings.models.manualAdd.displayName': '显示名称',

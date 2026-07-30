@@ -14,11 +14,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 export type AgentEvent =
-  | { kind: 'text_delta'; agent_id: string; agent_display: string; delta: string }
-  | { kind: 'tool_started'; agent_id: string; agent_display: string; call: { id: string; name: string; args: unknown } }
-  | { kind: 'tool_finished'; agent_id: string; agent_display: string; tool_call_id: string; preview: string; is_error: boolean; elapsed_ms: number }
+  | { kind: 'text_delta'; agent_id: string; agent_display: string; delta: string; task_id?: string | null }
+  | { kind: 'tool_started'; agent_id: string; agent_display: string; call: { id: string; name: string; args: unknown }; task_id?: string | null }
+  | { kind: 'tool_finished'; agent_id: string; agent_display: string; tool_call_id: string; preview: string; is_error: boolean; elapsed_ms: number; task_id?: string | null }
   | { kind: 'phase_transition'; wf_id: string; from: string | null; to: string }
-  | { kind: 'token_usage'; agent_id: string; provider: string; model: string; input_tokens: number; output_tokens: number; cost_usd: number | null }
+  | { kind: 'token_usage'; agent_id: string; provider: string; model: string; input_tokens: number; output_tokens: number; cost_usd: number | null; task_id?: string | null }
   | { kind: 'done'; wf_id: string; status: string; summary: string | null };
 
 const AGENT_KINDS: ReadonlySet<string> = new Set([

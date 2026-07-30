@@ -8,6 +8,17 @@ export interface LeftRosterProps {
   criticAStatus: AgentStatus;
   criticBStatus: AgentStatus;
   workerStatus: AgentStatus;
+  /**
+   * v0.4.22 (event 000118, fix 3): per-task worker status
+   * map keyed by the orchestrator's `t{idx}` task id. When
+   * non-empty, render N worker cards (one per plan task)
+   * instead of the single legacy `workerStatus` card. The
+   * single card stays as a fallback for the case where the
+   * runtime hasn't yet emitted any task-tagged events (e.g.
+   * during Phase 1-4 or before Phase 5 dispatches).
+   */
+  workerTaskStatus?: Record<string, AgentStatus>;
+  workerTaskTitles?: Record<string, string>;
 }
 
 /**
@@ -28,9 +39,19 @@ export function LeftRoster({
   criticAStatus,
   criticBStatus,
   workerStatus,
+  workerTaskStatus,
+  workerTaskTitles,
 }: LeftRosterProps) {
   const { t } = useTranslation();
   const [tab, setTab] = useState<'agents' | 'files'>('agents');
+  // v0.4.22 (event 000118, fix 3): if the orchestrator has
+  // tagged any Phase-5 events with a `t{idx}` task id,
+  // render one card per task. Sort by id so `t0`, `t1`, …
+  // stay in plan order rather than event-arrival order
+  // (worker N's first TextDelta arrives before worker N-1's).
+  const perTaskIds = workerTaskStatus
+    ? Object.keys(workerTaskStatus).sort()
+    : [];
 
   return (
     <div className="flex flex-col gap-2">
@@ -103,14 +124,40 @@ export function LeftRoster({
 
           <h2 className="mt-3 px-1 text-xs font-semibold uppercase tracking-wide text-text-secondary">
             {t('perTask.agent.worker')}
+            {perTaskIds.length > 1 && (
+              <span className="ml-1 text-text-tertiary">({perTaskIds.length})</span>
+            )}
           </h2>
-          <AgentCard
-            role="worker"
-            name={t('perTask.agent.worker')}
-            status={workerStatus}
-            statusLabel={t(`agentCard.status.${workerStatus}`)}
-            subtitle={t('leftRoster.workerSubtitle')}
-          />
+          {perTaskIds.length > 0 ? (
+            perTaskIds.map((tid) => {
+              const s = workerTaskStatus![tid] ?? 'idle';
+              const title = workerTaskTitles?.[tid];
+              const display = title
+                ? `${t('perTask.agent.worker')} · ${tid}: ${title}`
+                : `${t('perTask.agent.worker')} · ${tid}`;
+              return (
+                <AgentCard
+                  key={tid}
+                  role="worker"
+                  name={display}
+                  status={s}
+                  statusLabel={t(`agentCard.status.${s}`)}
+                  subtitle={t('leftRoster.workerSubtitle')}
+                />
+              );
+            })
+          ) : (
+            // No per-task events yet — fall back to the
+            // legacy single worker card so phases before
+            // dispatch still get a status row.
+            <AgentCard
+              role="worker"
+              name={t('perTask.agent.worker')}
+              status={workerStatus}
+              statusLabel={t(`agentCard.status.${workerStatus}`)}
+              subtitle={t('leftRoster.workerSubtitle')}
+            />
+          )}
         </div>
       )}
 

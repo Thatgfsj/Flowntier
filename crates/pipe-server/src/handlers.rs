@@ -7,7 +7,7 @@
 use agent_core::provider::openai::OpenAiProvider;
 use agent_core::tool::ToolRegistry;
 use agent_core::workspace::Workspace;
-use agent_core::{Agent, AgentConfig, AgentEvent};
+use agent_core::{Agent, AgentConfig, AgentEvent, Message};
 use serde_json::{json, Value};
 use std::sync::Arc;
 use tokio::sync::broadcast;
@@ -841,6 +841,23 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
             // chairman explicitly added). This guarantees the
             // role picker always has at least one selectable
             // option per provider.
+            // v0.4.22 (event 000118, fix 2): the chairman
+            // reported that the Settings → 角色 → 模型 dropdown
+            // rendered every row as `(unknown provider) ·
+            // (unknown model)`. Root cause: this endpoint
+            // emitted a nested shape
+            //   `{ provider_id, models: { id, display_name, ... } }`
+            // but the TS `AvailableModel` type expects a FLAT
+            // shape
+            //   `{ provider, provider_display, model, display_name }`.
+            // Tauri dropped the missing top-level fields to
+            // `undefined`, and the frontend coalesced them to
+            // `(unknown provider) · (unknown model)`.
+            //
+            // Fix: emit one flat row per model. Provider
+            // id (the storage key) and provider display name
+            // (the user-facing brand) come from PRESETS for
+            // built-ins and from `c.name` for custom providers.
             let mut models: Vec<Value> = Vec::new();
             // Presets — overlay catalog when cache is missing.
             for preset in crate::providers::PRESETS.iter() {
@@ -858,10 +875,19 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
                                         continue;
                                     }
                                 }
-                                models.push(json!({
-                                    "provider_id": preset.id,
-                                    "models": mm,
-                                }));
+                                // Flatten: keep every field the
+                                // live /v1/models endpoint emits
+                                // (so the user still sees
+                                // thinking_strength / context_length
+                                // / source when available) AND
+                                // hoist the provider metadata to
+                                // the top level.
+                                let mut row = mm;
+                                if let Some(obj) = row.as_object_mut() {
+                                    obj.insert("provider".to_string(), json!(preset.id));
+                                    obj.insert("provider_display".to_string(), json!(preset.display_name));
+                                }
+                                models.push(row);
                             }
                         }
                     }
@@ -878,14 +904,13 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
                                     continue;
                                 }
                                 models.push(json!({
-                                    "provider_id": preset.id,
-                                    "models": json!({
-                                        "id": entry.id,
-                                        "display_name": entry.display_name,
-                                        "thinking_strength": entry.thinking_strength,
-                                        "context_length": entry.context_length,
-                                        "source": "fallback",
-                                    }),
+                                    "provider": preset.id,
+                                    "provider_display": preset.display_name,
+                                    "id": entry.id,
+                                    "display_name": entry.display_name,
+                                    "thinking_strength": entry.thinking_strength,
+                                    "context_length": entry.context_length,
+                                    "source": "fallback",
                                 }));
                             }
                         }
@@ -904,6 +929,10 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
             // are normalized to the bare id so the role
             // resolver can look it up via
             // `state.repo.get_custom_provider(&provider_short)`.
+            //
+            // v0.4.22 (fix 2): same flattening as presets —
+            // emit `{ provider: "custom:<id>", provider_display: <c.name>,
+            // id, display_name, ... }` directly.
             for c in custom {
                 let custom_pid = format!("custom:{}", c.id);
                 if let Ok(Some(cache)) = s.repo.get_model_cache(&c.id).await {
@@ -919,10 +948,12 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
                                     continue;
                                 }
                             }
-                            models.push(json!({
-                                "provider_id": custom_pid,
-                                "models": mm,
-                            }));
+                            let mut row = mm;
+                            if let Some(obj) = row.as_object_mut() {
+                                obj.insert("provider".to_string(), json!(custom_pid));
+                                obj.insert("provider_display".to_string(), json!(c.name));
+                            }
+                            models.push(row);
                         }
                     }
                 } else if let Some(dm) = c.default_model.as_ref() {
@@ -932,14 +963,13 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
                     // contradiction, so don't surface it.
                     if !disabled_pairs.contains(&(custom_pid.clone(), dm.clone())) {
                         models.push(json!({
-                            "provider_id": custom_pid,
-                            "models": json!({
-                                "id": dm,
-                                "display_name": dm,
-                                "thinking_strength": "medium",
-                                "context_length": null,
-                                "source": "fallback",
-                            }),
+                            "provider": custom_pid,
+                            "provider_display": c.name,
+                            "id": dm,
+                            "display_name": dm,
+                            "thinking_strength": "medium",
+                            "context_length": null,
+                            "source": "fallback",
                         }));
                     }
                 }
@@ -1080,6 +1110,14 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
                 })));
             }
             tracing::info!(target: "pipe_server", task_len = task.len(), task_preview = %task.chars().take(80).collect::<String>(), "[TRACE] /api/run_workflow: creating Orchestrator");
+            // v0.4.22 (event 000118, fix 7): build the cancel
+            // token FIRST, then pass it to the Orchestrator so
+            // drive_single_agent can race it against the
+            // in-flight agent.run() inside tokio::select!. The
+            // same token handle is also stashed in the
+            // active_workflows map so /api/workflow/cancel
+            // can fire it from the Stop button.
+            let cancel_token = tokio_util::sync::CancellationToken::new();
             let orch = crate::orchestrator::Orchestrator::new(
                 s.clone(),
                 s.events.clone(),
@@ -1091,6 +1129,7 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
                 // request body so the chairman can tune it from
                 // the desktop without rebuilding the runtime.
                 3,
+                cancel_token.clone(),
             );
             let wf_id = orch.wf_id.clone();
             tracing::info!(target: "pipe_server", wf_id = %wf_id, "[TRACE] /api/run_workflow: spawning orch.run() on background tokio task");
@@ -1101,16 +1140,13 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
             // workflow progresses.
             // v0.4.22 (event 000091 fix #32): the cancel token
             // is created here and stashed in the active_workflows
-            // map so the `POST /api/workflow/{id}/cancel` route
+            // map so the `POST /api/workflow/cancel` route
             // can fire it. The token is removed when the
-            // workflow finishes (cleanup below). For now the
-            // orchestrator itself doesn't observe the token —
-            // firing it just marks the workflow as cancelled in
-            // the active map and prevents new phases from
-            // starting; agents in flight will run to their
-            // natural 5-min timeout. That's a v0.4.23 polish
-            // (plumb the token into run_agent's tokio::select!).
-            let cancel_token = tokio_util::sync::CancellationToken::new();
+            // workflow finishes (cleanup below). event 000118
+            // fix 7 plumbed the token into run_agent's
+            // tokio::select! so cancellation actually unwinds
+            // within ~1s instead of waiting for the 5-min
+            // per-task timeout.
             {
                 let mut map = s.active_workflows.lock().expect("active_workflows mutex");
                 map.insert(wf_id.clone(), cancel_token);
@@ -1193,6 +1229,63 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
                 "tasks_done": done,
                 "tasks_total": total,
             })))
+        })
+    });
+
+    // ── v0.4.22 (event 000118, fix 7): POST /api/workflow/cancel ─
+    // Stops a running workflow by firing the orchestrator's
+    // CancellationToken. Body shape: { wf_id: string }.
+    // The Tauri shell calls this from the Stop button.
+    // Previously the matching route was /api/workflow/{id}/cancel
+    // which the dispatcher couldn't match (segment count off),
+    // so cancel_workflow was a 404 no-op.
+    let s_wfcancel = state.clone();
+    d.register("POST", "/api/workflow/cancel", move |body| {
+        let s = s_wfcancel.clone();
+        Box::pin(async move {
+            let wf_id = body.get("wf_id").and_then(|v| v.as_str())
+                .map(|s| s.to_string()).unwrap_or_default();
+            if wf_id.is_empty() {
+                return Ok((400, json!({
+                    "ok": false,
+                    "error": "missing 'wf_id' in body",
+                })));
+            }
+            let token_opt = {
+                let map = s.active_workflows.lock().expect("active_workflows mutex");
+                map.get(&wf_id).cloned()
+            };
+            match token_opt {
+                Some(token) => {
+                    tracing::info!(
+                        target: "pipe_server",
+                        wf_id = %wf_id,
+                        "[TRACE] /api/workflow/cancel: firing cancel_token"
+                    );
+                    token.cancel();
+                    Ok((200, json!({
+                        "ok": true,
+                        "wf_id": wf_id,
+                        "status": "cancelling",
+                        "note": "cancel_token fired; orchestrator should exit within 1s",
+                    })))
+                }
+                None => {
+                    // Workflow finished already (or wf_id is wrong).
+                    // Don't 404 — the chair just sees "ok, no-op".
+                    tracing::warn!(
+                        target: "pipe_server",
+                        wf_id = %wf_id,
+                        "[TRACE] /api/workflow/cancel: no active workflow (already done?)"
+                    );
+                    Ok((200, json!({
+                        "ok": true,
+                        "wf_id": wf_id,
+                        "status": "not_active",
+                        "note": "no active workflow with this id (already finished?)",
+                    })))
+                }
+            }
         })
     });
 
@@ -1971,19 +2064,44 @@ async fn add_custom_provider(
         .unwrap_or("openai-compatible").to_string();
     let api_key_env = body.get("api_key_env").and_then(|v| v.as_str())
         .map(|s| s.to_string());
-    // v0.4.22 (event 000096): `default_model` is now taken from
-    // the user's first model row (or explicit field). The shell
-    // sends `models[].id` (the model id string) and
-    // `models[].display_name`; we persist the id as a
-    // comma-separated fallback chain so resolve_role sees the
-    // user's actual model list when they pick `<custom_id>:*`.
-    let models_json: Vec<String> = body.get("models")
+    // v0.4.22 (event 000096 + 000118-fix4): the user's
+    // models now carry their own display_name /
+    // thinking_strength / context_length. We persist the FULL
+    // row into the model_cache (not just the id) so the role
+    // picker can show real metadata instead of "(unknown model)".
+    // Empty thinking_strength / context_length collapse to
+    // null in the cache so the runtime falls back to "no
+    // hint" instead of forcing a default.
+    let models_rows: Vec<Value> = body.get("models")
         .and_then(|v| v.as_array())
-        .map(|arr| arr.iter()
-            .filter_map(|m| m.get("id").and_then(|x| x.as_str()).map(String::from))
-            .collect())
+        .map(|arr| arr.iter().filter_map(|m| {
+            let mid = m.get("id").and_then(|x| x.as_str())?;
+            let display = m.get("display_name").and_then(|x| x.as_str())
+                .filter(|s| !s.is_empty())
+                .unwrap_or(mid);
+            let thinking = m.get("thinking_strength").and_then(|x| x.as_str())
+                .filter(|s| matches!(*s, "low" | "medium" | "high"));
+            let context = m.get("context_length").and_then(|x| x.as_i64())
+                .filter(|n| *n > 0);
+            let mut obj = json!({
+                "id": mid,
+                "display_name": display,
+            });
+            if let Some(o) = obj.as_object_mut() {
+                if let Some(t) = thinking {
+                    o.insert("thinking_strength".to_string(), json!(t));
+                }
+                if let Some(c) = context {
+                    o.insert("context_length".to_string(), json!(c));
+                }
+                o.insert("source".to_string(), json!("user-curated"));
+            }
+            Some(obj)
+        }).collect())
         .unwrap_or_default();
-    let default_model = models_json.first().cloned();
+    let default_model = models_rows.first()
+        .and_then(|m| m.get("id").and_then(|x| x.as_str()))
+        .map(String::from);
 
     if id.is_empty() || id.len() > 64 {
         return Ok((400, json!({ "error": "id must be 1..=64 chars" })));
@@ -2016,8 +2134,8 @@ async fn add_custom_provider(
     // custom_provider table only stores `default_model`; we
     // mirror the full list into the model_cache row so the
     // Settings UI can render them.
-    if !models_json.is_empty() {
-        let body_str = serde_json::to_string(&models_json).unwrap_or_else(|_| "[]".into());
+    if !models_rows.is_empty() {
+        let body_str = serde_json::to_string(&models_rows).unwrap_or_else(|_| "[]".into());
         let _ = state.repo.put_model_cache(&storage::ModelCacheRow {
             provider_id: format!("custom:{id}"),
             models_json: body_str,
@@ -2042,8 +2160,8 @@ async fn add_custom_provider(
         "name": display_name,
         "base_url": base_url,
         "kind": kind,
-        "default_model": models_json.first(),
-        "models": models_json,
+        "default_model": models_rows.first(),
+        "models": models_rows,
         "enabled": true,
     })))
 }
@@ -2362,6 +2480,25 @@ async fn run_task(body: Value, state: Arc<ServerState>) -> Result<(u16, Value), 
         .unwrap_or("")
         .to_string();
 
+    // v0.4.22 (event 000118, fix 6): the ChatZone "对话" mode
+    // sends prior user/assistant turns here so the agent has
+    // memory of the conversation and doesn't fall into a
+    // clarification loop. Shape:
+    //   { role: "user"|"assistant"|"system", content: string,
+    //     tool_calls?: [...], tool_call_id?: string }
+    // We tolerate malformed entries by silently dropping them
+    // (the user can always re-send a corrected turn) so a single
+    // bad record doesn't kill the whole turn.
+    let chat_history: Vec<Message> = body
+        .get("chat_history")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|entry| serde_json::from_value::<Message>(entry.clone()).ok())
+                .collect()
+        })
+        .unwrap_or_default();
+
     // ── Build the primary provider ─────────────────────────────
     let (provider_kind, base_url, model, api_key) = if legacy_explicit {
         // Caller supplied everything — honor it (debug / scripted use).
@@ -2449,7 +2586,7 @@ async fn run_task(body: Value, state: Arc<ServerState>) -> Result<(u16, Value), 
         .unwrap_or(300)
         .clamp(10, 1800);
 
-    let mut rx = agent.run(task_text);
+    let mut rx = agent.run_with_history_and_task_id(task_text, chat_history, None);
     let mut last_status = "UNKNOWN".to_string();
     let mut summary: Option<String> = None;
     let timed_out = tokio::time::timeout(

@@ -272,6 +272,12 @@ pub struct Orchestrator {
     /// verdict pair (handled by event 000114's
     /// `terminal_done_status`).
     max_repair_loops: u32,
+    /// v0.4.22 (event 000118, fix 7): external stop switch.
+    /// Fired by `POST /api/workflow/cancel` so a stuck
+    /// workflow can be interrupted within ~1s instead of
+    /// waiting for the 5-min per-task timeout. `drive_single_agent`
+    /// races this against the in-flight agent.run().
+    cancel_token: tokio_util::sync::CancellationToken,
 }
 
 impl Orchestrator {
@@ -283,6 +289,7 @@ impl Orchestrator {
         events: broadcast::Sender<AgentEvent>,
         user_request: String,
         max_repair_loops: u32,
+        cancel_token: tokio_util::sync::CancellationToken,
     ) -> Self {
         // 12-char ulid-ish — collision-resistant enough for a
         // single process. Real wf_ids (legacy path) use full ULIDs.
@@ -297,6 +304,7 @@ impl Orchestrator {
             phase_started_at,
             current_phase: PHASES[0],
             max_repair_loops,
+            cancel_token,
         }
     }
 
@@ -435,7 +443,7 @@ impl Orchestrator {
         repair_context: Option<String>,
     ) -> Vec<TaskOutcome> {
         let mut worker_futures = Vec::new();
-        for t in &plan.tasks {
+        for (idx, t) in plan.tasks.iter().enumerate() {
             let mut task_text = format!(
                 "任务: {}\n目标: {}\n接口: {}\n依赖: {:?}\n要求: {}\n\n只做这一件事, 不要碰其他 worker 的文件。完成后用一句话汇报。",
                 t.title, t.objective, t.interfaces, t.dependencies, t.requirements,
@@ -444,11 +452,18 @@ impl Orchestrator {
                 task_text.push_str("\n\n# 修复循环反馈 (event 000113)\n");
                 task_text.push_str(ctx);
             }
-            worker_futures.push(self.run_agent(AgentRunSpec {
+            // v0.4.22 (event 000118, fix 3): tag every worker
+            // event with a stable per-task id (`t{idx}`) so the
+            // frontend can render N worker cards. Without this
+            // all events collapse into a single `agent:worker`
+            // key and the UI shows one card regardless of how
+            // many tasks the planner produced.
+            let task_id = Some(format!("t{idx}"));
+            worker_futures.push(self.run_agent_with_task_id(AgentRunSpec {
                 role: Role::Worker,
                 task: task_text,
                 context: None,
-            }));
+            }, task_id));
         }
         futures::future::join_all(worker_futures).await
     }
@@ -493,6 +508,18 @@ impl Orchestrator {
     /// but the spec says they shouldn't communicate via in-mem
     /// state).
     async fn run_agent(&self, spec: AgentRunSpec) -> TaskOutcome {
+        self.run_agent_with_task_id(spec, None).await
+    }
+
+    /// v0.4.22 (event 000118, fix 3): like `run_agent` but
+    /// attaches a per-task id (`t{idx}`) to every event
+    /// emitted from the agent's loop. The frontend uses the
+    /// tag to render N Phase-5 worker cards instead of one.
+    async fn run_agent_with_task_id(
+        &self,
+        spec: AgentRunSpec,
+        task_id: Option<String>,
+    ) -> TaskOutcome {
         let role_id = spec.role.id().to_string();
         let role_display = spec.role.display().to_string();
 
@@ -568,7 +595,7 @@ impl Orchestrator {
                 spec.task.clone()
             };
 
-            let outcome = self.drive_single_agent(agent, task, role_id.clone(), role_display.clone()).await;
+            let outcome = self.drive_single_agent(agent, task, role_id.clone(), role_display.clone(), task_id.clone()).await;
             // If the outcome looks like a retriable failure, log
             // it and try the next candidate. "DONE" / "ABORTED"
             // (user-cancelled) / "TIMEOUT" (5-min wall clock) are
@@ -673,130 +700,198 @@ impl Orchestrator {
             provider_short,
             model_id,
             base_url: preset.base_url.to_string(),
-            api_kind: preset.kind.to_string(),
+api_kind: preset.kind.to_string(),
             secret_name: preset.secret_name.to_string(),
             api_key,
         })
     }
+}
 
+/// v0.4.22 (event 000118, fix 7): inner-loop outcome tag
+/// for `drive_single_agent`. Lives outside the impl so
+/// nested async closures (returned via `tokio::select!`)
+/// can name it without `Self::` qualification.
+///   - Terminal: agent emitted Done{...}, loop returned
+///   - Cancelled: cancel_token fired, loop returned early
+///   - Exhausted: rx channel closed without Done (rare)
+/// The outer `tokio::time::timeout` reports Err on the
+/// 5-min ceiling — distinct from the three above.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OutcomeShape {
+    Terminal,
+    Cancelled,
+    Exhausted,
+}
+
+impl Orchestrator {
     /// Run one agent and collect its outcome (extracted from
     /// the original `run_agent` body so the fallback loop can
     /// call it multiple times).
     async fn drive_single_agent(
-        &self,
-        agent: agent_core::Agent,
-        task: String,
-        role_id: String,
-        role_display: String,
+    &self,
+    agent: agent_core::Agent,
+    task: String,
+    role_id: String,
+    role_display: String,
+    task_id: Option<String>,
     ) -> TaskOutcome {
-        let start = Instant::now();
-        let mut rx = agent.run(task);
-        let mut text = String::new();
-        let mut last_status = "UNKNOWN".to_string();
-        let mut summary: Option<String> = None;
-        // 5-minute per-agent ceiling so a runaway critic doesn't
-        // block the orchestrator forever. Per-task budget is
-        // enforced at the run_task handler; per-agent is new in
-        // event 000068 because critics + workers run unattended.
-        let timed_out = tokio::time::timeout(
-            Duration::from_secs(300),
-            async {
-                while let Some(ev) = rx.recv().await {
-                    let _ = self.events.send(ev.clone());
-                    match ev {
-                        AgentEvent::TextDelta { delta, .. } => text.push_str(&delta),
-                        AgentEvent::Done { status, summary: s, .. } => {
-                            last_status = status;
-                            summary = s;
-                            // v0.4.22 (event 000082): agent
-                            // finished (success OR error).
-                            // Chairman sees which role finished
-                            // + what status + how long it
-                            // took + whether text was emitted.
-                            info!(
-                                target: "orchestrator",
-                                wf_id = %self.wf_id,
-                                role = %role_id,
-                                status = %last_status,
-                                text_len = text.len(),
-                                "v0.4.22 (event 000082): agent run finished"
-                            );
-                            // v0.4.22 (event 000091 fix #2): use
-                            // starts_with instead of exact match.
-                            // The agent loop emits statuses like
-                            // "FAILED: DNS error" or
-                            // "FAILED: MaxIterationsReached(50)"
-                            // — exact "FAILED" never matched those,
-                            // so run_agent hung until the 5-min
-                            // per-agent timeout. Prefix matching
-                            // catches all of: DONE, FAILED:*,
-                            // ABORTED, ABORTED_REPEAT, TIMEOUT:*.
-                            if last_status == "DONE"
-                                || last_status.starts_with("FAILED")
-                                || last_status.starts_with("ABORTED")
-                                || last_status.starts_with("TIMEOUT")
-                            {
-                                return false;
+    let start = Instant::now();
+    // v0.4.22 (event 000118, fix 7): race the in-flight
+    // agent against the orchestrator's external cancel
+    // token (fired by POST /api/workflow/cancel from the
+    // Stop button). When the user clicks Stop, this future
+    // resolves immediately with `cancelled=true` and we
+    // synthesize a Done{ABORTED} event so the run returns
+    // in ~1s instead of waiting for the 5-min timeout.
+    let cancel_token = self.cancel_token.clone();
+    let mut rx = agent.run_with_task_id(task, task_id);
+    let mut text = String::new();
+    let mut last_status = "UNKNOWN".to_string();
+    let mut summary: Option<String> = None;
+    // v0.4.22 (event 000118, fix 5): per-phase TextDelta
+    // counter so debugging "ChatZone transcript 空" is a
+    // one-line log read instead of re-running the whole
+    // workflow. The chairman's fix5 report cited phase 8
+    // (chief 5-second delivery) as the smoke case — this
+    // shows how many text_deltas actually streamed.
+    let mut delta_count: u32 = 0;
+    let mut last_delta_len: u32 = 0;
+    // 5-minute per-agent ceiling so a runaway critic doesn't
+    // block the orchestrator forever. Per-task budget is
+    // enforced at the run_task handler; per-agent is new in
+    // event 000068 because critics + workers run unattended.
+    let outcome = tokio::time::timeout(
+        Duration::from_secs(300),
+        async {
+            loop {
+                // tokio::select! races the rx channel, the
+                // 5-min outer timeout, and the cancel
+                // token. Whichever fires first wins. The
+                // cancel branch synthesizes a Done{ABORTED}
+                // and exits the loop.
+                tokio::select! {
+                    biased;
+                    _ = cancel_token.cancelled() => {
+                        tracing::info!(
+                            target: "orchestrator",
+                            wf_id = %self.wf_id,
+                            role = %role_id,
+                            "v0.4.22 (event 000118 fix 7): cancel_token fired during phase"
+                        );
+                        let _ = self.events.send(AgentEvent::Done {
+                            wf_id: self.wf_id.clone(),
+                            status: "ABORTED".into(),
+                            summary: Some("workflow cancelled by user".into()),
+                        });
+                        last_status = "ABORTED".into();
+                        summary = Some("workflow cancelled by user".into());
+                        return OutcomeShape::Cancelled;
+                    }
+                    ev_opt = rx.recv() => {
+                        let Some(ev) = ev_opt else {
+                            // Channel closed (run finished).
+                            return OutcomeShape::Exhausted;
+                        };
+                        let _ = self.events.send(ev.clone());
+                        match ev {
+                            AgentEvent::TextDelta { delta, .. } => {
+                                delta_count += 1;
+                                last_delta_len = delta.len() as u32;
+                                text.push_str(&delta);
                             }
+                            AgentEvent::Done { status, summary: s, .. } => {
+                                last_status = status;
+                                summary = s;
+                                info!(
+                                    target: "orchestrator",
+                                    wf_id = %self.wf_id,
+                                    role = %role_id,
+                                    status = %last_status,
+                                    text_len = text.len(),
+                                    delta_count,
+                                    last_delta_len,
+                                    "v0.4.22 (event 000118 fix 5): phase streaming trace"
+                                );
+                                info!(
+                                    target: "orchestrator",
+                                    wf_id = %self.wf_id,
+                                    role = %role_id,
+                                    status = %last_status,
+                                    text_len = text.len(),
+                                    "v0.4.22 (event 000082): agent run finished"
+                                );
+                                if last_status == "DONE"
+                                    || last_status.starts_with("FAILED")
+                                    || last_status.starts_with("ABORTED")
+                                    || last_status.starts_with("TIMEOUT")
+                                {
+                                    return OutcomeShape::Terminal;
+                                }
+                            }
+                            _ => {}
                         }
-                        _ => {}
                     }
                 }
-                true
-            },
-        ).await.unwrap_or(true);
+            }
+        },
+    ).await;
 
-        let status = if timed_out && !(last_status == "DONE"
-            || last_status.starts_with("FAILED")
-            || last_status.starts_with("ABORTED")) {
-            let _ = self.events.send(AgentEvent::Done {
-                wf_id: self.wf_id.clone(),
-                status: format!("TIMEOUT (300s)"),
-                summary: Some(format!("agent {role_display} exceeded 300s")),
-            });
-            "TIMEOUT (300s)".into()
-        } else {
-            last_status
-        };
+    let timed_out = matches!(outcome, Err(_));
+    let cancelled = matches!(outcome, Ok(OutcomeShape::Cancelled));
 
-        // v0.4.22 (event 000115): only BugHunter + Reviewer are
-        // expected to emit a verdict block. Chief / Planner /
-        // Worker / Reporter leave this None — the orchestrator
-        // only consults structured_verdict on critic outcomes
-        // (event 000112 emit + final terminal status mapping),
-        // and a non-critic with a verdict block is treated as
-        // advisory prose.
-        //
-        // We match on `role_id` (a `String` propagated up from
-        // `run_agent`) rather than `Role` because this fn
-        // `drive_single_agent` only receives the id — re-binding
-        // the Role would mean re-deciding a routing choice
-        // already made by `run_agent`'s caller. The id set is
-        // stable (see `Role::id` in agent-core/src/prompt).
-        let is_critic = role_id == "agent:critic:a" || role_id == "agent:critic:b";
-        let structured_verdict = if is_critic {
-            Some(
-                parse_verdict_from_text(&TaskOutcome {
-                    role_id: role_id.clone(),
-                    role_display: role_display.clone(),
-                    status: status.clone(),
-                    summary: summary.clone(),
-                    text: text.clone(),
-                    elapsed_ms: 0,
-                    structured_verdict: None,
-                })
-                .1,
-            )
-        } else {
-            None
-        };
+    let status = if cancelled {
+        "ABORTED".to_string()
+    } else if timed_out && !(last_status == "DONE"
+        || last_status.starts_with("FAILED")
+        || last_status.starts_with("ABORTED")) {
+        let _ = self.events.send(AgentEvent::Done {
+            wf_id: self.wf_id.clone(),
+            status: format!("TIMEOUT (300s)"),
+            summary: Some(format!("agent {role_display} exceeded 300s")),
+        });
+        "TIMEOUT (300s)".into()
+    } else {
+        last_status
+    };
 
-        TaskOutcome {
-            role_id, role_display,
-            status, summary,
-            text, elapsed_ms: start.elapsed().as_millis() as u64,
-            structured_verdict,
-        }
+    // v0.4.22 (event 000115): only BugHunter + Reviewer are
+    // expected to emit a verdict block. Chief / Planner /
+    // Worker / Reporter leave this None — the orchestrator
+    // only consults structured_verdict on critic outcomes
+    // (event 000112 emit + final terminal status mapping),
+    // and a non-critic with a verdict block is treated as
+    // advisory prose.
+    //
+    // We match on `role_id` (a `String` propagated up from
+    // `run_agent`) rather than `Role` because this fn
+    // `drive_single_agent` only receives the id — re-binding
+    // the Role would mean re-deciding a routing choice
+    // already made by `run_agent`'s caller. The id set is
+    // stable (see `Role::id` in agent-core/src/prompt).
+    let is_critic = role_id == "agent:critic:a" || role_id == "agent:critic:b";
+    let structured_verdict = if is_critic {
+        Some(
+            parse_verdict_from_text(&TaskOutcome {
+                role_id: role_id.clone(),
+                role_display: role_display.clone(),
+                status: status.clone(),
+                summary: summary.clone(),
+                text: text.clone(),
+                elapsed_ms: 0,
+                structured_verdict: None,
+            })
+            .1,
+        )
+    } else {
+        None
+    };
+
+    TaskOutcome {
+        role_id, role_display,
+        status, summary,
+        text, elapsed_ms: start.elapsed().as_millis() as u64,
+        structured_verdict,
+    }
     }
 
     /// Run the full 8-phase workflow. Returns the final summary
@@ -810,7 +905,7 @@ impl Orchestrator {
         let chief_clarify = self.run_agent(AgentRunSpec {
             role: Role::Chief,
             task: format!(
-                "用户需求:{}\n\n只做一件事: 1-3 句判断需求是否清楚。如果清楚, 直接说 OK 准备进入下一阶段; 如果不清楚, 追问 1-3 个关键问题。不要做规划, 不要做拆任务。",
+                "用户需求:{}\n\n只做一件事: 1-3 句判断需求是否清楚。\n如果清楚, 直接说 OK 准备进入下一阶段; 如果不清楚, 追问 1-3 个关键问题。\n不要做规划, 不要做拆任务。\n\nv0.4.22 (event 000118, fix 6): 当用户只说了一句很短的话 (例如 \"打开给我看看\" / \"运行上次的工作\" / \"查看项目根目录\"), 先用 1-2 次 grep/read 看一眼项目根目录 (README / package.json / 当前目录列表) 判断上下文, 再决定是追问还是直接 OK 进入 Phase 2。不要在没看上下文的情况下无脑追问。",
                 self.user_request,
             ),
             context: None,
@@ -1026,7 +1121,10 @@ impl Orchestrator {
         let delivery = self.run_agent(AgentRunSpec {
             role: Role::Chief,
             task: format!(
-                "用一段人话总结这次 workflow 的产出:\n- 用户需求:{}\n- 计划: {}\n- Worker 数量: {}\n- Critic 评审: A={}, B={}\n- 最终状态: PASS or REPAIR\n\n不要列代码, 不要列任务细节, 一段中文给用户看。",
+                "用 4-6 段中文给用户看这次 workflow 的产出。\
+                 每段先讲结果再讲关键证据, 不要列代码, 不要列任务细节, 段落之间留一行空行:\n\
+                 - 用户需求:{}\n- 计划:{}\n- Worker 数量:{}\n- Critic 评审: A={}, B={}\n- 最终状态: PASS or REPAIR\n\n\
+                 第一段先告诉用户「做了什么」, 第二段「关键证据」, 第三段「评审结论」, 后续段落补建议 / 风险 / 下一步。",
                 self.user_request,
                 plan.summary,
                 plan.tasks.len(),

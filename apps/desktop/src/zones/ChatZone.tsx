@@ -22,13 +22,44 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
 import { useAgentStream } from '../hooks/useAgentStream.js';
-import { getRoleResolveStatus, type RoleResolveStatus } from '../lib/api.js';
+import {
+  getRoleResolveStatus,
+  runAgentTask,
+  type ChatTurnMessage,
+  type RoleResolveStatus,
+} from '../lib/api.js';
 
 interface RoleSpec {
   id: string;
   /** i18n key suffix (e.g. "chief", "worker", "criticA") — the
    *  component resolves label + hint via t() at render time. */
   i18nKey: string;
+}
+
+// v0.4.22 (event 000118, fix 2): the bottom of ChatZone used
+// to have a giant empty gap below the collapsible logs —
+// the chairman asked us to fill it with two compact blocks:
+//   left  = 当前就绪 <当前角色名> (worker 不显示)
+//   right = 工具 (tool-call timeline)
+//
+// To render the left block with a real role name + status, we
+// accept a `activeAgent` prop describing which agent card is
+// currently driving the workflow (the chairman's directive is
+// that the user should see "what role is working right now"
+// without scrolling back to the dashboard). The App passes
+// null when no workflow is running OR when the active role is
+// the worker (which the chairman explicitly excluded).
+interface ActiveAgentInfo {
+  /** Short role id like 'chief' / 'critic-a' / 'critic-b' — the
+   *  App maps the PHASE → agent role, then ChatZone only
+   *  shows the block when this is one of the head roles. */
+  role: 'chief' | 'critic-a' | 'critic-b';
+  /** i18n label for the role (already translated by App). */
+  label: string;
+  /** status string used by the dashboard (idle / thinking / speaking). */
+  status: 'idle' | 'thinking' | 'speaking';
+  /** optional phase label e.g. "5-开发" to make the block self-contained. */
+  phaseLabel?: string;
 }
 
 /** BUG-FRONTEND-RT-4 (event 000030 follow-up): the role
@@ -53,15 +84,44 @@ export interface ChatZoneProps {
    * button can collapse the panel itself.
    */
   onCollapse?: () => void;
+  /**
+   * v0.4.22 (event 000118, fix 2): App.tsx passes the role the
+   * workflow is currently driving (chief / critic-a / critic-b).
+   * ChatZone renders "当前就绪: <role> · <status> · <phase>"
+   * in the gap below the input + logs. Null = no workflow, or
+   * worker — in either case the block is hidden so worker-only
+   * workflows don't get a noisy "ready" line.
+   */
+  activeAgent?: ActiveAgentInfo | null;
 }
 
-export function ChatZone({ onCollapse }: ChatZoneProps = {}) {
+export function ChatZone({ onCollapse, activeAgent = null }: ChatZoneProps = {}) {
   const { t } = useTranslation();
   const [task, setTask] = useState('');
   const [role, setRole] = useState<string>('agent:chief');
+  // v0.4.22 (event 000118, fix 6): two send modes.
+  //   - 'workflow': default; goes through the 8-phase orchestrator
+  //     (run_workflow). For new tasks the user wants the full
+  //     plan+critic+worker dispatch flow.
+  //   - 'chat': bypasses the orchestrator and runs a single
+  //     agent (run_agent_task). For quick back-and-forth like
+  //     "打开给我看看" — without this, even a single sentence
+  //     falls into Phase 1's clarification loop because the
+  //     chief gets a fresh LLM context with no memory.
+  const [mode, setMode] = useState<'workflow' | 'chat'>('workflow');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [resolve, setResolve] = useState<RoleResolveStatus | null>(null);
+  // v0.4.22 (event 000118, fix 6): rolling transcript of the
+  // current 对话 session. We append user + assistant turns on
+  // every send and pass `slice(-N)` (last N turns) to the
+  // backend so the agent has memory of the conversation. Reset
+  // when the user switches modes or hits 清空.
+  const [chatHistory, setChatHistory] = useState<ChatTurnMessage[]>([]);
+  // Bound the in-flight history so a long conversation can't
+  // blow past the model's context window. 12 turns × ~2K chars
+  // is roughly 24K tokens — well under the cheapest model.
+  const MAX_CHAT_HISTORY = 12;
 
   const { events, text, done, status, reset } = useAgentStream();
   const transcriptRef = useRef<HTMLDivElement>(null);
@@ -70,6 +130,24 @@ export function ChatZone({ onCollapse }: ChatZoneProps = {}) {
     () => events.filter((e) => e.kind === 'tool_started' || e.kind === 'tool_finished'),
     [events],
   );
+
+  // v0.4.22 (event 000118, fix 5): when phase 8 chief runs in
+  // ~5 seconds and emits one batch of TextDeltas that all
+  // land within a single React render, the user perceives
+  // "ChatZone 没动静" — the transcript appears empty until
+  // refresh. If we received a `done` event whose summary is
+  // non-empty AND we never accumulated any text_delta, fall
+  // back to displaying the summary so the chairman still
+  // sees the phase-8 report. Streaming text always wins;
+  // this is only the empty-text fallback.
+  const fallbackSummary = useMemo(() => {
+    if (text.length > 0) return null;
+    const lastDone = [...events].reverse().find((e) => e.kind === 'done');
+    if (lastDone && lastDone.kind === 'done' && lastDone.summary && lastDone.summary.trim().length > 0) {
+      return lastDone.summary;
+    }
+    return null;
+  }, [events, text]);
 
   // v0.4.20 (event 000056): the scheduler emits a special
   // AgentEvent::Done { status: "QUOTA_NUDGE:<role>:<model>" } when
@@ -121,33 +199,75 @@ export function ChatZone({ onCollapse }: ChatZoneProps = {}) {
     return () => { cancelled = true; };
   }, [role]);
 
+  // v0.4.22 (event 000118, fix 6): when the stream closes
+  // with `done`, append an assistant turn to chatHistory so
+  // the next 对话-mode send has it in memory. We use the
+  // streamed `text` if it's non-empty, else fall back to the
+  // `summary` (event 000118 fix 5 path). Skipped in workflow
+  // mode because the orchestrator builds its own context.
+  useEffect(() => {
+    if (mode !== 'chat') return;
+    if (!done) return;
+    const assistantTurn = text.trim() || (fallbackSummary ?? '').trim();
+    if (!assistantTurn) return;
+    setChatHistory((h) => {
+      // Avoid duplicate consecutive assistant turns if the
+      // effect re-fires for the same `done` (e.g. StrictMode).
+      const last = h[h.length - 1];
+      if (last && last.role === 'assistant' && last.content === assistantTurn) return h;
+      const next = [...h, { role: 'assistant' as const, content: assistantTurn }];
+      return next.slice(-MAX_CHAT_HISTORY);
+    });
+  }, [done, mode, text, fallbackSummary]);
+
   const send = useCallback(async () => {
     const trimmed = task.trim();
     if (!trimmed || sending) return;
     setError(null);
     reset();
     setSending(true);
+
+    // v0.4.22 (event 000118, fix 6): snapshot chatHistory BEFORE
+    // we append the new user turn so the backend receives the
+    // conversation as it stood a moment ago (avoids an
+    // off-by-one where the user's current message appears in
+    // both the chat_history slice and the task arg).
+    const historyToSend = chatHistory.slice(-MAX_CHAT_HISTORY);
+
     try {
-      // v0.4.22 (event 000068): the legacy run_agent_task only
-      // ran a single agent. The spec (history/PROJECT_SPEC.md)
-      // requires an 8-phase workflow with critic reviews +
-      // worker dispatch. Default to run_workflow; users can
-      // still fall back to run_agent_task for single-agent chat
-      // (the role picker survives for that case).
-      const ok = await invoke<{ ok: boolean; error?: string; role?: string; hint?: string; status?: string; wf_id?: string; summary?: string }>(
-        'run_workflow',
-        { body: { task: trimmed } },
-      );
-      if (!ok?.ok) {
-        // The backend may return either 5xx-shaped envelope
-        // (status: 503, ok:false, error) or a thrown Err (Promise
-        // reject — caught by the catch below). Show the most
-        // informative line available.
-        const tail = ok?.error
-          ? `${ok.error}${ok.hint ? ` — ${ok.hint}` : ''}`
-          : ok?.status ?? '运行时未确认成功';
-        setError(tail);
+      if (mode === 'chat') {
+        // Single-agent chat: bypass orchestrator, send memory.
+        // The chairman's fix6 example: "打开给我看看" goes
+        // straight to /api/run_task with the prior turns; the
+        // chief reads README and answers.
+        await runAgentTask({
+          task: trimmed,
+          role,
+          chat_history: historyToSend,
+        });
+      } else {
+        // 8-phase workflow (default). chat_history is irrelevant
+        // here — phase 1 builds its own context from user_request.
+        const ok = await invoke<{ ok: boolean; error?: string; role?: string; hint?: string; status?: string; wf_id?: string; summary?: string }>(
+          'run_workflow',
+          { body: { task: trimmed } },
+        );
+        if (!ok?.ok) {
+          const tail = ok?.error
+            ? `${ok.error}${ok.hint ? ` — ${ok.hint}` : ''}`
+            : ok?.status ?? '运行时未确认成功';
+          setError(tail);
+        }
       }
+      // v0.4.22 (event 000118, fix 6): append the user turn so
+      // the next 对话-mode send has it in memory. We append
+      // the assistant turn in a separate effect keyed on `done`
+      // so we capture the streamed summary even when the
+      // backend didn't stream text.
+      setChatHistory((h) => {
+        const next = [...h, { role: 'user' as const, content: trimmed }];
+        return next.slice(-MAX_CHAT_HISTORY);
+      });
     } catch (e) {
       // Async pipe failure (server not reachable, panic, etc.).
       const msg = typeof e === 'string' ? e : (e as Error).message;
@@ -157,7 +277,7 @@ export function ChatZone({ onCollapse }: ChatZoneProps = {}) {
     } finally {
       setSending(false);
     }
-  }, [task, sending, reset, role]);
+  }, [task, sending, reset, role, mode, chatHistory]);
 
   const onSubmit = useCallback(
     (e: FormEvent) => {
@@ -215,6 +335,41 @@ export function ChatZone({ onCollapse }: ChatZoneProps = {}) {
       {/* Controls — only the role picker remains; everything else
           moved to Settings. */}
       <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border bg-surface-2/60 px-4 py-2 text-xs">
+        {/* v0.4.22 (event 000118, fix 6): mode toggle. Default
+            is 'workflow' (preserves the existing 8-phase flow).
+            Switching to 'chat' sends straight to /api/run_task
+            with chat_history so quick back-and-forth doesn't
+            fall into Phase 1's clarification loop. */}
+        <div className="inline-flex overflow-hidden rounded border border-border text-[11px]" role="group" aria-label={t('chatZone.modeLabel', { defaultValue: '发送模式' })}>
+          <button
+            type="button"
+            onClick={() => setMode('workflow')}
+            disabled={sending}
+            className={
+              mode === 'workflow'
+                ? 'bg-chief px-2 py-1 font-semibold text-white disabled:opacity-50'
+                : 'bg-surface-1 px-2 py-1 text-text-secondary hover:bg-surface-3 disabled:opacity-50'
+            }
+            aria-pressed={mode === 'workflow'}
+            title={t('chatZone.modeWorkflowHint', { defaultValue: '8 阶段编排, 主理+策划+找茬+实施+交付, 适合正式任务' })}
+          >
+            {t('chatZone.modeWorkflow', { defaultValue: '启动工作流' })}
+          </button>
+          <button
+            type="button"
+            onClick={() => setMode('chat')}
+            disabled={sending}
+            className={
+              mode === 'chat'
+                ? 'bg-chief px-2 py-1 font-semibold text-white disabled:opacity-50'
+                : 'bg-surface-1 px-2 py-1 text-text-secondary hover:bg-surface-3 disabled:opacity-50'
+            }
+            aria-pressed={mode === 'chat'}
+            title={t('chatZone.modeChatHint', { defaultValue: '单角色对话, 主理有记忆, 适合追问/查资料' })}
+          >
+            {t('chatZone.modeChat', { defaultValue: '对话' })}
+          </button>
+        </div>
         <label className="flex items-center gap-1">
           <span className="text-text-secondary">{t('chatZone.role', { defaultValue: '角色' })}</span>
           <select
@@ -318,15 +473,32 @@ export function ChatZone({ onCollapse }: ChatZoneProps = {}) {
           className="flex min-h-0 flex-col gap-2 overflow-y-auto rounded border border-border bg-surface-2 p-3"
           aria-live="polite"
         >
-          {text.length === 0 && !sending && (
-            <p className="text-xs text-text-secondary">{t('chatZone.waiting', { defaultValue: '等待输入…（输出会在这里流式显示）' })}</p>
+{text.length === 0 && !sending && !fallbackSummary && (
+            <p className="text-xs text-text-secondary">{t('chatZone.waiting', { defaultValue: '等待输入…（输出会在这里流式显示）'})}</p>
           )}
           {text && (
             <pre className="whitespace-pre-wrap break-words font-sans text-sm leading-relaxed text-text-primary">
               {text}
             </pre>
           )}
-          {sending && text.length === 0 && (
+          {!text && fallbackSummary && (
+            // v0.4.22 (event 000118, fix 5): empty-stream
+            // fallback. Phase 8 chief can complete in ~5s
+            // with the text arriving faster than the React
+            // render cycle; without this the transcript
+            // looks blank even though the workflow finished.
+            // The badge tells the chairman this is the
+            // post-hoc snapshot, not live streaming.
+            <>
+              <p className="text-[10px] uppercase tracking-wide text-text-tertiary">
+                {t('chatZone.summaryFallback', { defaultValue: '汇报快照（未流式）' })}
+              </p>
+              <pre className="whitespace-pre-wrap break-words font-sans text-sm leading-relaxed text-text-primary">
+                {fallbackSummary}
+              </pre>
+            </>
+          )}
+          {sending && text.length === 0 && !fallbackSummary && (
             <p className="text-xs italic text-text-secondary">{t('chatZone.waitingModel', { defaultValue: '… 正在等待模型响应' })}</p>
           )}
         </div>
@@ -368,6 +540,102 @@ export function ChatZone({ onCollapse }: ChatZoneProps = {}) {
           {events.length === 0 ? t('chatZone.noLogs', { defaultValue: '没有日志。' }) : null}
         </pre>
       </details>
+
+      {/* v0.4.22 (event 000118, fix 2): fill the empty space
+          below the collapsible logs with two compact blocks:
+
+            left  = 当前就绪 + 当前工作角色（仅 chief / critic-a /
+                    critic-b；worker 按主席指示不展示）
+            right = 工具 (tool-call timeline; reuses toolEvents so
+                    the live transcript and the bottom panel agree)
+
+          Each block is a fixed-height scroll region so the
+          ChatZone panel height stays bounded and the empty
+          space above this row is closed. */}
+      <div
+        className="grid shrink-0 grid-cols-1 gap-2 border-t border-border bg-surface-1 px-4 py-2 lg:grid-cols-2"
+        aria-label="当前就绪与工具"
+      >
+        {activeAgent ? (
+          <div className="flex min-h-[88px] flex-col gap-1 overflow-y-auto rounded border border-border bg-surface-2 p-2">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[10px] uppercase tracking-wide text-text-secondary">
+                {t('chatZone.readyTitle', { defaultValue: '当前就绪' })}
+              </span>
+              {activeAgent.phaseLabel && (
+                <span className="font-mono text-[10px] text-text-secondary">
+                  {activeAgent.phaseLabel}
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <span
+                className={
+                  activeAgent.status === 'thinking'
+                    ? 'rounded bg-chief/20 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-chief'
+                    : activeAgent.status === 'speaking'
+                      ? 'rounded bg-status-done/20 px-1.5 py-0.5 font-mono text-[11px] font-semibold text-status-done'
+                      : 'rounded bg-surface-3 px-1.5 py-0.5 font-mono text-[11px] text-text-secondary'
+                }
+              >
+                {activeAgent.label}
+              </span>
+              <span className="text-[11px] text-text-secondary">
+                {t(`chatZone.agentStatus.${activeAgent.status}`, {
+                  defaultValue:
+                    activeAgent.status === 'thinking'
+                      ? '思考中…'
+                      : activeAgent.status === 'speaking'
+                        ? '发言中…'
+                        : '空闲',
+                })}
+              </span>
+            </div>
+            <p className="text-[11px] leading-snug text-text-tertiary">
+              {t('chatZone.readyHint', {
+                defaultValue: '当主理 / 找茬 / 审查在动时这里实时显示当前角色与阶段。',
+              })}
+            </p>
+          </div>
+        ) : (
+          // No active head-role → worker-only or no workflow.
+          // Chairman asked us to NOT show "current work" when the
+          // worker is the one moving. Render a single-cell
+          // placeholder so the grid still reserves the column.
+          <div className="flex min-h-[88px] items-center justify-center rounded border border-dashed border-border bg-surface-2 p-2 text-[11px] text-text-secondary">
+            {t('chatZone.readyEmpty', { defaultValue: '（当前阶段无主理角色在工作）' })}
+          </div>
+        )}
+        <div className="flex min-h-[88px] flex-col gap-1 overflow-y-auto rounded border border-border bg-surface-2 p-2" aria-label="工具">
+          <div className="mb-1 text-[10px] uppercase tracking-wide text-text-secondary">
+            {t('chatZone.tools', { defaultValue: '工具' })}{' '}
+            <span className="text-text-tertiary">
+              ({toolEvents.length === 0
+                ? t('chatZone.toolsEmpty', { defaultValue: '（暂无工具调用）' })
+                : toolEvents.length}
+              )
+            </span>
+          </div>
+          {toolEvents.length === 0 ? null : (
+            <ol className="space-y-1 text-[11px]">
+              {toolEvents.slice(-8).reverse().map((ev, i) => (
+                <li key={i} className="rounded border border-border bg-surface-1 px-2 py-1 font-mono">
+                  {ev.kind === 'tool_started' && (
+                    <span className="break-all">
+                      ▶ {String(ev.call.name)} {String((ev.call.args as Record<string, unknown>)?.['command'] ?? '').slice(0, 60)}
+                    </span>
+                  )}
+                  {ev.kind === 'tool_finished' && (
+                    <span>
+                      ✓ {String(ev.preview).slice(0, 60)} ({String(ev.elapsed_ms)}ms)
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ol>
+          )}
+        </div>
+      </div>
     </section>
   );
 }

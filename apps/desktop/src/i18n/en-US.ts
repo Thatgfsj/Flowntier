@@ -168,6 +168,9 @@ const enUS: Translations = {
   'settings.models.thinking.low': 'Low',
   'settings.models.thinking.medium': 'Medium',
 'settings.models.thinking.high': 'High',
+  // v0.4.22 (event 000118, fix 4): explicit "Default" option
+  // so the chairman can skip thinking_strength entirely.
+  'settings.models.thinking.default': 'Default',
   'settings.models.manualAdd.title': 'Add model manually',
   'settings.models.manualAdd.id': 'Model ID',
   'settings.models.manualAdd.displayName': 'Display name',

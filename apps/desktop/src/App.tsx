@@ -193,6 +193,13 @@ export function App() {
   // panel; the last final-review entry wins the binding.
   const [reviewerVerdicts, setReviewerVerdicts] = useState<ReviewerVerdictEvent[]>([]);
   const [finalReport, setFinalReport] = useState<string | null>(null);
+  // v0.4.22 (event 000118, fix 3): per-task worker status map,
+  // keyed by the orchestrator's `t{idx}` task id. Phase 5 now
+  // tags every worker event with the id so the dashboard can
+  // render N cards (one per plan task) instead of collapsing
+  // them into a single "worker" status.
+  const [workerTaskStatus, setWorkerTaskStatus] = useState<Record<string, AgentStatus>>({});
+  const [workerTaskTitles, setWorkerTaskTitles] = useState<Record<string, string>>({});
   // v0.4.22 (event 000095): the orchestrator emits a Done
   // event with status='FAILED: <reason>' when an agent can't
   // reach the provider (e.g. 401 from Mimo). We capture the
@@ -207,6 +214,11 @@ export function App() {
   const [selectedTask, setSelectedTask] = useState<string | null>(null);
   const [showPlanGraph, setShowPlanGraph] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
+  // v0.4.22 (event 000118, fix 7): Stop button pending state.
+  // True between the user confirming the modal and the backend
+  // ack'ing the cancel. The TopBar swaps label to "停止中…" and
+  // disables itself so a double-click doesn't re-fire.
+  const [cancelling, setCancelling] = useState(false);
   const busyRef = useRef(false);
 
   // v0.4.22 (event 000118): poll /api/workflow/{id} so the workbench
@@ -611,9 +623,48 @@ export function App() {
         setAgentStatus((prev) => ({ ...prev, worker: 'thinking' }));
       }
     }
+    // v0.4.22 (event 000118, fix 3): when Phase 5 dispatches
+    // N workers in parallel, every TextDelta / ToolStarted /
+    // ToolFinished / TokenUsage event now carries a
+    // `task_id` (`t0`, `t1`, …). Use it to drive one
+    // per-task status cell so the dashboard renders N
+    // worker cards instead of collapsing them.
+    if (event.kind === 'text_delta' && event.task_id) {
+      setWorkerTaskStatus((prev) => ({ ...prev, [event.task_id!]: 'speaking' }));
+    } else if (event.kind === 'tool_started' && event.task_id) {
+      setWorkerTaskStatus((prev) => ({ ...prev, [event.task_id!]: 'thinking' }));
+    } else if (event.kind === 'tool_finished' && event.task_id) {
+      setWorkerTaskStatus((prev) => ({ ...prev, [event.task_id!]: 'speaking' }));
+    }
+    // v0.4.22 (event 000118, fix 7): treat `done` events
+    // with `status` starting with `ABORTED` / `FAILED` as the
+    // workflow's terminal signal. Reset busy / show a banner
+    // so the chairman sees the cancel actually took effect
+    // (Tauri cancel_workflow -> runtime fires
+    // CancellationToken -> orchestrator sends Done{ABORTED}).
+    if (event.kind === 'done') {
+      const aborted = event.status.startsWith('ABORTED') || event.status.startsWith('FAILED');
+      if (aborted && busyRef.current) {
+        busyRef.current = false;
+        setBusy(false);
+        setCompleted(true);
+        setFinalReport(
+          event.summary
+            ?? (event.status.startsWith('ABORTED')
+                ? t('app.cancelledByUser', { defaultValue: '已中止' })
+                : t('workflow.verdict.failed', { defaultValue: '工作流失败' })),
+        );
+      }
+    }
     if (event.kind === 'task_status' && event.task_id) {
       const newState = event.task_status;
       const summary = event.task_summary;
+      // v0.4.22 (event 000118, fix 3): capture the plan-task
+      // title keyed by the orchestrator's `t{idx}` so the new
+      // worker cards can show "Worker · t0: <title>".
+      if (event.task_title) {
+        setWorkerTaskTitles((prev) => ({ ...prev, [event.task_id!]: event.task_title! }));
+      }
       setTasks((prev) => {
         const idx = prev.findIndex((t) => t.id === event.task_id);
         if (idx >= 0) {
@@ -635,6 +686,34 @@ export function App() {
     }
   };
 
+  // v0.4.22 (event 000118, fix 7): TopBar Stop button handler.
+// Fires after the user confirms the modal in TopBar.tsx.
+// Cancels the running workflow via the pipe-server's
+// /api/workflow/cancel route, then optimistically resets the
+// busy flag so the UI doesn't stay frozen if the workflow's
+// terminal Done event is delayed.
+const handleCancel = async () => {
+  if (!currentWfId || cancelling) return;
+  setCancelling(true);
+  try {
+    const { cancelWorkflow } = await import('./lib/api.js');
+    await cancelWorkflow(currentWfId);
+  } catch (e) {
+    // Cancellation is best-effort. If the RPC fails (server
+    // already shut down the workflow, network blip, etc.) we
+    // still want to clear busy so the UI is responsive.
+    console.warn('[flowntier] cancel_workflow failed:', e);
+  } finally {
+    // Optimistically unblock the UI. The real Done{ABORTED}
+    // event will arrive within ~1s and clear `currentWfId` +
+    // set final report; if it never arrives (true hang) the
+    // user can still click again — at worst nothing happens.
+    setBusy(false);
+    busyRef.current = false;
+    setCancelling(false);
+  }
+};
+
   const startRealWorkflow = async (text: string) => {
     busyRef.current = true;
     setBusy(true);
@@ -645,6 +724,11 @@ export function App() {
     // v0.4.22 (event 000112): also drop the verdict log.
     setReviewerVerdicts([]);
     setFinalReport(null);
+    // v0.4.22 (event 000118, fix 3): clear per-task worker
+    // status so the dashboard's worker cards don't bleed
+    // state from the previous workflow.
+    setWorkerTaskStatus({});
+    setWorkerTaskTitles({});
     setWorkflowError(null);
     setActivePhase(0);
     setPhaseStates({ ...PHASE_STATE });
@@ -846,6 +930,13 @@ export function App() {
         onChatClick={() => setChatOpen((v) => !v)}
         chatOpen={chatOpen}
         updateBanner={updateBanner}
+        // v0.4.22 (event 000118, fix 7): Stop button. Only
+        // render the handler when busy AND we have a wf_id so
+        // the modal stops showing once the workflow finishes.
+        // Spread conditionally because exactOptionalPropertyTypes
+        // rejects `onCancel={undefined}`.
+        {...(busy && currentWfId ? { onCancel: handleCancel } : {})}
+        cancelling={cancelling}
         onUpdateClick={() => {
           // The user clicked the "update available" banner. Re-check
           // (in case cache expired) then install. installUpdate()
@@ -874,6 +965,8 @@ export function App() {
             criticAStatus={agentStatusToRole(agentStatus['critic-a'])}
             criticBStatus={agentStatusToRole(agentStatus['critic-b'])}
             workerStatus={agentStatusToRole(agentStatus.worker)}
+            workerTaskStatus={workerTaskStatus}
+            workerTaskTitles={workerTaskTitles}
           />
         </aside>
 
@@ -1145,7 +1238,55 @@ export function App() {
       >
         {chatOpen ? (
           <div className="h-full w-full">
-            <ChatZone onCollapse={() => setChatOpen(false)} />
+            <ChatZone
+              onCollapse={() => setChatOpen(false)}
+              // v0.4.22 (event 000118, fix 2): the bottom
+              // "当前就绪 + 工具" block needs to know which head
+              // role (chief / critic-a / critic-b) is currently
+              // driving the workflow. We derive it from the
+              // current phase + the role agentStatus. Per the
+              // chairman: don't surface the worker-only case.
+              activeAgent={(() => {
+                if (!busy) return null;
+                const headRoles: ReadonlyArray<{
+                  role: 'chief' | 'critic-a' | 'critic-b';
+                  i18nKey: 'chief' | 'criticA' | 'criticB';
+                  phases: ReadonlyArray<Phase['name']>;
+                }> = [
+                  { role: 'chief', i18nKey: 'chief', phases: ['requirement', 'plan', 'dispatch', 'repair', 'delivery'] },
+                  { role: 'critic-a', i18nKey: 'criticA', phases: ['plan-review', 'final-review'] },
+                  { role: 'critic-b', i18nKey: 'criticB', phases: ['plan-review', 'final-review'] },
+                ];
+                for (const def of headRoles) {
+                  // Find the first phase in `def.phases` that's
+                  // currently `active`; that phase's label is
+                  // what the chairman sees in the "当前就绪"
+                  // block header.
+                  let activePhaseLabel: string | null = null;
+                  for (const p of def.phases) {
+                    if (phaseStates[p] === 'active') {
+                      activePhaseLabel = PHASES.find((pp) => pp.name === p)?.label ?? p;
+                      break;
+                    }
+                  }
+                  if (!activePhaseLabel) continue;
+                  // Map AgentStatus ('idle' | 'thinking' | 'speaking'
+                  // | 'error') onto ActiveAgentInfo's narrower
+                  // union. ChatZone only cares about live activity,
+                  // so collapse 'error' -> 'idle' for display.
+                  const raw = agentStatus[def.role];
+                  const status: 'idle' | 'thinking' | 'speaking' =
+                    raw === 'thinking' || raw === 'speaking' ? raw : 'idle';
+                  return {
+                    role: def.role,
+                    label: t(`chatZone.roles.${def.i18nKey}`),
+                    status,
+                    phaseLabel: activePhaseLabel,
+                  };
+                }
+                return null;
+              })()}
+            />
           </div>
         ) : (
           <button
