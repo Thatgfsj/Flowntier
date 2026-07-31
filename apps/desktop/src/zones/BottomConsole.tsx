@@ -40,7 +40,12 @@ export function BottomConsole({ events }: BottomConsoleProps) {
       aria-label={t('bottomConsole.tabs.log')}
     >
       {visible.length === 0 ? (
-        <div className="p-2 text-text-secondary">{t('bottomConsole.empty.log')}</div>
+        // v0.4.24 (event 000119): chairman explicitly asked to
+        // drop the "没有日志" placeholder. The empty panel
+        // shouldn't show any "fake content" — an empty region
+        // is clearer than a single line telling the user
+        // nothing is happening.
+        null
       ) : (
         <ol className="flex flex-col gap-0.5">
           {visible.map((e, i) => {

@@ -742,32 +742,14 @@ export function ChatZone({ onCollapse, activeAgent = null }: ChatZoneProps = {})
           // still reserves the column for layout stability.
           <div className="min-h-[56px] rounded border border-transparent p-2" />
         )}
-        <div className="flex min-h-[56px] flex-col gap-1 overflow-y-auto rounded border border-border bg-surface-2 p-2" aria-label="工具">
-          <div className="mb-1 text-[10px] uppercase tracking-wide text-text-secondary">
-            {t('chatZone.tools', { defaultValue: '工具' })}{' '}
-            <span className="text-text-tertiary">
-              ({toolEvents.length})
-            </span>
-          </div>
-          {toolEvents.length === 0 ? null : (
-            <ol className="space-y-1 text-[11px]">
-              {toolEvents.slice(-8).reverse().map((ev, i) => (
-                <li key={i} className="rounded border border-border bg-surface-1 px-2 py-1 font-mono">
-                  {ev.kind === 'tool_started' && (
-                    <span className="break-all">
-                      ▶ {String(ev.call.name)} {String((ev.call.args as Record<string, unknown>)?.['command'] ?? '').slice(0, 60)}
-                    </span>
-                  )}
-                  {ev.kind === 'tool_finished' && (
-                    <span>
-                      ✓ {String(ev.preview).slice(0, 60)} ({String(ev.elapsed_ms)}ms)
-                    </span>
-                  )}
-                </li>
-              ))}
-            </ol>
-          )}
-        </div>
+        {/* v0.4.24 (event 000119): removed the secondary 工具
+            summary panel here. The full tool timeline is already
+            rendered in the transcript body above (with the count
+            in the header), so a second "{toolEvents.length}" badge
+            + duplicated list here was just visual noise. The grid
+            stays 2-column so the 当前就绪 cell still aligns with
+            other 2-column blocks in the app. */}
+        <div className="min-h-[56px] rounded border border-transparent p-2" aria-hidden="true" />
       </div>
     </section>
   );

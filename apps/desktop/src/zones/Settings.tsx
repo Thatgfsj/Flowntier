@@ -736,7 +736,20 @@ export function Settings({ open, onClose, workdir }: SettingsProps) {
                     <RoleAssignmentCard
                       key={r.role}
                       role={r}
-                      availableModels={snapshot.available_models}
+                      // v0.4.24 (event 000119): the backend
+                      // /v1/models endpoint sometimes returns rows
+                      // with empty `model` / `provider` / both
+                      // `display_name` AND `provider_display`. Those
+                      // rendered as "(unnamed provider) · (unnamed
+                      // model)" in the dropdown — visually noise that
+                      // the user can't act on. Filter them out so the
+                      // selector only shows entries the user can
+                      // actually pick.
+                      availableModels={snapshot.available_models.filter((m) => {
+                        const id = safeStr(m.model);
+                        const prov = safeStr(m.provider) || safeStr(m.provider_display);
+                        return id.length > 0 && prov.length > 0;
+                      })}
                       saving={saving}
                       onDefaultChange={(model) => void setRoleDefault(r.role, model)}
                       onFallbackChange={(chain) => void setRoleFallback(r.role, chain)}
