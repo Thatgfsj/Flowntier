@@ -1,114 +1,530 @@
-//! v0.4.22 (event 000080): the chief app's developer-mode
-//! log system. Per chairman: "日志的功能让我们设置为开发
-//! 环节的功能,你内置出来方便删" — log collection is
-//! explicitly a development-cycle feature, with a
-//! built-in path for the chairman to delete the log file
-//! when they're done diagnosing.
+//! v0.4.26 (event 000119): per-role log routing.
 //!
-//! Three pieces:
+//! Chairman's directive (event 000119): "日志详细写一下, 在桌面
+//! 新建一个文件夹, 给所有角色的日志跟系统的日志分开写" — keep
+//! per-role traces separate from system events, and put them in a
+//! dedicated folder on the user's desktop so they're easy to find
+//! (and easy to delete when the dev cycle is done).
 //!
-//! 1. **Default log file location** — `~/Desktop/Flowntier.log`
-//!    on Windows (the chairman's main dev box), `~/Flowntier.log`
-//!    elsewhere. Can be overridden via `FLWNTIER_LOG_FILE=<path>`
-//!    env var. Set `FLWNTIER_LOG_FILE=0` (zero) to disable file
-//!    logging entirely — the runtime still emits tracing
-//!    events to stdout but nothing hits the disk.
+//! ## Layout
 //!
-//! event 000108: `read_tail` / `clear_log` accept an optional
-//! `path` argument so unit tests can target a tmp file instead
-//! of the chairman's real `~/Desktop/Flowntier.log`. The HTTP
-//! handlers continue to use `None` (the resolved default path).
+//! On Windows, the default log directory is
+//! `~/Desktop/Flowntier/logs/`. Inside that directory we emit
+//! one file per role + one for the system + one merged
+//! "everything" file:
 //!
-//! 2. **Two HTTP endpoints** on the pipe-server JSON-RPC
-//!    bridge: `GET /api/logs/get?tail=N` (last N lines, default
-//!    200) and `POST /api/logs/clear` (truncate to zero bytes
-//!    and emit a sentinel "[logs cleared at <ts>]" so the
-//!    chairman can tell where the next session starts). The
-//!    endpoints are gated by `FLWNTIER_LOG_API=1` (default
-//!    off) so production / released builds don't expose a
-//!    file-read surface. The Tauri shell sets this env var
-//!    for chairman-side debug builds.
+//! ```text
+//! ~/Desktop/Flowntier/logs/
+//!   chief.log       — events emitted while driving  `agent:chief`
+//!                     (主理: requirement / plan / dispatch /
+//!                     repair / delivery phases).
+//!   critic-a.log    — events while driving `agent:critic:a`
+//!                     (找茬 — bug / security review).
+//!   critic-b.log    — events while driving `agent:critic:b`
+//!                     (架构审查 — code quality review).
+//!   worker.log      — events while driving `agent:worker` (all
+//!                     N Phase-5 workers merged into one file so
+//!                     the chairman can grep the multi-worker
+//!                     stream in chronological order).
+//!   system.log      — orchestrator phase transitions, dispatch
+//!                     routing, HTTP server start/stop, quota
+//!                     scheduler, panics.
+//!   runtime.log     — every event regardless of target. Useful
+//!                     as a single-file fallback / chronological
+//!                     view of the whole session.
+//! ```
 //!
-//! 3. **Tauri commands** in `apps/desktop/src-tauri/src/lib.rs`
-//!    that wrap the HTTP endpoints so the Settings panel
-//!    can show a "View log" / "Clear log" / "Open log
-//!    file location" button group. The settings panel
-//!    surfaces this only when `FLWNTIER_LOG_API=1`.
+//! ## Routing
 //!
-//! ## When the chairman says "delete the log"
+//! tracing-subscriber lets us stack layers, each with its own
+//! `Filter` + `MakeWriter`. We attach 7 layers:
+//!   1. stderr          — every event (live console for the
+//!                        `pnpm tauri:dev` process).
+//!   2. chief.log       — `target == "chief"` (event 000119 — the
+//!                        orchestrator's `drive_single_agent` now
+//!                        emits role-specific targets so each
+//!                        file gets only its author's events).
+//!   3. critic-a.log    — `target == "critic-a"`.
+//!   4. critic-b.log    — `target == "critic-b"`.
+//!   5. worker.log      — `target == "worker"`.
+//!   6. system.log      — `target in {pipe_server, dispatcher,
+//!                        orchestrator, quota, pipe_server::scheduler,
+//!                        flowntier_shell, tauri_ipc}`.
+//!   7. runtime.log     — every event.
 //!
-//! The point of this design is that the chairman can scrub
-//! the log without it being a footgun. Three ways:
-//!   a. `POST /api/logs/clear` (truncate to 0, write a
-//!      sentinel line, keep the file open for further writes).
-//!   b. `Settings → Logs → Clear` button (Tauri shell).
-//!   c. `rm ~/Desktop/Flowntier.log` (manual, the file is
-//!      recreated on the next runtime start since we
-//!      always open in append mode).
-//! None of these are silent: the log file's path is
-//! available in the Settings panel and via
-//! `GET /health` (the runtime's `version` field) for the
-//! chairman to confirm the scrub worked.
+//! Each file layer is paired with a small `NullWriter` that
+//! drops bytes — we use that when an individual file open
+//! fails (e.g. disk full mid-session) so the rest of the
+//! routing stays alive.
+//!
+//! ## Backwards-compatible env vars
+//!
+//! - `FLWNTIER_LOG_DIR=<dir>` — override the per-role directory.
+//! - `FLWNTIER_LOG_FILE=<path>` — legacy single-file mode. When
+//!   set, we ignore `FLWNTIER_LOG_DIR` and write the whole
+//!   stream to that one file (chairman's old grep scripts keep
+//!   working).
+//! - `FLWNTIER_LOG_FILE=0` — disable file logging entirely.
+//! - `FLWNTIER_LOG_API=1` — expose the legacy HTTP-log endpoints
+//!   (`GET /api/logs/get`, `POST /api/logs/clear`). Default off.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-/// Default log file path: chairman's desktop on Windows,
-/// $HOME on Linux/Mac. May be overridden by the
-/// `FLWNTIER_LOG_FILE` env var. The runtime emits a
-/// `tracing::info!(path = %log_file, "log file")` line
-/// at startup so the chairman can grep the log to see
-/// where it's writing.
-pub fn default_log_path() -> PathBuf {
+// Canonical targets used by the rest of the codebase. Keep
+// in sync with the `target: "…"` strings emitted by the
+// orchestrator / runtime binary.
+pub const TARGET_CHIEF: &str = "chief";
+pub const TARGET_CRITIC_A: &str = "critic-a";
+pub const TARGET_CRITIC_B: &str = "critic-b";
+pub const TARGET_WORKER: &str = "worker";
+
+/// v0.4.26 (event 000119): per-role log helper.
+///
+/// `tracing::info!(target: $t, ...)` requires `$t` to be a
+/// compile-time string literal because the macro expands the
+/// target into a `static __CALLSITE`. Runtime `&'static str`
+/// doesn't satisfy that. So we use a `match` to pick the
+/// right literal at the call site.
+///
+/// Usage:
+/// ```ignore
+/// role_info!(orch, role_id, "message {x}", x = 1);
+/// ```
+///
+/// Expands to the right `info!(target: "chief", ...)` etc.
+#[macro_export]
+macro_rules! role_info {
+    ($self:expr, $role_id:expr, $($arg:tt)+) => {{
+        let __role = $role_id.as_str();
+        match __role {
+            "agent:chief" => {
+                tracing::info!(target: $crate::logs::TARGET_CHIEF, $($arg)+)
+            }
+            "agent:critic:a" => {
+                tracing::info!(target: $crate::logs::TARGET_CRITIC_A, $($arg)+)
+            }
+            "agent:critic:b" => {
+                tracing::info!(target: $crate::logs::TARGET_CRITIC_B, $($arg)+)
+            }
+            "agent:worker" => {
+                tracing::info!(target: $crate::logs::TARGET_WORKER, $($arg)+)
+            }
+            // planner / reporter / unknown -> chief.log (they
+            // run inside the chief's pipeline).
+            _ => {
+                tracing::info!(target: $crate::logs::TARGET_CHIEF, $($arg)+)
+            }
+        }
+    }};
+}
+
+/// Like `role_info!` but for `warn!`.
+#[macro_export]
+macro_rules! role_warn {
+    ($self:expr, $role_id:expr, $($arg:tt)+) => {{
+        let __role = $role_id.as_str();
+        match __role {
+            "agent:chief" => {
+                tracing::warn!(target: $crate::logs::TARGET_CHIEF, $($arg)+)
+            }
+            "agent:critic:a" => {
+                tracing::warn!(target: $crate::logs::TARGET_CRITIC_A, $($arg)+)
+            }
+            "agent:critic:b" => {
+                tracing::warn!(target: $crate::logs::TARGET_CRITIC_B, $($arg)+)
+            }
+            "agent:worker" => {
+                tracing::warn!(target: $crate::logs::TARGET_WORKER, $($arg)+)
+            }
+            _ => {
+                tracing::warn!(target: $crate::logs::TARGET_CHIEF, $($arg)+)
+            }
+        }
+    }};
+}
+
+const SYSTEM_TARGETS: &[&str] = &[
+    "pipe_server",
+    "dispatcher",
+    "orchestrator",
+    "quota",
+    "pipe_server::scheduler",
+    "flowntier_shell",
+    "tauri_ipc",
+];
+
+/// Default log directory (event 000119). Replaces the legacy
+/// `default_log_path() == ~/Desktop/Flowntier.log`.
+pub fn default_log_dir() -> PathBuf {
     let home = std::env::var_os("USERPROFILE")
         .or_else(|| std::env::var_os("HOME"))
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."));
     if cfg!(target_os = "windows") {
-        home.join("Desktop").join("Flowntier.log")
+        home.join("Desktop").join("Flowntier").join("logs")
     } else {
-        home.join("Flowntier.log")
+        home.join("Flowntier").join("logs")
     }
 }
 
-/// Resolve the log file path. `FLWNTIER_LOG_FILE=0` disables
-/// file logging (returns None). Any other value is the
-/// explicit path.
-pub fn resolve_log_path() -> Option<PathBuf> {
+/// Resolve the log directory per the env vars. Returns None if
+/// file logging is disabled (`FLWNTIER_LOG_FILE=0`).
+pub fn resolve_log_dir() -> Option<PathBuf> {
+    if let Ok(v) = std::env::var("FLWNTIER_LOG_FILE") {
+        if v == "0" {
+            return None;
+        }
+    }
+    if let Ok(v) = std::env::var("FLWNTIER_LOG_DIR") {
+        if !v.is_empty() {
+            return Some(PathBuf::from(v));
+        }
+    }
+    Some(default_log_dir())
+}
+
+/// Legacy single-file path. Used when `FLWNTIER_LOG_FILE` is
+/// set to a real path (not `0`).
+pub fn legacy_log_file_path() -> Option<PathBuf> {
     match std::env::var("FLWNTIER_LOG_FILE") {
-        Err(_) => Some(default_log_path()),
+        Err(_) => None,
         Ok(v) if v == "0" => None,
         Ok(v) => Some(PathBuf::from(v)),
     }
 }
 
+/// v0.4.26 (event 000119): backwards-compat shim. The old
+/// HTTP handler at `handlers.rs::get_log_tail` calls
+/// `logs::resolve_log_path()` to get the single file path.
+/// With per-role routing there is no single file, so we point
+/// at `runtime.log` under the per-role directory (or the legacy
+/// single-file path when `FLWNTIER_LOG_FILE` is set).
+pub fn resolve_log_path() -> Option<PathBuf> {
+    if let Some(p) = legacy_log_file_path() {
+        return Some(p);
+    }
+    resolve_log_dir().map(|d| d.join("runtime.log"))
+}
+
+/// v0.4.26 (event 000119): backwards-compat shim. Legacy
+/// callers that used to get `~/Desktop/Flowntier.log` now get
+/// `~/Desktop/Flowntier/logs/runtime.log` so the same path
+/// still holds the merged stream.
+pub fn default_log_path() -> PathBuf {
+    default_log_dir().join("runtime.log")
+}
+
 /// `true` iff the HTTP log endpoints should be exposed.
-/// Default is `false` so a released build (with no env var
-/// set) doesn't ship a file-read surface; the Tauri shell
-/// sets `FLWNTIER_LOG_API=1` for chairman debug builds.
 pub fn log_api_enabled() -> bool {
     std::env::var("FLWNTIER_LOG_API")
         .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
         .unwrap_or(false)
 }
 
-/// Read the last `tail` lines from the log file. Returns
-/// empty Vec if the file doesn't exist yet (first launch
-/// before any log line was written, or the chairman deleted
-/// the file). The runtime's tracing-appender instance is
-/// NOT involved — we just read the on-disk file directly
-/// so the API call doesn't depend on subscriber state.
-///
-/// event 000108: `path_override` lets unit tests read a
-/// scratch file (e.g. `tmp/foo.log`) instead of the
-/// chairman's real `~/Desktop/Flowntier.log`. Pass `None`
-/// to keep the production behaviour. The HTTP handler at
-/// `crates/pipe-server/src/handlers.rs::get_log_tail`
-/// always calls this with `None`.
-pub fn read_tail(tail: usize, path_override: Option<&std::path::Path>) -> Vec<String> {
+/// Initialize the per-role log file routing. Returns the
+/// resolved log directory (or legacy file path) on success,
+/// `None` if file logging is disabled.
+pub fn init() -> Option<PathBuf> {
+    use tracing_subscriber::EnvFilter;
+    use tracing_subscriber::fmt::format::FmtSpan;
+    use tracing_subscriber::layer::SubscriberExt;
+    use tracing_subscriber::util::SubscriberInitExt;
+
+    let env_filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new("info,pipe_server=debug,orchestrator=debug"));
+
+    // Legacy single-file mode (FLWNTIER_LOG_FILE=<path>). Skip
+    // the per-role routing.
+    if let Some(legacy_path) = legacy_log_file_path() {
+        if let Some(parent) = legacy_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let writer = FileWriter::open_or_null(&legacy_path);
+        tracing_subscriber::registry()
+            .with(env_filter)
+            .with(
+                tracing_subscriber::fmt::layer()
+                    .with_span_events(FmtSpan::NONE)
+                    .with_writer(std::io::stderr),
+            )
+            .with(
+                tracing_subscriber::fmt::layer()
+                    .with_span_events(FmtSpan::NONE)
+                    .with_writer(writer)
+                    .json(),
+            )
+            .init();
+        tracing::info!(
+            path = %legacy_path.display(),
+            "v0.4.26 (event 000119): legacy single-file log mode"
+        );
+        return Some(legacy_path);
+    }
+
+    // Per-role directory mode (default).
+    let dir = match resolve_log_dir() {
+        Some(d) => d,
+        None => return init_stderr_only(&env_filter),
+    };
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        eprintln!(
+            "[flowntier-runtime] could not create log dir {}: {}",
+            dir.display(),
+            e
+        );
+        return init_stderr_only(&env_filter);
+    }
+
+    let chief = FileWriter::open_or_null(&dir.join("chief.log"));
+    let critic_a = FileWriter::open_or_null(&dir.join("critic-a.log"));
+    let critic_b = FileWriter::open_or_null(&dir.join("critic-b.log"));
+    let worker = FileWriter::open_or_null(&dir.join("worker.log"));
+    let system = FileWriter::open_or_null(&dir.join("system.log"));
+    let runtime = FileWriter::open_or_null(&dir.join("runtime.log"));
+
+    let stderr_layer = tracing_subscriber::fmt::layer()
+        .with_span_events(FmtSpan::NONE)
+        .with_writer(std::io::stderr);
+
+    let subscriber = tracing_subscriber::registry()
+        .with(env_filter)
+        // 1. stderr — every event (live console).
+        .with(stderr_layer)
+        // 2/3/4/5. per-role targets.
+        .with(role_layer(TARGET_CHIEF, chief))
+        .with(role_layer(TARGET_CRITIC_A, critic_a))
+        .with(role_layer(TARGET_CRITIC_B, critic_b))
+        .with(role_layer(TARGET_WORKER, worker))
+        // 6. system targets.
+        .with(targets_layer(SYSTEM_TARGETS, system))
+        // 7. catch-all chronological mirror.
+        .with(catch_all_layer(runtime));
+
+    if let Err(e) = subscriber.try_init() {
+        eprintln!("[flowntier-runtime] tracing subscriber init failed: {e}");
+        // Don't propagate — we already initialised stderr in
+        // the layer above, so the runtime still has live
+        // logging even if the per-role files fail.
+    }
+
+    tracing::info!(
+        dir = %dir.display(),
+        "v0.4.26 (event 000119): per-role log directory initialised"
+    );
+    Some(dir)
+}
+
+/// Build a JSON layer for one target. Generic over the
+/// subscriber `S` so the returned value can be `with()`'d
+/// onto any in-progress subscriber (Registry, Layered, ...).
+fn role_layer<S>(
+    target: &'static str,
+    writer: FileWriter,
+) -> impl tracing_subscriber::layer::Layer<S>
+where
+    S: tracing::Subscriber + for<'span> tracing_subscriber::registry::LookupSpan<'span>,
+{
+    use tracing_subscriber::filter::FilterFn;
+    use tracing_subscriber::layer::Layer as _;
+    let predicate = FilterFn::new(move |m| m.target() == target);
+    tracing_subscriber::fmt::layer()
+        .with_span_events(tracing_subscriber::fmt::format::FmtSpan::NONE)
+        .with_writer(writer)
+        .json()
+        .with_filter(predicate)
+}
+
+/// Multi-target filter (e.g. system.log).
+fn targets_layer<S>(
+    targets: &'static [&'static str],
+    writer: FileWriter,
+) -> impl tracing_subscriber::layer::Layer<S>
+where
+    S: tracing::Subscriber + for<'span> tracing_subscriber::registry::LookupSpan<'span>,
+{
+    use tracing_subscriber::filter::FilterFn;
+    use tracing_subscriber::layer::Layer as _;
+    let predicate = FilterFn::new(move |m| targets.contains(&m.target()));
+    tracing_subscriber::fmt::layer()
+        .with_span_events(tracing_subscriber::fmt::format::FmtSpan::NONE)
+        .with_writer(writer)
+        .json()
+        .with_filter(predicate)
+}
+
+/// Catch-all (no filter).
+fn catch_all_layer<S>(
+    writer: FileWriter,
+) -> impl tracing_subscriber::layer::Layer<S>
+where
+    S: tracing::Subscriber + for<'span> tracing_subscriber::registry::LookupSpan<'span>,
+{
+    use tracing_subscriber::layer::Layer;
+    tracing_subscriber::fmt::layer()
+        .with_span_events(tracing_subscriber::fmt::format::FmtSpan::NONE)
+        .with_writer(writer)
+        .json()
+}
+
+/// Stderr-only fallback (used when the file open fails or
+/// `FLWNTIER_LOG_FILE=0` is set).
+pub fn init_stderr_only(env_filter: &tracing_subscriber::EnvFilter) -> Option<PathBuf> {
+    use tracing_subscriber::fmt::format::FmtSpan;
+    use tracing_subscriber::layer::SubscriberExt;
+    use tracing_subscriber::util::SubscriberInitExt;
+    tracing_subscriber::registry()
+        .with(env_filter.clone())
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_span_events(FmtSpan::NONE)
+                .with_writer(std::io::stderr),
+        )
+        .init();
+    tracing::info!("v0.4.26 (event 000119): stderr-only logging initialised");
+    None
+}
+
+/// Install a panic hook that writes the panic to chief.log
+/// (the runtime panics usually happen while the chief is
+/// running). event 000109: same shape as the legacy hook but
+/// points at the role directory, not the single file.
+pub fn install_panic_hook(log_dir: &Path) {
+    let dir = log_dir.to_path_buf();
+    let target = dir.join("chief.log");
+    std::panic::set_hook(Box::new(move |info| {
+        let bt = std::backtrace::Backtrace::force_capture();
+        eprintln!("[flowntier-runtime] PANIC: {info}\n{bt}");
+        use std::io::Write;
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&target)
+        {
+            let _ = writeln!(
+                f,
+                "[flowntier-runtime] PANIC at {}: {info}\n{bt}",
+                chrono::Utc::now().to_rfc3339()
+            );
+        }
+    }));
+}
+
+// ── writers ────────────────────────────────────────────────
+
+/// Mutex-protected file writer. Always returns a writer; if
+/// the file open fails, falls back to a `NullWriter` so the
+/// layer still works (it just doesn't write anywhere).
+enum FileWriter {
+    Real(RealFileWriter),
+    Null,
+}
+
+struct RealFileWriter {
+    file: std::sync::Arc<std::sync::Mutex<std::fs::File>>,
+}
+
+impl FileWriter {
+    fn open_or_null(path: &Path) -> Self {
+        match std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+        {
+            Ok(f) => FileWriter::Real(RealFileWriter {
+                file: std::sync::Arc::new(std::sync::Mutex::new(f)),
+            }),
+            Err(e) => {
+                if cfg!(debug_assertions) {
+                    eprintln!(
+                        "[flowntier-runtime] could not open log file {}: {}",
+                        path.display(),
+                        e
+                    );
+                }
+                FileWriter::Null
+            }
+        }
+    }
+}
+
+impl std::io::Write for FileWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        match self {
+            FileWriter::Null => Ok(buf.len()),
+            FileWriter::Real(r) => r.write(buf),
+        }
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        match self {
+            FileWriter::Null => Ok(()),
+            FileWriter::Real(r) => r.flush(),
+        }
+    }
+}
+
+impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for FileWriter {
+    type Writer = FileWriterHandle;
+    fn make_writer(&'a self) -> Self::Writer {
+        match self {
+            FileWriter::Null => FileWriterHandle::Null,
+            FileWriter::Real(r) => FileWriterHandle::Real(RealFileWriterHandle {
+                file: r.file.clone(),
+            }),
+        }
+    }
+}
+
+impl std::io::Write for RealFileWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        std::io::Write::write(&mut *self.file.lock().expect("log file mutex"), buf)
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        std::io::Write::flush(&mut *self.file.lock().expect("log file mutex"))
+    }
+}
+
+enum FileWriterHandle {
+    Real(RealFileWriterHandle),
+    Null,
+}
+
+struct RealFileWriterHandle {
+    file: std::sync::Arc<std::sync::Mutex<std::fs::File>>,
+}
+
+impl std::io::Write for FileWriterHandle {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        match self {
+            FileWriterHandle::Null => Ok(buf.len()),
+            FileWriterHandle::Real(r) => r.write(buf),
+        }
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        match self {
+            FileWriterHandle::Null => Ok(()),
+            FileWriterHandle::Real(r) => r.flush(),
+        }
+    }
+}
+
+impl std::io::Write for RealFileWriterHandle {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        std::io::Write::write(&mut *self.file.lock().expect("log mutex"), buf)
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        std::io::Write::flush(&mut *self.file.lock().expect("log mutex"))
+    }
+}
+
+// ── legacy read_tail / clear_log (operate on runtime.log) ────
+
+/// Read the last `tail` lines from the merged `runtime.log`.
+/// In the per-role regime, runtime.log is the union stream.
+pub fn read_tail(tail: usize, path_override: Option<&Path>) -> Vec<String> {
     let path = match path_override {
         Some(p) => p.to_path_buf(),
-        None => match resolve_log_path() {
-            Some(p) => p,
+        None => match resolve_log_dir() {
+            Some(d) => d.join("runtime.log"),
             None => return Vec::new(),
         },
     };
@@ -125,33 +541,28 @@ pub fn read_tail(tail: usize, path_override: Option<&std::path::Path>) -> Vec<St
         .collect()
 }
 
-/// Truncate the log file to zero bytes and write a single
-/// sentinel line so the chairman can tell where the next
-/// session starts. Returns the path on success.
-///
-/// event 000108: same `path_override` escape hatch as
-/// `read_tail` — production callers pass `None`, tests pass
-/// `Some(scratch_path)`.
-pub fn clear_log(path_override: Option<&std::path::Path>) -> std::io::Result<PathBuf> {
+/// Truncate runtime.log to zero bytes and write a sentinel
+/// line. Per-role files are left untouched (the chairman can
+/// clear them individually by `rm` or with a future "clear
+/// per-role" endpoint).
+pub fn clear_log(path_override: Option<&Path>) -> std::io::Result<PathBuf> {
     let path = match path_override {
         Some(p) => p.to_path_buf(),
-        None => resolve_log_path().ok_or_else(|| {
-            std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                "FLWNTIER_LOG_FILE=0; file logging disabled",
-            )
-        })?,
+        None => match resolve_log_dir() {
+            Some(d) => d.join("runtime.log"),
+            None => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    "FLWNTIER_LOG_FILE=0; file logging disabled",
+                ))
+            }
+        },
     };
-    // Touch (create if missing) then truncate.
     std::fs::OpenOptions::new()
         .create(true)
         .write(true)
         .truncate(true)
         .open(&path)?;
-    // Append a single sentinel. We don't use the tracing
-    // subscriber because the chairman just cleared the file
-    // — anything the runtime emits next is via the
-    // tracing-appender which will create the file again.
     use std::io::Write;
     let mut f = std::fs::OpenOptions::new()
         .append(true)
@@ -164,270 +575,36 @@ pub fn clear_log(path_override: Option<&std::path::Path>) -> std::io::Result<Pat
     Ok(path)
 }
 
-/// Set up the global tracing subscriber to mirror all
-/// events to stderr AND (if `FLWNTIER_LOG_FILE` is set
-/// and not "0") to the log file. Uses the JSON format
-/// so the chairman can grep / parse cleanly. Returns the
-/// path the log file is at, or `None` if file logging is
-/// disabled.
-pub fn init() -> Option<PathBuf> {
-    use tracing_subscriber::EnvFilter;
-    use tracing_subscriber::fmt::format::FmtSpan;
-    let env_filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("info,pipe_server=debug"));
-
-    let log_path = resolve_log_path();
-
-    if let Some(path) = log_path.clone() {
-        // Ensure the parent dir exists (Windows desktop may
-        // not exist for new users — although it always does
-        // for the chairman). Touch the file so the first
-        // append doesn't race with the call to open().
-        if let Some(parent) = path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        // Build a non-blocking writer on top of the file.
-        // We hand-roll a small "always-open, append, flush
-        // on every line" writer instead of pulling in
-        // tracing-appender's `file` feature (which would
-        // force the workspace dep to add it — and that
-        // conflicts with tauri-core's existing pin). The
-        // shape we need is simple: a Mutex<File> behind a
-        // MakeWriter impl that locks, writes, flushes, drops.
-        //
-        // event 000103: don't `.expect()` here — if the
-        // desktop is read-only / onedrive-syncing and the
-        // file open fails, the runtime must still come up
-        // (just without file logging). Falling back to
-        // stderr-only logging keeps the RPC pipe alive.
-        let file = match std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&path)
-        {
-            Ok(f) => f,
-            Err(e) => {
-                eprintln!(
-                    "[flowntier-runtime] could not open log file {}: {}; \
-                     falling back to stderr-only",
-                    path.display(),
-                    e
-                );
-                return init_stderr_only(&env_filter);
-            }
-        };
-        let writer = LogFileWriter {
-            file: std::sync::Arc::new(std::sync::Mutex::new(file)),
-        };
-        use tracing_subscriber::prelude::*;
-        tracing_subscriber::registry()
-            .with(env_filter)
-            .with(
-                tracing_subscriber::fmt::layer()
-                    .with_span_events(FmtSpan::NONE)
-                    .with_writer(std::io::stderr),
-            )
-            .with(
-                tracing_subscriber::fmt::layer()
-                    .with_span_events(FmtSpan::NONE)
-                    .with_writer(writer)
-                    .json(),
-            )
-            .init();
-        tracing::info!(
-            path = %path.display(),
-            "v0.4.22 (event 000080): log file initialised"
-        );
-        return Some(path);
-    }
-
-    // event 000103: helper for the file-open-failure fallback
-    // path above. Mirrors the FLWNTIER_LOG_FILE=0 branch but
-    // is reachable from inside `init()` when the file open
-    // itself fails (vs. when the env var says "don't file
-    // log").
-    init_stderr_only_inner(&env_filter)
-}
-
-/// Set up only the stderr layer (no file output). Used when
-/// `FLWNTIER_LOG_FILE=0` is set OR when the resolved log file
-/// path can't be opened for write (e.g. read-only desktop,
-/// OneDrive sync conflict).
-pub fn init_stderr_only(
-    env_filter: &tracing_subscriber::EnvFilter,
-) -> Option<PathBuf> {
-    init_stderr_only_inner(env_filter)
-}
-
-fn init_stderr_only_inner(
-    env_filter: &tracing_subscriber::EnvFilter,
-) -> Option<PathBuf> {
-    use tracing_subscriber::prelude::*;
-    use tracing_subscriber::fmt::format::FmtSpan;
-    tracing_subscriber::registry()
-        .with(env_filter.clone())
-        .with(
-            tracing_subscriber::fmt::layer()
-                .with_span_events(FmtSpan::NONE)
-                .with_writer(std::io::stderr),
-        )
-        .init();
-    tracing::info!("v0.4.23 (event 000103): stderr-only logging initialised");
-    None
-}
-
-/// event 000109: install a panic hook that writes any panic
-/// to the same log file the chairman already opens
-/// (`~/Desktop/Flowntier.log` by default). The sidecar binary
-/// is a standalone process with no `tauri_core` available at
-/// link time, so it uses this hook instead of
-/// `tauri_core::logging::install_panic_hook` — but the two
-/// hooks have the SAME shape (eprintln + best-effort file
-/// append + structured timestamp) so the chairman can read
-/// either process's panic output the same way.
-///
-/// The hook is process-global — call exactly once at
-/// startup (from `flowntier-runtime.rs::main`). Rust's
-/// `std::panic::set_hook` is last-write-wins, so calling
-/// twice silently discards the first hook.
-pub fn install_panic_hook(log_path: &std::path::Path) {
-    let path = log_path.to_path_buf();
-    std::panic::set_hook(Box::new(move |info| {
-        // Default-style stderr write — visible in dev mode,
-        // swallowed in release builds where stdout/stderr
-        // are detached (windows_subsystem="windows").
-        let bt = std::backtrace::Backtrace::force_capture();
-        eprintln!("[flowntier-runtime] PANIC: {info}\n{bt}");
-
-        // Best-effort append to the log file the chairman
-        // already has open. Don't panic inside the hook.
-        use std::io::Write;
-        if let Ok(mut f) = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&path)
-        {
-            let _ = writeln!(
-                f,
-                "[flowntier-runtime] PANIC at {}: {info}\n{bt}",
-                chrono::Utc::now().to_rfc3339()
-            );
-        }
-    }));
-}
-
-/// Hand-rolled tracing MakeWriter that appends each
-/// tracing event as a single line and flushes. Simpler
-/// than the `tracing_appender::file` feature and avoids
-/// the workspace-dep conflict with tauri-core's pin.
-struct LogFileWriter {
-    file: std::sync::Arc<std::sync::Mutex<std::fs::File>>,
-}
-
-impl std::io::Write for LogFileWriter {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        use std::io::Write;
-        let mut f = self.file.lock().expect("log file mutex");
-        let n = f.write(buf)?;
-        f.flush()?;
-        Ok(n)
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        let mut f = self.file.lock().expect("log file mutex");
-        std::io::Write::flush(&mut *f)
-    }
-}
-
-/// MakeWriter impl — tracing_subscriber requires this
-/// trait, not just Write.
-impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for LogFileWriter {
-    type Writer = LogFileWriteGuard;
-    fn make_writer(&'a self) -> Self::Writer {
-        LogFileWriteGuard { file: self.file.clone() }
-    }
-}
-
-struct LogFileWriteGuard {
-    file: std::sync::Arc<std::sync::Mutex<std::fs::File>>,
-}
-
-impl std::io::Write for LogFileWriteGuard {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        std::io::Write::write(&mut *self.file.lock().expect("log mutex"), buf)
-    }
-    fn flush(&mut self) -> std::io::Result<()> {
-        std::io::Write::flush(&mut *self.file.lock().expect("log mutex"))
-    }
-}
-
-static LOG_GUARD: std::sync::OnceLock<tracing_appender::non_blocking::WorkerGuard> =
-    std::sync::OnceLock::new();
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
 
-    /// event 000109: pin the contract that `install_panic_hook`
-    /// writes a `[flowntier-runtime] PANIC at <RFC3339>: …`
-    /// line to the configured path. This is the chairman's
-    /// one-stop diagnostic — the log file always has panics.
-    ///
-    /// We don't actually trigger a panic (that would abort the
-    /// test process). Instead we install a hook to a scratch
-    /// path, then invoke the same panic-handler code path via
-    /// `std::panic::catch_unwind(|| -> i32 { panic!("test")
-    /// })` which still runs the hook before unwinding.
-    ///
-    /// After this runs the installed global hook is replaced
-    /// (Rust's `set_hook` semantics: last write wins) — so
-    /// subsequent tests in this binary see the hook we set
-    /// here. We restore a no-op hook at the end via a guard
-    /// pattern (NextTestHook) to avoid leaking state.
     #[test]
-    fn install_panic_hook_writes_to_path() {
-        let dir = std::env::temp_dir().join("flowntier-panic-hook-test");
-        let _ = std::fs::create_dir_all(&dir);
-        let unique = format!(
-            "{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        );
-        let path = dir.join(format!("panic-{unique}.log"));
-        let _ = std::fs::remove_file(&path);
-
-        install_panic_hook(&path);
-        let r = std::panic::catch_unwind(|| -> () {
-            panic!("event 000109 test panic — should land in {path:?}");
-        });
-        assert!(r.is_err(), "expected the panic to be caught");
-
-        // Give the hook a moment to flush.
-        std::thread::sleep(std::time::Duration::from_millis(50));
-        let raw = std::fs::read_to_string(&path)
-            .expect("hook should have written panic to file");
-        assert!(
-            raw.contains("[flowntier-runtime] PANIC at"),
-            "hook output missing marker: {raw}"
-        );
-        assert!(
-            raw.contains("event 000109 test panic"),
-            "hook output missing panic message: {raw}"
-        );
+    fn default_log_dir_is_under_desktop_flowntier_logs() {
+        let d = default_log_dir();
+        assert!(d.ends_with("logs"), "got {d:?}");
+        if cfg!(target_os = "windows") {
+            assert!(d.to_string_lossy().contains("Desktop"));
+        }
     }
 
-    /// Round-trip: write lines, read tail, clear, write
-    /// more, read again. The clear should put a sentinel
-    /// in place.
+    #[test]
+    fn resolve_log_dir_respects_env_var() {
+        let prev = std::env::var("FLWNTIER_LOG_DIR").ok();
+        std::env::set_var("FLWNTIER_LOG_DIR", "/tmp/flowntier-test-logs");
+        let d = resolve_log_dir().unwrap();
+        assert_eq!(d, PathBuf::from("/tmp/flowntier-test-logs"));
+        match prev {
+            Some(v) => std::env::set_var("FLWNTIER_LOG_DIR", v),
+            None => std::env::remove_var("FLWNTIER_LOG_DIR"),
+        }
+    }
+
     #[test]
     fn write_read_clear_roundtrip() {
-        let dir = std::env::temp_dir().join("flwntier-log-test");
+        let dir = std::env::temp_dir().join("flwntier-log-test-v0426");
         let _ = std::fs::create_dir_all(&dir);
-        let path = dir.join("test.log");
+        let path = dir.join("runtime.log");
         let _ = std::fs::remove_file(&path);
         for i in 0..10 {
             let mut f = std::fs::OpenOptions::new()
@@ -435,34 +612,22 @@ mod tests {
                 .append(true)
                 .open(&path)
                 .unwrap();
+            use std::io::Write;
             writeln!(f, "line {i}").unwrap();
         }
         let tail = read_tail(3, Some(&path));
         assert_eq!(tail, vec!["line 7", "line 8", "line 9"]);
-        let cleared = clear_log_for(&path).unwrap();
+        let cleared = clear_log(Some(&path)).unwrap();
         assert_eq!(cleared, path);
-        // Sentinel present, file truncated.
         let raw = std::fs::read_to_string(&path).unwrap();
         assert!(raw.contains("[logs cleared at"));
-        // We can still write after clear.
         let mut f = std::fs::OpenOptions::new()
             .append(true)
             .open(&path)
             .unwrap();
+        use std::io::Write;
         writeln!(f, "after clear").unwrap();
         let tail = read_tail(2, Some(&path));
         assert!(tail.last().unwrap().contains("after clear"));
-    }
-
-    fn clear_log_for(path: &std::path::Path) -> std::io::Result<std::path::PathBuf> {
-        std::fs::OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(true)
-            .open(path)?;
-        use std::io::Write;
-        let mut f = std::fs::OpenOptions::new().append(true).open(path)?;
-        writeln!(f, "[logs cleared at 2026-07-02T00:00:00Z]")?;
-        Ok(path.to_path_buf())
     }
 }

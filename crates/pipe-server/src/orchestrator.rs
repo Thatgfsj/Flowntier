@@ -43,7 +43,29 @@ use serde_json::{json, Value};
 use tokio::sync::broadcast;
 use tracing::{info, warn};
 
+/// v0.4.26 (event 000119): map the orchestrator's `role_id`
+/// ("agent:chief" / "agent:critic:a" / "agent:critic:b" /
+/// "agent:worker" / "agent:planner" / "agent:reporter") to the
+/// per-role log target ("chief" / "critic-a" / "critic-b" /
+/// "worker" / "chief" / "chief"). The planner + reporter
+/// delegate to the chief because they run in the chief's
+/// pipeline phases; their detail belongs in chief.log.
+fn role_to_log_target(role_id: &str) -> &'static str {
+    match role_id {
+        "agent:chief" => logs::TARGET_CHIEF,
+        "agent:critic:a" => logs::TARGET_CRITIC_A,
+        "agent:critic:b" => logs::TARGET_CRITIC_B,
+        "agent:worker" => logs::TARGET_WORKER,
+        // planner / reporter share the chief's file (they run
+        // in the chief's pipeline).
+        "agent:planner" | "agent:reporter" => logs::TARGET_CHIEF,
+        _ => logs::TARGET_CHIEF,
+    }
+}
+
 use crate::handlers::ServerState;
+use crate::logs;
+use crate::{role_info, role_warn};
 
 /// Spec-defined phase names. Order is meaningful — the
 /// orchestrator advances through these in lockstep.
@@ -744,6 +766,11 @@ impl Orchestrator {
     // synthesize a Done{ABORTED} event so the run returns
     // in ~1s instead of waiting for the 5-min timeout.
     let cancel_token = self.cancel_token.clone();
+    // v0.4.26 (event 000119): extract metadata before `task` and
+    // `task_id` are moved into `run_with_task_id` — we use them
+    // in the "agent run started" log line below.
+    let task_len = task.len();
+    let task_id_str = task_id.as_deref().unwrap_or("").to_string();
     let mut rx = agent.run_with_task_id(task, task_id);
     let mut text = String::new();
     let mut last_status = "UNKNOWN".to_string();
@@ -756,6 +783,29 @@ impl Orchestrator {
     // shows how many text_deltas actually streamed.
     let mut delta_count: u32 = 0;
     let mut last_delta_len: u32 = 0;
+    // v0.4.26 (event 000119): per-role detail counters — the
+    // chairman wants detailed per-role logs, so we record
+    // how many tool calls, deltas, and final text lands in
+    // each role's file. Cheap (u32 increments) and helps
+    // diagnose "did this agent actually do anything?" without
+    // re-running the workflow.
+    let mut tool_started_count: u32 = 0;
+    let mut tool_finished_count: u32 = 0;
+    // v0.4.26 (event 000119): session-level start line — goes
+    // to the agent's own log file so the chairman can grep
+    // `chief.log` for "agent run started" and jump to the
+    // trace. Captures role + task_id + task length so we can
+    // spot runaway prompts.
+    role_info!(
+        self,
+        &role_id,
+        wf_id = %self.wf_id,
+        role = %role_id,
+        role_display = %role_display,
+        task_id = %task_id_str,
+        task_len,
+        "v0.4.26 (event 000119): agent run started"
+    );
     // 5-minute per-agent ceiling so a runaway critic doesn't
     // block the orchestrator forever. Per-task budget is
     // enforced at the run_task handler; per-agent is new in
@@ -772,8 +822,13 @@ impl Orchestrator {
                 tokio::select! {
                     biased;
                     _ = cancel_token.cancelled() => {
-                        tracing::info!(
-                            target: "orchestrator",
+                        // v0.4.26 (event 000119): per-role target
+                        // so this lands in the agent's own log
+                        // file (chief.log / critic-a.log / etc),
+                        // not in the system.log noise.
+                        role_info!(
+                            self,
+                            &role_id,
                             wf_id = %self.wf_id,
                             role = %role_id,
                             "v0.4.22 (event 000118 fix 7): cancel_token fired during phase"
@@ -798,12 +853,70 @@ impl Orchestrator {
                                 delta_count += 1;
                                 last_delta_len = delta.len() as u32;
                                 text.push_str(&delta);
+                                // v0.4.26 (event 000119): per-role
+                                // detail log on every text delta —
+                                // the chairman wants detailed logs
+                                // ("日志详细写一下"). We emit
+                                // every delta at debug level so the
+                                // runtime.log stream still shows
+                                // the full stream, but chief.log /
+                                // critic-*.log / worker.log stay
+                                // scannable.
+                                //
+                                // Preview is truncated to 80 chars
+                                // so a 5KB delta doesn't bloat the
+                                // JSON file; the chairman can
+                                // re-run with RUST_LOG=trace for
+                                // full payloads.
+                                role_info!(
+                                    self,
+                                    &role_id,
+                                    wf_id = %self.wf_id,
+                                    role = %role_id,
+                                    delta_count,
+                                    delta_len = delta.len(),
+                                    preview = %delta.chars().take(80).collect::<String>(),
+                                    "text delta"
+                                );
+                            }
+                            AgentEvent::ToolStarted { call, .. } => {
+                                tool_started_count += 1;
+                                role_info!(
+                                    self,
+                                    &role_id,
+                                    wf_id = %self.wf_id,
+                                    role = %role_id,
+                                    tool_started_count,
+                                    tool_name = %call.name,
+                                    "tool started"
+                                );
+                            }
+                            AgentEvent::ToolFinished { preview, elapsed_ms, .. } => {
+                                tool_finished_count += 1;
+                                role_info!(
+                                    self,
+                                    &role_id,
+                                    wf_id = %self.wf_id,
+                                    role = %role_id,
+                                    tool_finished_count,
+                                    elapsed_ms,
+                                    preview = %preview.chars().take(80).collect::<String>(),
+                                    "tool finished"
+                                );
                             }
                             AgentEvent::Done { status, summary: s, .. } => {
                                 last_status = status;
                                 summary = s;
-                                info!(
-                                    target: "orchestrator",
+                                // v0.4.26 (event 000119): per-role
+                                // targets so the streaming trace
+                                // and the run-finished line land
+                                // in the author's log file. The
+                                // chairman can `tail -f chief.log`
+                                // to watch the chief's progress
+                                // without grepping system noise.
+                                role_info!(
+                                    self,
+                                    &role_id,
                                     wf_id = %self.wf_id,
                                     role = %role_id,
                                     status = %last_status,
@@ -812,8 +925,9 @@ impl Orchestrator {
                                     last_delta_len,
                                     "v0.4.22 (event 000118 fix 5): phase streaming trace"
                                 );
-                                info!(
-                                    target: "orchestrator",
+                                role_info!(
+                                    self,
+                                    &role_id,
                                     wf_id = %self.wf_id,
                                     role = %role_id,
                                     status = %last_status,
@@ -853,6 +967,35 @@ impl Orchestrator {
     } else {
         last_status
     };
+
+    // v0.4.26 (event 000119): per-role terminal summary line,
+    // written to the agent's own log file with the final
+    // status + every counter we tracked. The chairman can grep
+    // `chief.log` for "agent run finished" and see the full
+    // picture (deltas, tool calls, final text length, total
+    // runtime) without reading system.log.
+    let started = start.elapsed();
+    role_info!(
+        self,
+        &role_id,
+        wf_id = %self.wf_id,
+        role = %role_id,
+        role_display = %role_display,
+        status = %status,
+        text_len = text.len(),
+        delta_count,
+        tool_started_count,
+        tool_finished_count,
+        elapsed_ms = started.as_millis() as u64,
+        summary_len = summary.as_deref().map(str::len).unwrap_or(0),
+        summary_preview = %summary
+            .as_deref()
+            .unwrap_or("")
+            .chars()
+            .take(120)
+            .collect::<String>(),
+        "v0.4.26 (event 000119): agent run finished (per-role summary)"
+    );
 
     // v0.4.22 (event 000115): only BugHunter + Reviewer are
     // expected to emit a verdict block. Chief / Planner /
