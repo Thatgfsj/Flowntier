@@ -35,15 +35,16 @@ export interface PhaseTimelineProps {
 }
 
 const stateClass: Record<PhaseState, string> = {
-  // No color blocks. State is communicated via border weight and
-  // a tiny dot at the top of the bubble. v0.2: per user request,
-  // status colors are reserved for task rows; the timeline stays
-  // monochrome so it doesn't compete for attention with the
-  // mission-control content.
-  pending: 'border border-border text-text-secondary',
-  active: 'border-2 border-chief text-primary ring-2 ring-chief/30',
-  done: 'border border-text-secondary/60 text-text-secondary',
-  failed: 'border border-status-failed text-status-failed',
+  // v0.4.24 (event 000119): the timeline was monochrome and
+  // indistinguishable from the panel behind it. Each phase state
+  // now carries a faint tinted background so the eye can scan
+  // "where are we in the pipeline" without reading labels.
+  // Tints are low-alpha so they still feel mono when no phase is
+  // active — only the active phase really glows.
+  pending: 'border border-border bg-surface-3/40 text-text-secondary',
+  active: 'border-2 border-chief bg-chief/15 text-primary',
+  done: 'border border-status-done/60 bg-status-done/10 text-text-secondary',
+  failed: 'border border-status-failed bg-status-failed/15 text-status-failed',
 };
 
 /**
@@ -62,7 +63,11 @@ export function PhaseTimeline({ steps, onStepClick, className }: PhaseTimelinePr
             onClick={() => onStepClick?.(s.name)}
             className={cn(
               'flex w-full flex-col items-center gap-1 rounded-md p-2 text-xs transition-colors',
-              'hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-chief',
+              'hover:bg-surface-3/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-chief',
+              // v0.4.24 (event 000119): when a phase is active, the
+              // whole button gets the chief glow so the eye snaps
+              // to "the orchestrator is here" without reading text.
+              s.state === 'active' && 'flt-glow-chief',
             )}
             aria-label={`${s.label} (${s.state})`}
           >

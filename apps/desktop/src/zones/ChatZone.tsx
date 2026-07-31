@@ -493,7 +493,7 @@ export function ChatZone({ onCollapse, activeAgent = null }: ChatZoneProps = {})
             disabled={sending}
             className={
               mode === 'workflow'
-                ? 'bg-chief px-2 py-1 font-semibold text-white disabled:opacity-50'
+                ? 'bg-chief px-2 py-1 font-semibold text-black disabled:opacity-50'
                 : 'bg-surface-1 px-2 py-1 text-text-secondary hover:bg-surface-3 disabled:opacity-50'
             }
             aria-pressed={mode === 'workflow'}
@@ -507,7 +507,7 @@ export function ChatZone({ onCollapse, activeAgent = null }: ChatZoneProps = {})
             disabled={sending}
             className={
               mode === 'chat'
-                ? 'bg-chief px-2 py-1 font-semibold text-white disabled:opacity-50'
+                ? 'bg-chief px-2 py-1 font-semibold text-black disabled:opacity-50'
                 : 'bg-surface-1 px-2 py-1 text-text-secondary hover:bg-surface-3 disabled:opacity-50'
             }
             aria-pressed={mode === 'chat'}
@@ -597,7 +597,7 @@ export function ChatZone({ onCollapse, activeAgent = null }: ChatZoneProps = {})
           <button
             type="submit"
             disabled={sending || task.trim().length === 0}
-            className="rounded bg-chief px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-chief/90 disabled:pointer-events-none disabled:opacity-50"
+            className="rounded bg-chief px-4 py-1.5 text-sm font-medium text-black transition-colors hover:brightness-110 disabled:pointer-events-none disabled:opacity-50"
           >
             {sending
               ? t('chatZone.sending', { defaultValue: '发送中…' })
@@ -605,7 +605,7 @@ export function ChatZone({ onCollapse, activeAgent = null }: ChatZoneProps = {})
           </button>
         </div>
         {error && (
-          <p className="text-xs text-red-400" role="alert">
+          <p className="text-xs text-status-failed" role="alert">
             ⚠ {error}
           </p>
         )}
@@ -649,12 +649,13 @@ export function ChatZone({ onCollapse, activeAgent = null }: ChatZoneProps = {})
           )}
         </div>
 
-        {/* Tool timeline */}
+        {/* Tool timeline — chairman asked to drop the "暂无工具调用"
+            placeholder; an empty list is enough. The bottom
+            fix2 panel (当前就绪 + 工具) already shows the
+            count, so duplicating it here is noise. */}
         <div className="flex min-h-0 flex-col gap-1 overflow-y-auto rounded border border-border bg-surface-2 p-3" aria-label="工具">
           <div className="mb-1 text-[10px] uppercase tracking-wide text-text-secondary">
-            {t('chatZone.tools', { defaultValue: '工具' })} ({toolEvents.length === 0
-              ? t('chatZone.toolsEmpty', { defaultValue: '（暂无工具调用）' })
-              : ''}
+            {t('chatZone.tools', { defaultValue: '工具' })} ({toolEvents.length})
           </div>
           {toolEvents.length === 0 ? null : (
             <ol className="space-y-1 text-xs">
@@ -677,18 +678,8 @@ export function ChatZone({ onCollapse, activeAgent = null }: ChatZoneProps = {})
         </div>
       </div>
 
-      {/* Error log toggled out for brevity; if event stream yields an
-          error-level tool call, the controller is via the error
-          banner above. */}
-      <details className="border-t border-border bg-surface-2/60 px-4 py-2 text-xs">
-        <summary className="cursor-pointer text-text-secondary">{t('chatZone.logs', { defaultValue: '日志' })}</summary>
-        <pre className="mt-2 max-h-32 overflow-y-auto whitespace-pre-wrap break-words font-mono text-text-primary">
-          {events.length === 0 ? t('chatZone.noLogs', { defaultValue: '没有日志。' }) : null}
-        </pre>
-      </details>
-
       {/* v0.4.22 (event 000118, fix 2): fill the empty space
-          below the collapsible logs with two compact blocks:
+          below the transcript with two compact blocks:
 
             left  = 当前就绪 + 当前工作角色（仅 chief / critic-a /
                     critic-b；worker 按主席指示不展示）
@@ -703,7 +694,7 @@ export function ChatZone({ onCollapse, activeAgent = null }: ChatZoneProps = {})
         aria-label="当前就绪与工具"
       >
         {activeAgent ? (
-          <div className="flex min-h-[88px] flex-col gap-1 overflow-y-auto rounded border border-border bg-surface-2 p-2">
+          <div className="flex min-h-[56px] flex-col gap-1 overflow-y-auto rounded border border-border bg-surface-2 p-2">
             <div className="flex items-center justify-between gap-2">
               <span className="text-[10px] uppercase tracking-wide text-text-secondary">
                 {t('chatZone.readyTitle', { defaultValue: '当前就绪' })}
@@ -745,21 +736,17 @@ export function ChatZone({ onCollapse, activeAgent = null }: ChatZoneProps = {})
           </div>
         ) : (
           // No active head-role → worker-only or no workflow.
-          // Chairman asked us to NOT show "current work" when the
-          // worker is the one moving. Render a single-cell
-          // placeholder so the grid still reserves the column.
-          <div className="flex min-h-[88px] items-center justify-center rounded border border-dashed border-border bg-surface-2 p-2 text-[11px] text-text-secondary">
-            {t('chatZone.readyEmpty', { defaultValue: '（当前阶段无主理角色在工作）' })}
-          </div>
+          // The chairman's directive is to NOT show "current work"
+          // when the worker is the one moving (workers render their
+          // own cards above). Render an empty cell so the grid
+          // still reserves the column for layout stability.
+          <div className="min-h-[56px] rounded border border-transparent p-2" />
         )}
-        <div className="flex min-h-[88px] flex-col gap-1 overflow-y-auto rounded border border-border bg-surface-2 p-2" aria-label="工具">
+        <div className="flex min-h-[56px] flex-col gap-1 overflow-y-auto rounded border border-border bg-surface-2 p-2" aria-label="工具">
           <div className="mb-1 text-[10px] uppercase tracking-wide text-text-secondary">
             {t('chatZone.tools', { defaultValue: '工具' })}{' '}
             <span className="text-text-tertiary">
-              ({toolEvents.length === 0
-                ? t('chatZone.toolsEmpty', { defaultValue: '（暂无工具调用）' })
-                : toolEvents.length}
-              )
+              ({toolEvents.length})
             </span>
           </div>
           {toolEvents.length === 0 ? null : (

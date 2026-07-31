@@ -48,7 +48,7 @@ export function CenterPanel({ chiefCard, hasActiveWorkflow, onTrySample }: Cente
               <button
                 type="button"
                 onClick={onTrySample}
-                className="mt-2 self-center rounded-md bg-chief px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90"
+                className="mt-2 self-center rounded-md bg-chief px-4 py-2 text-sm font-medium text-black transition-opacity hover:opacity-90"
               >
                 {t('centerPanel.orTrySample')}
               </button>

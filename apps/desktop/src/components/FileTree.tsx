@@ -364,7 +364,7 @@ export function FileTree({ pollMs = 5000 }: FileTreeProps) {
       )}
 
       {error && (
-        <div className="rounded border border-red-300 bg-red-900/30 px-2 py-1 text-[11px] text-red-200">
+        <div className="rounded border border-status-failed/50 bg-status-failed/15 px-2 py-1 text-[11px] text-status-failed">
           {error}
         </div>
       )}

@@ -957,7 +957,7 @@ const handleCancel = async () => {
 
       <div className="flex flex-1 overflow-hidden">
         <aside
-          className="w-[260px] shrink-0 overflow-y-auto border-r border-border bg-surface-2 p-2"
+          className="w-[260px] shrink-0 overflow-y-auto border-r border-border-strong bg-surface-3 p-2"
           aria-label={t('app.aria.roster')}
         >
           <LeftRoster
@@ -971,7 +971,7 @@ const handleCancel = async () => {
         </aside>
 
         <main role="main" aria-label={t('app.aria.workspace')} className="flex-1 overflow-y-auto p-3">
-          <div className="mb-3 rounded-lg border border-border bg-surface-1 p-2">
+          <div className="mb-3 rounded-lg border border-border bg-surface-2 shadow-sm">
             <PhaseTimeline
               steps={PHASES.map((p) => ({
                 name: p.name,
@@ -1205,7 +1205,7 @@ const handleCancel = async () => {
         </main>
 
         <aside
-          className="w-[360px] shrink-0 overflow-y-auto border-l border-border bg-surface-2 p-3"
+          className="w-[360px] shrink-0 overflow-y-auto border-l border-border-strong bg-surface-3 p-3"
           aria-label={t('app.aria.tasks')}
         >
           <RightPanel tasks={tasks} events={events} />
@@ -1233,7 +1233,7 @@ const handleCancel = async () => {
           for the same panel. */}
       <div
         className={`relative flex shrink-0 border-t border-border transition-[height] ${
-          chatOpen ? 'h-[420px]' : 'h-9'
+          chatOpen ? 'h-[480px]' : 'h-9'
         }`}
       >
         {chatOpen ? (

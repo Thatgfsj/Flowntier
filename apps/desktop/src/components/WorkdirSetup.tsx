@@ -180,7 +180,7 @@ export function WorkdirSetup({ initialPath, onConfirm, onSkip, mode }: WorkdirSe
             type="button"
             onClick={confirm}
             disabled={path.trim().length === 0 || busy}
-            className="rounded-md bg-chief px-4 py-2 text-sm font-medium text-white hover:bg-chief/90 disabled:opacity-50"
+            className="rounded-md bg-chief px-4 py-2 text-sm font-medium text-black hover:brightness-110 disabled:opacity-50"
           >
             {isFirstLaunch ? t('workdir.confirmFirst') : t('workdir.confirmSettings')}
           </button>

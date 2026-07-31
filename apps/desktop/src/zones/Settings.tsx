@@ -139,7 +139,7 @@ function QuickAddAI({ onSaved }: { onSaved: () => void }) {
             type="button"
             onClick={handleSave}
             disabled={busy || !apiKey.trim()}
-            className="w-full rounded bg-chief px-3 py-2 text-sm font-medium text-white hover:bg-chief/90 disabled:opacity-50"
+            className="w-full rounded bg-chief px-3 py-2 text-sm font-medium text-black hover:brightness-110 disabled:opacity-50"
           >
             {busy ? t('settings.action.save') : t('settings.secrets.saveKeyFor', { provider: provider.name })}
           </button>
@@ -558,7 +558,7 @@ export function Settings({ open, onClose, workdir }: SettingsProps) {
                           <div className="flex items-center gap-1.5">
                             <Toggle on={p.enabled} onChange={(v) => void toggle(p.id, v)} disabled={!usable} />
                             {isCustom && (
-                              <button type="button" onClick={handleDeleteCustom} title={String(t('settings.action.deleteCustom'))} className="rounded p-0.5 text-[10px] text-red-400 hover:bg-red-400/10 hover:text-red-300">✕</button>
+                              <button type="button" onClick={handleDeleteCustom} title={String(t('settings.action.deleteCustom'))} className="rounded p-0.5 text-[10px] text-status-failed hover:bg-status-failed/15 hover:text-status-failed">✕</button>
                             )}
                           </div>
                         </div>
@@ -1314,7 +1314,7 @@ function ProviderModelManager({
             </label>
           </div>
           {manualErr && (
-            <p role="alert" className="mt-1 text-[11px] text-red-400">{manualErr}</p>
+            <p role="alert" className="mt-1 text-[11px] text-status-failed">{manualErr}</p>
           )}
           <div className="mt-2 flex items-center justify-end gap-2">
             <button
@@ -1723,7 +1723,7 @@ function CustomProviderForm({ onSaved }: { onSaved: () => void }) {
                   <span className="shrink-0 rounded bg-surface-3 px-1.5 py-0.5 text-[10px] text-text-primary">
                     {t(`settings.models.thinking.${m.thinking_strength}`)}
                   </span>
-                  <button type="button" onClick={() => removeModelRow(m.id)} className="shrink-0 text-[10px] text-red-400 hover:text-red-300">✕</button>
+                  <button type="button" onClick={() => removeModelRow(m.id)} className="shrink-0 text-[10px] text-status-failed hover:text-status-failed">✕</button>
                 </li>
               ))}
             </ul>
@@ -1760,7 +1760,7 @@ function CustomProviderForm({ onSaved }: { onSaved: () => void }) {
         </div>
       </div>
 
-      {error && <p role="alert" aria-live="polite" className="mt-2 text-[11px] text-red-400">{error}</p>}
+      {error && <p role="alert" aria-live="polite" className="mt-2 text-[11px] text-status-failed">{error}</p>}
       {success && <p role="status" aria-live="polite" className="mt-2 text-[11px] text-status-done">{t('settings.error.alreadyAdded')}</p>}
 
       <div className="mt-3 flex justify-end">

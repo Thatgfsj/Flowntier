@@ -42,7 +42,7 @@ const INSTALLER_NSI = path.join(ROOT, TARGET_SUBDIR, 'installer.nsi');
 const BUNDLE_OUT = path.join(
   ROOT,
   TAURI_TARGET ? `target/${TAURI_TARGET}/release` : 'target/release',
-  'bundle/nsis/Flowntier_0.4.22_x64-setup.exe'
+  'bundle/nsis/Flowntier_0.4.24_x64-setup.exe'
 );
 
 function step(name, cmd, args, opts = {}) {

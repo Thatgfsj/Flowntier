@@ -27,11 +27,36 @@ const roleColors: Record<AgentRole, string> = {
   worker: 'border-l-worker-1',
 };
 
-const statusPills: Record<AgentStatus, string> = {
-  idle: 'bg-status-pending/20 text-status-pending',
-  thinking: 'bg-status-active/20 text-status-active animate-pulse',
-  speaking: 'bg-status-active/20 text-status-active',
-  error: 'bg-status-failed/20 text-status-failed',
+/** v0.4.24 (event 000119): per role the status pill now uses
+ *  the role's brand color instead of the generic status-active
+ *  yellow, so the user can tell "who is speaking" by hue
+ *  alone (chief = blue, critic-a = red, critic-b = purple,
+ *  worker = teal). Error stays red for clarity. */
+const statusPills: Record<AgentStatus, Record<AgentRole, string>> = {
+  idle: {
+    chief: 'bg-surface-3 text-text-secondary',
+    'critic-a': 'bg-surface-3 text-text-secondary',
+    'critic-b': 'bg-surface-3 text-text-secondary',
+    worker: 'bg-surface-3 text-text-secondary',
+  },
+  thinking: {
+    chief: 'bg-chief/25 text-chief animate-pulse',
+    'critic-a': 'bg-critic-a/25 text-critic-a animate-pulse',
+    'critic-b': 'bg-critic-b/25 text-critic-b animate-pulse',
+    worker: 'bg-worker-1/25 text-worker-1 animate-pulse',
+  },
+  speaking: {
+    chief: 'bg-chief/25 text-chief',
+    'critic-a': 'bg-critic-a/25 text-critic-a',
+    'critic-b': 'bg-critic-b/25 text-critic-b',
+    worker: 'bg-worker-1/25 text-worker-1',
+  },
+  error: {
+    chief: 'bg-status-failed/25 text-status-failed',
+    'critic-a': 'bg-status-failed/25 text-status-failed',
+    'critic-b': 'bg-status-failed/25 text-status-failed',
+    worker: 'bg-status-failed/25 text-status-failed',
+  },
 };
 
 /** BUG-FRONTEND-RT-5 (event 000031): raw English status
@@ -63,7 +88,11 @@ export function AgentCard({
   return (
     <div
       className={cn(
-        'flex items-center gap-3 rounded-md border border-border border-l-4 bg-surface-1 p-3',
+        // v0.4.24 (event 000119): the card sits on a surface-3
+        // sidebar / panel, so its own background is surface-2
+        // (one step shallower than its container) to give the
+        // "card lifts off panel" depth read.
+        'flex items-center gap-3 rounded-md border border-border border-l-4 bg-surface-2 p-3',
         roleColors[role],
         className,
       )}
@@ -78,8 +107,8 @@ export function AgentCard({
           <div className="font-medium truncate">{name}</div>
           <span
             className={cn(
-              'shrink-0 rounded-full px-2 py-0.5 text-[10px] uppercase tracking-wide',
-              statusPills[status],
+              'shrink-0 rounded-full px-2 py-0.5 text-[10px] uppercase tracking-wide font-semibold',
+              statusPills[status][role],
             )}
           >
             {statusLabel ?? DEFAULT_STATUS_LABELS[status]}

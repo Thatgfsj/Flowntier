@@ -52,8 +52,8 @@ export function ErrorBadge() {
             className={
               'ml-0.5 inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full px-1 text-[10px] font-semibold ' +
               (errorCount > 0
-                ? 'bg-red-600 text-white'
-                : 'bg-yellow-500 text-black')
+                ? 'bg-status-failed text-black'
+                : 'bg-status-active text-black')
             }
           >
             {rows.length}
@@ -88,9 +88,9 @@ export function ErrorBadge() {
                 className={
                   'rounded border px-2 py-1 text-[11px] ' +
                   (r.severity === 'error'
-                    ? 'border-red-500/50 bg-red-900/20 text-red-100'
+                    ? 'border-status-failed/50 bg-status-failed/15 text-status-failed'
                     : r.severity === 'warn'
-                      ? 'border-yellow-500/50 bg-yellow-900/20 text-yellow-100'
+                      ? 'border-status-warn/50 bg-status-warn/15 text-status-warn'
                       : 'border-border bg-surface-2 text-text-primary')
                 }
               >

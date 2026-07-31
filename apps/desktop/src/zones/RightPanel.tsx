@@ -99,8 +99,13 @@ export function RightPanel({ tasks, events = [] }: RightPanelProps) {
                   setSelectedTask(selectedTask === t.id ? null : t.id);
                   setShowConsole(false);
                 }}
-                className={`text-left transition-colors ${
-                  selectedTask === t.id ? 'rounded bg-surface-2 p-1' : ''
+                className={`text-left transition-colors rounded ${
+                  // v0.4.24 (event 000119): selected task row
+                  // gets a chief-tinted wash so the user can
+                  // see "this is the one I'm inspecting".
+                  selectedTask === t.id
+                    ? 'bg-chief/15 ring-1 ring-chief/40 p-1'
+                    : 'hover:bg-surface-2/60 p-1'
                 }`}
               >
                 <TaskItem
@@ -190,8 +195,10 @@ export function RightPanel({ tasks, events = [] }: RightPanelProps) {
             {tasks.map((t) => (
               <div
                 key={t.id}
-                className={`flex items-center gap-2 rounded px-1 py-0.5 ${
-                  selectedTask === t.id ? 'bg-surface-2' : ''
+                className={`flex items-center gap-2 rounded px-1 py-0.5 transition-colors ${
+                  selectedTask === t.id
+                    ? 'bg-chief/15 ring-1 ring-chief/40'
+                    : 'hover:bg-surface-1/60'
                 }`}
               >
                 <span

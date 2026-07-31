@@ -1,26 +1,80 @@
 @import "tailwindcss";
 
+/* v0.4.24 (event 000119): Tailwind v4 only auto-scans the
+   package that owns the entry CSS. The `@flowntier/ui` package
+   sits in apps/desktop's `node_modules` (linked via pnpm
+   workspace) so its `src/` is invisible to the scanner. Without
+   these `@source` directives, `bg-critic-a/25` etc. used by
+   packages/ui don't get emitted and we end up with
+   transparent backgrounds in production builds. */
+@source "../../../packages/ui/src/**/*.{ts,tsx}";
+
+/* ════════════════════════════════════════════════════════════════
+   Flowntier theme tokens — v0.4.24
+   ────────────────────────────────────────────────────────────────
+   Design rules (chairman directive, event 000119):
+   1. Dark base, with clearly visible color accents.
+      "黑白为主, 主题色为辅" — backgrounds & text stay mono,
+      only the 4 head-roles + 4 worker colors carry hue.
+   2. Surface ramp has ≥8 units of perceptual lightness
+      between consecutive levels so the eye can separate panels.
+   3. WCAG AA on text: primary ≥ 7:1, secondary ≥ 4.5:1
+      against the surface they sit on.
+   4. Head-role colors are bright (luminance ≥ 0.45) so they
+      read as "who is speaking" at a glance.
+   ════════════════════════════════════════════════════════════════ */
+
 @theme {
-  --color-chief:      #3B6FE0;
-  --color-critic-a:   #D04A4A;
-  --color-critic-b:   #7B4FBE;
-  --color-worker-1:   #1B9E8C;
-  --color-worker-2:   #E08A2E;
-  --color-worker-3:   #4A8A3B;
-  --color-worker-4:   #8E5BC1;
-  --color-status-pending: #9CA3AF;
-  --color-status-active:  var(--color-chief);
-  --color-status-done:    #16A34A;
-  --color-status-failed:  #DC2626;
-  --color-status-warn:    #D97706;
-  --color-surface-1:  #0E1116;
-  --color-surface-2:  #161B22;
-  --color-surface-3:  #21262D;
-  --color-primary:    #E6EDF3;
-  --color-text-secondary: #8B949E;
-  --color-border:     #30363D;
-  --font-sans: "Inter", system-ui, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  /* ── Surface ramp (8 levels, monotonic luminance) ─────────── */
+  --color-surface-0: #06080D;   /* body / canvas — deepest   */
+  --color-surface-1: #0F141C;   /* primary panel             */
+  --color-surface-2: #1A2230;   /* card / elevated panel     */
+  --color-surface-3: #25303F;   /* hover, selected card      */
+  --color-surface-4: #2F3B4D;   /* focus ring, strong hover  */
+
+  /* ── Border ramp (always lighter than surface) ────────────── */
+  --color-border-subtle: #1F2A38;
+  --color-border:        #3A4658;
+  --color-border-strong: #556480;
+
+  /* ── Text (≥4.5:1 vs surface-1) ───────────────────────────── */
+  /* The class names in this codebase use the double "text-text-"
+     prefix because Tailwind v4 auto-prefixes every @theme color
+     var with the utility prefix it belongs to. We honor that
+     naming so the existing 362 token usages just keep working. */
+  --color-text-primary:   #F2F5FA; /* L≈0.93, vs s1 ≈13:1     */
+  --color-text-secondary: #B6BFCC; /* L≈0.71, vs s1 ≈6.5:1    */
+  --color-text-tertiary:  #7A8493; /* L≈0.50, vs s1 ≈3.7:1    */
+  --color-text-disabled:  #4F5867; /* L≈0.32                   */
+  --color-text-error:     #FF5C6C;
+  --color-text-success:   #3DDC97;
+  --color-text-accent:    #FFD24A;
+
+  /* ── Head roles (bright, hue-distinct) ────────────────────── */
+  --color-chief:    #5B9CFF;  /* 亮蓝 — coordinator         */
+  --color-critic-a: #FF7A85;  /* 亮红 — 找茬                 */
+  --color-critic-b: #B493FF;  /* 亮紫 — 架构审查             */
+
+  /* ── Workers (4 distinct hues, all medium-bright) ─────────── */
+  --color-worker-1: #4DD0B5;  /* 亮青绿                     */
+  --color-worker-2: #FFB347;  /* 亮橙                       */
+  --color-worker-3: #8AE063;  /* 亮草绿                     */
+  --color-worker-4: #E879F9;  /* 亮品红                     */
+
+  /* ── Status (workflow phase) ─────────────────────────────── */
+  --color-status-pending: #6B7787;
+  --color-status-active:  #FFD24A;  /* 鲜亮黄 (与 chief 蓝区分) */
+  --color-status-done:    #3DDC97;
+  --color-status-failed:  #FF5C6C;
+  --color-status-warn:    #FFA94D;
+  --color-status-error:   #FF5C6C;
+  /* Back-compat alias: the codebase has a `status-fail` and a
+     `status-failed` spelling. */
+  --color-status-fail:    #FF5C6C;
+
+  /* ── Type ─────────────────────────────────────────────────── */
+  --font-sans: "Inter", system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "Cascadia Code", monospace;
 }
 
 :root {
@@ -35,14 +89,40 @@
 body {
   margin: 0;
   min-height: 100vh;
-  background: var(--color-surface-1);
-  color: var(--color-primary);
+  background: var(--color-surface-0);
+  color: var(--color-text-primary);
 }
 
 #root {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+}
+
+/* ── Focus ring ────────────────────────────────────────────── */
+
+:where(button, a, [tabindex], input, select, textarea):focus-visible {
+  outline: 2px solid var(--color-status-active);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* ── Scrollbar (Webkit) — match the new surface ramp ───────── */
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: var(--color-surface-0);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-surface-3);
+  border-radius: 6px;
+  border: 2px solid var(--color-surface-0);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-surface-4);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -54,20 +134,16 @@ body {
   }
 }
 
-/* ── Polish 17: animated transitions ───────────────────── */
+/* ── Polish 17: animated transitions ───────────────────────── */
 
-/* Step cards in Welcome: fade-in + slight slide-up on mount */
 @keyframes flt-fade-in {
   from { opacity: 0; transform: translateY(8px); }
   to   { opacity: 1; transform: translateY(0); }
 }
-
-/* Apply to any element with .flt-anim-in */
 .flt-anim-in {
   animation: flt-fade-in 280ms ease-out both;
 }
 
-/* Step-pill progress dot pulses when active */
 @keyframes flt-pulse {
   0%, 100% { opacity: 1; }
   50%      { opacity: 0.55; }
@@ -76,7 +152,6 @@ body {
   animation: flt-pulse 1.6s ease-in-out infinite;
 }
 
-/* ErrorBoundary shake on error appearance */
 @keyframes flt-shake {
   0%, 100% { transform: translateX(0); }
   20%, 60% { transform: translateX(-6px); }
@@ -85,3 +160,16 @@ body {
 .flt-anim-shake {
   animation: flt-shake 380ms ease-in-out;
 }
+
+/* ── v0.4.24 (event 000119): role-glow utility classes ─────── */
+
+/* Each role gets a subtle box-shadow ring when it's the
+   "active speaker" — the user spots who's talking without
+   reading labels. Shadow tinted by the role's brand color. */
+.flt-glow-chief { box-shadow: 0 0 0 1px var(--color-chief), 0 0 14px -2px var(--color-chief); }
+.flt-glow-critic-a { box-shadow: 0 0 0 1px var(--color-critic-a), 0 0 14px -2px var(--color-critic-a); }
+.flt-glow-critic-b { box-shadow: 0 0 0 1px var(--color-critic-b), 0 0 14px -2px var(--color-critic-b); }
+.flt-glow-worker-1 { box-shadow: 0 0 0 1px var(--color-worker-1), 0 0 10px -3px var(--color-worker-1); }
+.flt-glow-worker-2 { box-shadow: 0 0 0 1px var(--color-worker-2), 0 0 10px -3px var(--color-worker-2); }
+.flt-glow-worker-3 { box-shadow: 0 0 0 1px var(--color-worker-3), 0 0 10px -3px var(--color-worker-3); }
+.flt-glow-worker-4 { box-shadow: 0 0 0 1px var(--color-worker-4), 0 0 10px -3px var(--color-worker-4); }

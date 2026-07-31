@@ -132,7 +132,7 @@ export function ChatSessionsPanel({
                       onDelete(s.id);
                     }
                   }}
-                  className="hidden rounded px-1 text-[10px] text-text-secondary hover:bg-red-500/20 hover:text-red-400 group-hover:inline-block"
+                  className="hidden rounded px-1 text-[10px] text-text-secondary hover:bg-status-failed/20 hover:text-status-failed group-hover:inline-block"
                   aria-label={t('chatZone.sessionsDelete', { defaultValue: '删除' })}
                 >
                   ✕

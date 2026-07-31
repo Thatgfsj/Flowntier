@@ -37,7 +37,7 @@ export function CommandDock({
   return (
     <form
       onSubmit={handleSubmit}
-      className="flex shrink-0 items-center gap-2 border-t border-border bg-surface-2 px-4 py-3"
+      className="flex shrink-0 items-center gap-2 border-t border-border-strong bg-surface-3 px-4 py-3"
       aria-label={t('commandDock.placeholder')}
     >
       <span className="shrink-0 font-mono text-xs text-text-secondary">主理 ▸</span>
@@ -58,7 +58,7 @@ export function CommandDock({
       <button
         type="submit"
         disabled={!canSubmit}
-        className="rounded-md bg-chief px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-chief/90 focus:outline-none focus:ring-2 focus:ring-chief/50 disabled:pointer-events-none disabled:opacity-50"
+        className="rounded-md bg-chief px-4 py-2 text-sm font-medium text-black transition-colors hover:brightness-110 focus:outline-none focus:ring-2 focus:ring-chief/50 disabled:pointer-events-none disabled:opacity-50"
       >
         {isReset ? resetLabel : t('commandDock.submit')}
       </button>

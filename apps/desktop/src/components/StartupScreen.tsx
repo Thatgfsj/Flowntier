@@ -99,7 +99,7 @@ export function StartupScreen({ onReady }: StartupScreenProps) {
               <button
                 type="button"
                 onClick={handleRetry}
-                className="rounded bg-chief px-4 py-2 text-sm text-white hover:bg-chief/90"
+                className="rounded bg-chief px-4 py-2 text-sm text-black hover:brightness-110"
               >
                 重试
               </button>

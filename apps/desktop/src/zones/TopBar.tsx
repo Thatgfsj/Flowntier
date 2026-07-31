@@ -63,7 +63,7 @@ export function TopBar({
   // a 4-minute workflow.
   const [confirmOpen, setConfirmOpen] = useState(false);
   return (
-    <header className="flex h-14 shrink-0 items-center gap-4 border-b border-border bg-surface-2 px-4">
+    <header className="flex h-14 shrink-0 items-center gap-4 border-b border-border-strong bg-surface-3 px-4">
       <div className="flex items-baseline gap-2">
         <span className="font-semibold tracking-tight text-primary">{projectName}</span>
         <span className="text-xs text-text-secondary">{t('topbar.tagline')}</span>
@@ -89,7 +89,7 @@ export function TopBar({
             onClick={() => setConfirmOpen(true)}
             disabled={!!cancelling}
             aria-label={t('topbar.stopAria', { defaultValue: '停止当前工作流' })}
-            className="rounded-md border border-red-500/60 bg-red-500/10 px-3 py-1.5 text-xs font-medium text-red-400 transition-colors hover:bg-red-500/20 focus:outline-none focus:ring-2 focus:ring-red-500/50 disabled:opacity-50"
+            className="rounded-md border border-status-failed/60 bg-status-failed/10 px-3 py-1.5 text-xs font-medium text-status-failed transition-colors hover:bg-status-failed/20 focus:outline-none focus:ring-2 focus:ring-status-failed/50 disabled:opacity-50"
             title={t('topbar.stopHint', { defaultValue: '立即中断当前工作流' })}
           >
             {cancelling
@@ -130,7 +130,7 @@ export function TopBar({
                       setConfirmOpen(false);
                       if (onCancel) await onCancel();
                     }}
-                    className="rounded bg-red-500 px-3 py-1 text-xs font-semibold text-white hover:bg-red-600"
+                    className="rounded bg-status-failed px-3 py-1 text-xs font-semibold text-black hover:brightness-110"
                   >
                     {t('topbar.cancelConfirm', { defaultValue: '确认停止' })}
                   </button>
