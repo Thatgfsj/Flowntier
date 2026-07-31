@@ -41,7 +41,7 @@ use agent_core::workspace::Workspace;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::sync::broadcast;
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 
 /// v0.4.26 (event 000119): map the orchestrator's `role_id`
 /// ("agent:chief" / "agent:critic:a" / "agent:critic:b" /
@@ -623,9 +623,54 @@ impl Orchestrator {
             // (user-cancelled) / "TIMEOUT" (5-min wall clock) are
             // not retriable — they reflect intent, not provider
             // health.
+            //
+            // v0.4.28 (event 000121): auth errors (401 / 403 /
+            // "Invalid API Key") are NOT retriable — the same
+            // key on a different provider preset won't
+            // magically work. Burning the fallback chain on
+            // auth just hides the real problem and turns one
+            // error into N×70 ms of confusion (chief
+            // appeared to "time out" while retry-loop spun).
+            // Fast-fail with a clear `auth_error` status so
+            // the UI can surface "API key 无效,请到
+            // Settings → 供应商 配置 <secret_name>" instead of
+            // letting the workflow spin until the per-phase
+            // timeout.
+            let is_auth_failure = outcome.status.contains("401")
+                || outcome.status.contains("403")
+                || outcome.status.contains("Invalid API Key")
+                || outcome.status.contains("invalid_key")
+                || outcome.status.contains("Authentication")
+                || outcome.status.contains("PermissionDenied");
             let retriable = outcome.status.starts_with("FAILED")
                 && !outcome.status.starts_with("FAILED: abort")
-                && !outcome.status.starts_with("FAILED: cancel");
+                && !outcome.status.starts_with("FAILED: cancel")
+                && !is_auth_failure;
+            if is_auth_failure {
+                error!(
+                    target: "orchestrator",
+                    wf_id = %self.wf_id,
+                    role = %role_id,
+                    provider = %cand.provider_short,
+                    secret_name = %cand.secret_name,
+                    base_url = %cand.base_url,
+                    "v0.4.28 (event 000121): auth failure — NOT retrying. \
+                     fix in Settings → 供应商 (provider={}, secret={})",
+                    cand.provider_short, cand.secret_name,
+                );
+                return TaskOutcome {
+                    role_id: outcome.role_id,
+                    role_display: outcome.role_display,
+                    status: format!(
+                        "FAILED: auth_error (provider={}, secret={}): {}",
+                        cand.provider_short, cand.secret_name, outcome.status
+                    ),
+                    summary: outcome.summary,
+                    text: outcome.text,
+                    elapsed_ms: outcome.elapsed_ms,
+                    structured_verdict: outcome.structured_verdict,
+                };
+            }
             if !retriable {
                 return outcome;
             }
