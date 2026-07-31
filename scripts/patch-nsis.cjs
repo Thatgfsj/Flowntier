@@ -1,7 +1,7 @@
 // BUG-FRONTEND-RT-15 (event 000045) + event 000061: post-build
 // script that patches the Tauri-generated NSIS installer.
 //
-// Three patches, in order:
+// Four patches, in order:
 //   (a) BUG-FRONTEND-RT-15: add a 2nd CheckIfAppIsRunning macro
 //       for the sidecar (flowntier_runtime.exe). Tauri 2.x only
 //       checks the main binary; the sidecar keeps a file handle
@@ -17,6 +17,14 @@
 //       isn't on PATH or returns a non-zero exit code. Tauri uses
 //       Node.js internally for the WebView2 asset bundling, so
 //       missing Node breaks the very first app launch.
+//   (d) v0.4.27 — Sync VERSION / VERSIONWITHBUILD with the
+//       app's package.json. Tauri's installer.nsi template
+//       hardcodes "0.4.22" (left over from when the chairman
+//       first switched to NSIS bundling). Without (d), the
+//       installer window shows "Flowntier 0.4.22 已安装" even
+//       when the actual productVersion + setup filename say
+//       0.4.27 — confusing. We read package.json and rewrite
+//       both !define lines.
 //
 // Usage: invoked from tauri.conf.json (postBuildCommand), or
 // manually via `pnpm tauri:patch`.
@@ -185,6 +193,42 @@ for (const rel of TARGETS) {
 
   fs.writeFileSync(fullPath, content, 'utf8');
   patched++;
+}
+
+// Patch (d) — sync VERSION / VERSIONWITHBUILD with package.json.
+// Read the version straight from the desktop app's package.json
+// (single source of truth — bumping tauri.conf.json alone leaves
+// the NSIS template stale) and rewrite both !define lines in
+// every installer.nsi we just touched.
+const pkgPath = path.join(WORKSPACE, 'apps/desktop/package.json');
+let appVersion = null;
+try {
+  const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+  appVersion = pkg.version;
+} catch (e) {
+  console.warn(`  could not read ${pkgPath} for version sync: ${e.message}`);
+}
+if (appVersion) {
+  for (const rel of TARGETS) {
+    const fullPath = path.resolve(__dirname, '..', '..', '..', rel);
+    if (!fs.existsSync(fullPath)) continue;
+    let content = fs.readFileSync(fullPath, 'utf8');
+    const before = content;
+    content = content.replace(
+      /^!define VERSION "[\d.]+"\s*$/m,
+      `!define VERSION "${appVersion}"`
+    );
+    content = content.replace(
+      /^!define VERSIONWITHBUILD "[\d.]+"\s*$/m,
+      `!define VERSIONWITHBUILD "${appVersion}.0"`
+    );
+    if (content !== before) {
+      fs.writeFileSync(fullPath, content, 'utf8');
+      console.log(`  patched (d): ${fullPath} -> ${appVersion}`);
+    } else {
+      console.log(`  (d already in sync) ${fullPath}`);
+    }
+  }
 }
 
 console.log(patched > 0
