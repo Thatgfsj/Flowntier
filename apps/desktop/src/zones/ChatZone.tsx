@@ -24,10 +24,27 @@ import { invoke } from '@tauri-apps/api/core';
 import { useAgentStream } from '../hooks/useAgentStream.js';
 import {
   getRoleResolveStatus,
+  kvGet,
+  kvSet,
   runAgentTask,
   type ChatTurnMessage,
   type RoleResolveStatus,
 } from '../lib/api.js';
+import { fallbackSummary as fallbackSummaryFromEvents } from './chatFallback.js';
+import {
+  findSession,
+  loadActiveId,
+  loadSessions,
+  newSession as buildNewSession,
+  removeSession,
+  sortByUpdatedAt,
+  STORAGE_KEY_ACTIVE,
+  STORAGE_KEY_SESSIONS,
+  touchSession,
+  upsertSession,
+  type ChatSession,
+} from './chatSessions.js';
+import { ChatSessionsPanel } from './ChatSessionsPanel.js';
 
 interface RoleSpec {
   id: string;
@@ -123,6 +140,16 @@ export function ChatZone({ onCollapse, activeAgent = null }: ChatZoneProps = {})
   // is roughly 24K tokens — well under the cheapest model.
   const MAX_CHAT_HISTORY = 12;
 
+  // v0.4.22 (event 000118, fix 6 persistence): durable chat
+  // sessions. We persist the full list under STORAGE_KEY_SESSIONS
+  // and the active session id under STORAGE_KEY_ACTIVE. The
+  // `chatHistory` above is the working copy of the active
+  // session's messages — every send + every assistant reply
+  // updates both the in-memory session and the persisted blob.
+  const [sessions, setSessions] = useState<ChatSession[]>([]);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [sessionsLoading, setSessionsLoading] = useState(true);
+
   const { events, text, done, status, reset } = useAgentStream();
   const transcriptRef = useRef<HTMLDivElement>(null);
 
@@ -139,15 +166,78 @@ export function ChatZone({ onCollapse, activeAgent = null }: ChatZoneProps = {})
   // non-empty AND we never accumulated any text_delta, fall
   // back to displaying the summary so the chairman still
   // sees the phase-8 report. Streaming text always wins;
-  // this is only the empty-text fallback.
-  const fallbackSummary = useMemo(() => {
-    if (text.length > 0) return null;
-    const lastDone = [...events].reverse().find((e) => e.kind === 'done');
-    if (lastDone && lastDone.kind === 'done' && lastDone.summary && lastDone.summary.trim().length > 0) {
-      return lastDone.summary;
-    }
-    return null;
-  }, [events, text]);
+  // this is only the empty-text fallback. The pure helper
+  // lives in `chatFallback.ts` so we can unit-test it.
+  const fallbackText = useMemo(
+    () => fallbackSummaryFromEvents(events, text),
+    [events, text],
+  );
+
+  // v0.4.22 (event 000118, fix 6 persistence): load sessions
+  // on mount. Runs exactly once; the loaders in `chatSessions`
+  // are tolerant of corrupt storage (see vitest) so a
+  // half-written SQLite blob can't brick the UI.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const [rawSessions, rawActive] = await Promise.all([
+        kvGet<unknown>(STORAGE_KEY_SESSIONS),
+        kvGet<unknown>(STORAGE_KEY_ACTIVE),
+      ]);
+      if (cancelled) return;
+      const loaded = loadSessions(rawSessions);
+      const activeId = loadActiveId(rawActive);
+      // Cross-check: if the active id no longer exists in the
+      // list (corruption / manually deleted via dev tools),
+      // drop the active pointer.
+      const validActive = activeId && findSession(loaded, activeId)
+        ? activeId
+        : null;
+      setSessions(sortByUpdatedAt(loaded));
+      setActiveSessionId(validActive);
+      // Pre-load the chatHistory if we found an active session.
+      if (validActive) {
+        const s = findSession(loaded, validActive);
+        if (s) setChatHistory(s.messages);
+      }
+      setSessionsLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // v0.4.22 (event 000118, fix 6 persistence): when the active
+  // session's messages change, mirror them into the session
+  // object + bump updatedAt + persist. We track chatHistory
+  // changes via a ref so this effect doesn't loop on itself.
+  useEffect(() => {
+    if (sessionsLoading) return;
+    if (!activeSessionId) return;
+    // Only update if the active session exists and its
+    // messages actually differ.
+    const current = findSession(sessions, activeSessionId);
+    if (!current) return;
+    if (current.messages === chatHistory) return;
+    const updated: ChatSession = touchSession({
+      ...current,
+      messages: chatHistory,
+    });
+    setSessions((prev) => sortByUpdatedAt(upsertSession(prev, updated)));
+    // chatHistory is intentionally NOT a dep: we only want to
+    // react to its changes, not re-run on the same ref.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chatHistory, activeSessionId, sessionsLoading]);
+
+  // v0.4.22 (event 000118, fix 6 persistence): persist on
+  // every change. We don't await — kvSet is fire-and-forget
+  // for the user; failures are logged but never block the UI.
+  useEffect(() => {
+    if (sessionsLoading) return;
+    void kvSet(STORAGE_KEY_SESSIONS, sessions);
+  }, [sessions, sessionsLoading]);
+  useEffect(() => {
+    if (sessionsLoading) return;
+    void kvSet(STORAGE_KEY_ACTIVE, activeSessionId);
+  }, [activeSessionId, sessionsLoading]);
 
   // v0.4.20 (event 000056): the scheduler emits a special
   // AgentEvent::Done { status: "QUOTA_NUDGE:<role>:<model>" } when
@@ -208,7 +298,7 @@ export function ChatZone({ onCollapse, activeAgent = null }: ChatZoneProps = {})
   useEffect(() => {
     if (mode !== 'chat') return;
     if (!done) return;
-    const assistantTurn = text.trim() || (fallbackSummary ?? '').trim();
+    const assistantTurn = text.trim() || (fallbackText ?? '').trim();
     if (!assistantTurn) return;
     setChatHistory((h) => {
       // Avoid duplicate consecutive assistant turns if the
@@ -218,7 +308,7 @@ export function ChatZone({ onCollapse, activeAgent = null }: ChatZoneProps = {})
       const next = [...h, { role: 'assistant' as const, content: assistantTurn }];
       return next.slice(-MAX_CHAT_HISTORY);
     });
-  }, [done, mode, text, fallbackSummary]);
+  }, [done, mode, text, fallbackText]);
 
   const send = useCallback(async () => {
     const trimmed = task.trim();
@@ -226,6 +316,19 @@ export function ChatZone({ onCollapse, activeAgent = null }: ChatZoneProps = {})
     setError(null);
     reset();
     setSending(true);
+
+    // v0.4.22 (event 000118, fix 6 persistence): if there's no
+    // active session, this send creates one. We do it BEFORE
+    // runAgentTask so the panel shows the new entry while the
+    // assistant is still streaming. The first user turn becomes
+    // the session's title.
+    let sessionId = activeSessionId;
+    if (!sessionId) {
+      const created = buildNewSession(trimmed, mode);
+      setSessions((prev) => sortByUpdatedAt(upsertSession(prev, created)));
+      setActiveSessionId(created.id);
+      sessionId = created.id;
+    }
 
     // v0.4.22 (event 000118, fix 6): snapshot chatHistory BEFORE
     // we append the new user turn so the backend receives the
@@ -277,7 +380,39 @@ export function ChatZone({ onCollapse, activeAgent = null }: ChatZoneProps = {})
     } finally {
       setSending(false);
     }
-  }, [task, sending, reset, role, mode, chatHistory]);
+  }, [task, sending, reset, role, mode, chatHistory, activeSessionId]);
+
+  // v0.4.22 (event 000118, fix 6 persistence): session action
+  // handlers. Select / create / delete. Each is one effect-free
+  // setState cascade so the persist effects fire correctly.
+
+  const selectSession = useCallback((id: string) => {
+    const s = findSession(sessions, id);
+    if (!s) return;
+    setActiveSessionId(id);
+    setChatHistory(s.messages);
+    setMode(s.mode);
+    reset();
+    setError(null);
+  }, [sessions]);
+
+  const createNewSession = useCallback(() => {
+    setActiveSessionId(null);
+    setChatHistory([]);
+    setMode(mode);  // keep current mode; user can change after
+    reset();
+    setError(null);
+  }, [mode]);
+
+  const deleteSession = useCallback((id: string) => {
+    setSessions((prev) => removeSession(prev, id));
+    if (activeSessionId === id) {
+      // Active session was deleted — clear the chat so the
+      // next send starts a brand new session.
+      setActiveSessionId(null);
+      setChatHistory([]);
+    }
+  }, [activeSessionId]);
 
   const onSubmit = useCallback(
     (e: FormEvent) => {
@@ -331,6 +466,17 @@ export function ChatZone({ onCollapse, activeAgent = null }: ChatZoneProps = {})
           </button>
         </div>
       </header>
+
+      {/* v0.4.22 (event 000118, fix 6 persistence): AIde-style
+          collapsible sessions list at the top of ChatZone. */}
+      <ChatSessionsPanel
+        sessions={sessions}
+        activeId={activeSessionId}
+        onSelect={selectSession}
+        onCreate={createNewSession}
+        onDelete={deleteSession}
+        loading={sessionsLoading}
+      />
 
       {/* Controls — only the role picker remains; everything else
           moved to Settings. */}
@@ -473,7 +619,7 @@ export function ChatZone({ onCollapse, activeAgent = null }: ChatZoneProps = {})
           className="flex min-h-0 flex-col gap-2 overflow-y-auto rounded border border-border bg-surface-2 p-3"
           aria-live="polite"
         >
-{text.length === 0 && !sending && !fallbackSummary && (
+{text.length === 0 && !sending && !fallbackText && (
             <p className="text-xs text-text-secondary">{t('chatZone.waiting', { defaultValue: '等待输入…（输出会在这里流式显示）'})}</p>
           )}
           {text && (
@@ -481,7 +627,7 @@ export function ChatZone({ onCollapse, activeAgent = null }: ChatZoneProps = {})
               {text}
             </pre>
           )}
-          {!text && fallbackSummary && (
+          {!text && fallbackText && (
             // v0.4.22 (event 000118, fix 5): empty-stream
             // fallback. Phase 8 chief can complete in ~5s
             // with the text arriving faster than the React
@@ -494,11 +640,11 @@ export function ChatZone({ onCollapse, activeAgent = null }: ChatZoneProps = {})
                 {t('chatZone.summaryFallback', { defaultValue: '汇报快照（未流式）' })}
               </p>
               <pre className="whitespace-pre-wrap break-words font-sans text-sm leading-relaxed text-text-primary">
-                {fallbackSummary}
+                {fallbackText}
               </pre>
             </>
           )}
-          {sending && text.length === 0 && !fallbackSummary && (
+          {sending && text.length === 0 && !fallbackText && (
             <p className="text-xs italic text-text-secondary">{t('chatZone.waitingModel', { defaultValue: '… 正在等待模型响应' })}</p>
           )}
         </div>

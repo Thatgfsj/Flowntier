@@ -27,7 +27,7 @@ pub mod tarot;
 pub mod ws_bridge;
 
 pub use dispatcher::Dispatcher;
-pub use handlers::{register_all, ServerState};
+pub use handlers::{register_all, ActiveWorkflows, ServerState};
 pub use protocol::{codes, RpcError, RpcParams, RpcRequest, RpcResponse, RpcResult, MAX_LINE};
 pub use scheduler::run_quota_scheduler;
 pub use server::{Server, ServerConfig};

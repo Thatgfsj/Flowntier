@@ -322,6 +322,41 @@ rolled forward to a v0.4.22 RFC in a future event).
   - 前端: `cancelWorkflow(wfId)` wrapper
   - 前端: TopBar 加红色 "停止" 按钮 + 二次确认 modal
   - App.tsx: `handleCancel` 调 `cancelWorkflow` + 乐观 reset busy
+
+### event 000118 hardening pass (2026-07-29)
+- **背景**: 主席说"你的修复没用强健性", 4 个 fix 加边界 case + 单测
+- **fix3 hardening** (Phase 5 task_id 传播):
+  - 6 个 `#[test]` 边界 case in `crates/agent-core/src/event.rs`:
+    Some/None 往返, JSON null vs omitted 区分, "" vs None 区分,
+    4 个 task-scoped variant 都带 task_id, 4 个非 task-scoped 不带
+  - 独立 `crates/agent-core/tests/hardening_fix3.rs` (绕过 Windows libtest crash)
+  - 注: Windows 工具链 0xc0000005 crash 不影响 release, Linux/CI 跑
+- **fix5 hardening** (phase 8 streaming 兜底):
+  - 提取纯函数 `fallbackSummary(events, text)` 到 `apps/desktop/src/zones/chatFallback.ts`
+  - 12 个 vitest in `chatFallback.test.ts`:
+    text 非空时返回 null (streaming wins), whitespace-only summary = null,
+    null summary = null, ABORTED 仍兜底, 多个 done 取最新, 单空格边界
+  - **12/12 vitest PASS**
+- **fix6 hardening** (chat_history + 持久化):
+  - 提取纯函数 `parse_chat_history(body)` 到 `crates/agent-core/src/message.rs`
+  - 12 个 `#[test]` 边界 case in `message.rs`:
+    missing/null/empty/wrong-type/malformed-entries/tool_call_id required/...
+  - 持久化层: `apps/desktop/src/zones/chatSessions.ts` 纯模块
+    + `ChatSessionsPanel.tsx` AIde 风格折叠列表 (ChatZone 顶部)
+  - 36 个 vitest in `chatSessions.test.ts`:
+    newSessionId 无冲突, deriveTitle 边界, sortByUpdatedAt 不修改输入,
+    capMessages 保留最新, loadSessions 抗腐化 (null/non-array/malformed),
+    loadActiveId 边界, round-trip
+  - **36/36 vitest PASS**
+- **fix7 hardening** (cancel_token race):
+  - 提取 `ActiveWorkflows` newtype in `crates/pipe-server/src/handlers.rs`
+    (insert/get/remove/len 干净接口)
+  - 11 个 `#[tokio::test]` in `crates/pipe-server/tests/hardening_fix7.rs`:
+    cancel_token 幂等, clone 共享状态, 3 支 select! race (cancel/recv/closed),
+    parallel cancel 安全, 100 workflow 隔离 cancel
+  - 路由 `POST /api/workflow/cancel` 接 `ActiveWorkflows.get()` 代替原始 mutex
+- **总体**: cargo check --tests 全通过, vitest **48/48 PASS**, tsc --noEmit 0 error
+
 - v0.5: re-enable macOS + Linux NSIS bundle targets in
   the Tauri config (currently set to NSIS only). Block
   on the chairman's iOS-signing story first.

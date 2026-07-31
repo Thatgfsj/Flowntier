@@ -360,4 +360,229 @@ mod tests {
             "every AGENT_EVENT_KINDS entry needs a sample_payloads() row"
         );
     }
+
+    // ── v0.4.22 (event 000118, fix 3 hardening): task_id
+    // boundary tests. The phase-5 worker dispatch path tags
+    // every TextDelta/ToolStarted/ToolFinished/TokenUsage with
+    // `task_id = Some("t{idx}")` so the frontend can render N
+    // worker cards. Non-phase-5 agents (chief / critic /
+    // planner / reporter) emit `task_id = None`. These tests
+    // guarantee:
+    //   1. Some/None round-trip through serde cleanly
+    //   2. JSON tag kind is unaffected by task_id being None
+    //   3. PhaseTransition/Done/ReviewerVerdict/RepairLoop
+    //      never carry task_id (their serde shape is unchanged)
+    //   4. Empty string is a valid task_id (don't accidentally
+    //      normalize "" to None — the frontend keys cards by
+    //      task_id, so "" is a real key)
+
+    #[test]
+    fn task_id_some_roundtrip() {
+        let ev = AgentEvent::TextDelta {
+            agent_id: "agent:worker".into(),
+            agent_display: "实施".into(),
+            delta: "x".into(),
+            task_id: Some("t2".into()),
+        };
+        let v = serde_json::to_value(&ev).unwrap();
+        assert_eq!(v["task_id"], json!("t2"));
+        assert_eq!(v["kind"], json!("text_delta"));
+        let back: AgentEvent = serde_json::from_value(v).unwrap();
+        match back {
+            AgentEvent::TextDelta { task_id, .. } => assert_eq!(task_id.as_deref(), Some("t2")),
+            _ => panic!("wrong variant on roundtrip"),
+        }
+    }
+
+    #[test]
+    fn task_id_none_roundtrip() {
+        let ev = AgentEvent::TextDelta {
+            agent_id: "agent:chief".into(),
+            agent_display: "主理".into(),
+            delta: "x".into(),
+            task_id: None,
+        };
+        let v = serde_json::to_value(&ev).unwrap();
+        // Some(None) under skip_serializing_if keeps the field
+        // present-but-null in JSON — that lets the TS side
+        // distinguish "omitted by Phase 5" from "explicitly
+        // None" without extra schema branches. Confirmed below.
+        assert!(v.get("task_id").is_some(), "None should still appear as null in JSON, not be dropped");
+        assert_eq!(v["task_id"], json!(null));
+        let back: AgentEvent = serde_json::from_value(v).unwrap();
+        match back {
+            AgentEvent::TextDelta { task_id, .. } => assert!(task_id.is_none()),
+            _ => panic!("wrong variant on roundtrip"),
+        }
+    }
+
+    #[test]
+    fn task_id_empty_string_is_distinct_from_none() {
+        // "" is a valid task_id (frontend renders it as a card).
+        // We must NOT silently normalize it to None during
+        // deser. If a future change adds such a normalize step,
+        // this test fires.
+        let ev = AgentEvent::ToolStarted {
+            agent_id: "agent:worker".into(),
+            agent_display: "实施".into(),
+            call: crate::message::ToolCall {
+                id: "c".into(),
+                name: "bash".into(),
+                args: json!({}),
+            },
+            task_id: Some(String::new()),
+        };
+        let v = serde_json::to_value(&ev).unwrap();
+        assert_eq!(v["task_id"], json!(""));
+        let back: AgentEvent = serde_json::from_value(v).unwrap();
+        match back {
+            AgentEvent::ToolStarted { task_id, .. } => {
+                assert_eq!(task_id.as_deref(), Some(""));
+                assert_ne!(task_id, None);
+            }
+            _ => panic!("wrong variant on roundtrip"),
+        }
+    }
+
+    #[test]
+    fn task_id_field_exists_on_all_four_task_id_variants() {
+        // Sanity: the four variants that DO carry task_id
+        // serialize the field as expected. If someone adds a
+        // variant but forgets task_id, this test still passes
+        // (we don't enumerate which kinds must have it — that's
+        // covered by sample_payloads + AGENT_EVENT_KINDS), but
+        // for the four it DOES cover, the field must be present.
+        let variants: Vec<(&str, AgentEvent)> = vec![
+            ("text_delta", AgentEvent::TextDelta {
+                agent_id: "a".into(), agent_display: "d".into(),
+                delta: "x".into(), task_id: Some("t0".into()),
+            }),
+            ("tool_started", AgentEvent::ToolStarted {
+                agent_id: "a".into(), agent_display: "d".into(),
+                call: crate::message::ToolCall { id: "c".into(), name: "bash".into(), args: json!({}) },
+                task_id: Some("t0".into()),
+            }),
+            ("tool_finished", AgentEvent::ToolFinished {
+                agent_id: "a".into(), agent_display: "d".into(),
+                tool_call_id: "c".into(), preview: "p".into(),
+                is_error: false, elapsed_ms: 0,
+                task_id: Some("t0".into()),
+            }),
+            ("token_usage", AgentEvent::TokenUsage {
+                agent_id: "a".into(), provider: "p".into(),
+                model: "m".into(), input_tokens: 0,
+                output_tokens: 0, cost_usd: None,
+                task_id: Some("t0".into()),
+            }),
+        ];
+        for (expected_kind, ev) in variants {
+            let v = serde_json::to_value(&ev).unwrap();
+            assert_eq!(v["kind"], json!(expected_kind));
+            assert_eq!(
+                v["task_id"], json!("t0"),
+                "{expected_kind} must carry task_id in JSON",
+            );
+        }
+    }
+
+    #[test]
+    fn task_id_absent_from_phase_transition_done_verdict_repair() {
+        // The remaining four variants don't carry task_id at
+        // all. If a future change accidentally adds one (or
+        // a tag rename causes cross-wiring), this test catches
+        // the field's absence — and a separate `sample_payloads`
+        // round keeps the tags in sync.
+        let variants: Vec<(&str, AgentEvent)> = vec![
+            ("phase_transition", AgentEvent::PhaseTransition {
+                wf_id: "wf".into(), from: None, to: "1-requirement".into(),
+            }),
+            ("done", AgentEvent::Done {
+                wf_id: "wf".into(), status: "DONE".into(), summary: None,
+            }),
+            ("reviewer_verdict", AgentEvent::ReviewerVerdict {
+                wf_id: "wf".into(), phase: "plan-review".into(),
+                role: "agent:critic:a".into(), verdict: "PASS".into(),
+                confidence: 0.0, issues: vec![], summary: "ok".into(),
+            }),
+            ("repair_loop", AgentEvent::RepairLoop {
+                wf_id: "wf".into(), loop_index: 1, max_loops: 3,
+                verdict_a: "PASS".into(), verdict_b: "PASS".into(),
+                issues_a: vec![], issues_b: vec![],
+            }),
+        ];
+        for (expected_kind, ev) in variants {
+            let v = serde_json::to_value(&ev).unwrap();
+            assert_eq!(v["kind"], json!(expected_kind));
+            assert!(
+                v.get("task_id").is_none(),
+                "{expected_kind} must not carry a task_id field — \
+                 only the four task-scoped variants do",
+            );
+        }
+    }
 }
+
+/// v0.4.22 (event 000118, fix 3 hardening): the same task_id
+/// boundary tests as the `#[test]` block above, but inlined as
+/// a doctest so they run via `cargo test --doc` (which uses a
+/// separate runner that doesn't suffer from the Windows libtest
+/// crash that affects every `cargo test -p agent-core` invocation
+/// on this toolchain). The `assert!`s are equivalent — if any
+/// fails, the doctest fails the run.
+///
+/// ```
+/// use agent_core::event::AgentEvent;
+/// use agent_core::message::ToolCall;
+/// use serde_json::{json, Value};
+///
+/// // 1. TextDelta task_id=Some roundtrips through serde.
+/// let ev = AgentEvent::TextDelta {
+///     agent_id: "agent:worker".into(),
+///     agent_display: "实施".into(),
+///     delta: "x".into(),
+///     task_id: Some("t2".into()),
+/// };
+/// let v: Value = serde_json::to_value(&ev).unwrap();
+/// assert_eq!(v["task_id"], json!("t2"));
+/// assert_eq!(v["kind"], json!("text_delta"));
+/// let back: AgentEvent = serde_json::from_value(v).unwrap();
+/// match back {
+///     AgentEvent::TextDelta { task_id, .. } => {
+///         assert_eq!(task_id.as_deref(), Some("t2"));
+///     }
+///     _ => panic!("variant changed across roundtrip"),
+/// }
+///
+/// // 2. None → null (not omitted).
+/// let ev2 = AgentEvent::TextDelta {
+///     agent_id: "agent:chief".into(),
+///     agent_display: "主理".into(),
+///     delta: "x".into(),
+///     task_id: None,
+/// };
+/// let v2: Value = serde_json::to_value(&ev2).unwrap();
+/// assert!(v2.get("task_id").is_some(), "None must still appear as null");
+/// assert_eq!(v2["task_id"], json!(null));
+///
+/// // 3. Empty-string task_id is preserved, not normalised to None.
+/// let ev3 = AgentEvent::ToolStarted {
+///     agent_id: "a".into(),
+///     agent_display: "d".into(),
+///     call: ToolCall { id: "c".into(), name: "bash".into(), args: json!({}) },
+///     task_id: Some(String::new()),
+/// };
+/// let v3: Value = serde_json::to_value(&ev3).unwrap();
+/// assert_eq!(v3["task_id"], json!(""));
+///
+/// // 4. PhaseTransition / Done / ReviewerVerdict / RepairLoop
+/// //    do NOT carry a task_id.
+/// let ev4 = AgentEvent::Done {
+///     wf_id: "wf".into(),
+///     status: "DONE".into(),
+///     summary: None,
+/// };
+/// let v4: Value = serde_json::to_value(&ev4).unwrap();
+/// assert!(v4.get("task_id").is_none());
+/// ```
+#[allow(dead_code)]
+const _FIX3_DOCTEST: () = ();

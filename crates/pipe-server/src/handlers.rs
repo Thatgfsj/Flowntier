@@ -7,7 +7,7 @@
 use agent_core::provider::openai::OpenAiProvider;
 use agent_core::tool::ToolRegistry;
 use agent_core::workspace::Workspace;
-use agent_core::{Agent, AgentConfig, AgentEvent, Message};
+use agent_core::{Agent, AgentConfig, AgentEvent, Message, message::parse_chat_history};
 use serde_json::{json, Value};
 use std::sync::Arc;
 use tokio::sync::broadcast;
@@ -85,7 +85,42 @@ pub struct ServerState {
     /// `cancel_workflow` Tauri command was a no-op stub and
     /// the chairman had no way to interrupt a runaway
     /// 30-minute workflow.
-    active_workflows: Arc<std::sync::Mutex<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>>,
+    active_workflows: Arc<ActiveWorkflows>,
+}
+
+/// v0.4.22 (event 000118, fix 7 hardening): thin newtype around
+/// the wf_id → cancel_token map. Exists primarily so the test
+/// suite at `tests/hardening_fix7.rs` can exercise insert/get/
+/// remove without spinning up a full ServerState.
+#[derive(Default)]
+pub struct ActiveWorkflows {
+    inner: std::sync::Mutex<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>,
+}
+
+impl ActiveWorkflows {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn insert(&self, wf_id: String, token: tokio_util::sync::CancellationToken) {
+        let mut m = self.inner.lock().expect("ActiveWorkflows mutex poisoned");
+        m.insert(wf_id, token);
+    }
+
+    pub fn get(&self, wf_id: &str) -> Option<tokio_util::sync::CancellationToken> {
+        let m = self.inner.lock().expect("ActiveWorkflows mutex poisoned");
+        m.get(wf_id).cloned()
+    }
+
+    pub fn remove(&self, wf_id: &str) -> Option<tokio_util::sync::CancellationToken> {
+        let mut m = self.inner.lock().expect("ActiveWorkflows mutex poisoned");
+        m.remove(wf_id)
+    }
+
+    pub fn len(&self) -> usize {
+        let m = self.inner.lock().expect("ActiveWorkflows mutex poisoned");
+        m.len()
+    }
 }
 
 impl ServerState {
@@ -126,7 +161,7 @@ impl ServerState {
             secrets,
             repo,
             dispatcher: Arc::new(std::sync::Mutex::new(None)),
-            active_workflows: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+            active_workflows: Arc::new(ActiveWorkflows::new()),
         }
     }
 
@@ -1148,8 +1183,7 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
             // within ~1s instead of waiting for the 5-min
             // per-task timeout.
             {
-                let mut map = s.active_workflows.lock().expect("active_workflows mutex");
-                map.insert(wf_id.clone(), cancel_token);
+                s.active_workflows.insert(wf_id.clone(), cancel_token);
             }
             let wf_id_for_log = wf_id.clone();
             let s_for_cleanup = s.clone();
@@ -1161,10 +1195,7 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
                 // workflow is done — the route will return
                 // 404 from this point on, which matches the
                 // "no longer active" semantic.
-                {
-                    let mut map = s_for_cleanup.active_workflows.lock().expect("active_workflows mutex");
-                    map.remove(&wf_id_for_cleanup);
-                }
+                s_for_cleanup.active_workflows.remove(&wf_id_for_cleanup);
                 tracing::info!(
                     target: "pipe_server",
                     wf_id = %wf_id_for_log,
@@ -1251,10 +1282,7 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
                     "error": "missing 'wf_id' in body",
                 })));
             }
-            let token_opt = {
-                let map = s.active_workflows.lock().expect("active_workflows mutex");
-                map.get(&wf_id).cloned()
-            };
+            let token_opt = s.active_workflows.get(&wf_id);
             match token_opt {
                 Some(token) => {
                     tracing::info!(
@@ -1527,10 +1555,7 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
                     "error": "missing 'wf_id' in path placeholder",
                 })));
             }
-            let token = {
-                let map = s.active_workflows.lock().expect("active_workflows mutex");
-                map.get(&wf_id).cloned()
-            };
+            let token = s.active_workflows.get(&wf_id);
             match token {
                 Some(tok) => {
                     tok.cancel();
@@ -2488,16 +2513,10 @@ async fn run_task(body: Value, state: Arc<ServerState>) -> Result<(u16, Value), 
     //     tool_calls?: [...], tool_call_id?: string }
     // We tolerate malformed entries by silently dropping them
     // (the user can always re-send a corrected turn) so a single
-    // bad record doesn't kill the whole turn.
-    let chat_history: Vec<Message> = body
-        .get("chat_history")
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|entry| serde_json::from_value::<Message>(entry.clone()).ok())
-                .collect()
-        })
-        .unwrap_or_default();
+    // bad record doesn't kill the whole turn. The actual
+    // filter_map is in `parse_chat_history` in agent-core so
+    // we can unit-test it without spinning up the pipe server.
+    let chat_history: Vec<Message> = parse_chat_history(&body);
 
     // ── Build the primary provider ─────────────────────────────
     let (provider_kind, base_url, model, api_key) = if legacy_explicit {
