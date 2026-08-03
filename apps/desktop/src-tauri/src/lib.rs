@@ -618,6 +618,42 @@ async fn delete_secret(name: String) -> Result<(), String> {
     }
 }
 
+/// v0.4.30 (audit 000130): upsert a per-(provider, model)
+/// metadata override (context_length + thinking_strength).
+/// Either field may be null to mean "don't touch the
+/// existing override for that column" — but the frontend
+/// usually sends both together or neither.
+#[tauri::command]
+async fn set_model_override(
+    provider_id: String,
+    model_id: String,
+    context_length: Option<Option<i64>>,
+    thinking_strength: Option<Option<String>>,
+) -> Result<serde_json::Value, String> {
+    let body = serde_json::json!({
+        "context_length": context_length.map(|v| match v {
+            Some(n) => serde_json::json!(n),
+            None => serde_json::json!(null),
+        }),
+        "thinking_strength": thinking_strength.map(|v| match v {
+            Some(s) => serde_json::json!(s),
+            None => serde_json::json!(null),
+        }),
+    });
+    let path = format!("/api/providers/{}/models/{}", provider_id, model_id);
+    pipe_request("PUT", &path, Some(body)).await
+}
+
+/// v0.4.30 (audit 000130): drop the override row entirely.
+#[tauri::command]
+async fn clear_model_override(
+    provider_id: String,
+    model_id: String,
+) -> Result<serde_json::Value, String> {
+    let path = format!("/api/providers/{}/models/{}", provider_id, model_id);
+    pipe_request("DELETE", &path, None).await
+}
+
 #[tauri::command]
 async fn reveal_secret(name: String) -> Result<String, String> {
     // v0.4.13: still returns String at the Tauri IPC boundary
@@ -1918,6 +1954,7 @@ pub fn run() {
             list_plugins, invoke_plugin, fetch_provider_models,
             add_custom_provider, remove_custom_provider,
             disable_provider_model, enable_provider_model,
+            set_model_override, clear_model_override,
             start_workflow_cmd, get_workflow, cancel_workflow,
             run_agent_task, run_workflow,
             draw_i_ching,

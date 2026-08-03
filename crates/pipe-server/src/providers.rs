@@ -53,7 +53,11 @@ pub const PRESETS: &[ProviderPreset] = &[
         display_name: "OpenAI",
         kind: "openai-compatible",
         base_url: "https://api.openai.com/v1",
-        secret_name: "OPENAI_API_KEY",
+        // v0.4.30 (audit 000130): renamed from `OPENAI_API_KEY` to
+        // put every Flowntier secret in an internal namespace so
+        // there is zero chance of confusion with shell env vars.
+        // Migration 0008 renames any pre-existing rows.
+        secret_name: "flowntier/openai",
         default_model: "gpt-4o",
         note: "GPT-4o, GPT-4 Turbo, o1-preview",
         has_live_models_endpoint: true,
@@ -63,7 +67,7 @@ pub const PRESETS: &[ProviderPreset] = &[
         display_name: "Anthropic",
         kind: "anthropic-compatible",
         base_url: "https://api.anthropic.com",
-        secret_name: "ANTHROPIC_API_KEY",
+        secret_name: "flowntier/anthropic",
         default_model: "claude-opus-4-8",
         note: "Claude Opus 4.8 (recommended), Sonnet 4.6, Haiku",
         has_live_models_endpoint: false, // Anthropic has no /v1/models
@@ -73,7 +77,7 @@ pub const PRESETS: &[ProviderPreset] = &[
         display_name: "Google AI (Gemini)",
         kind: "openai-compatible",
         base_url: "https://generativelanguage.googleapis.com/v1beta/openai",
-        secret_name: "GOOGLE_API_KEY",
+        secret_name: "flowntier/google",
         default_model: "gemini-2.0-flash",
         note: "Gemini 2.0 Flash (fast), 1.5 Pro (deep)",
         has_live_models_endpoint: true,
@@ -83,7 +87,7 @@ pub const PRESETS: &[ProviderPreset] = &[
         display_name: "DeepSeek",
         kind: "openai-compatible",
         base_url: "https://api.deepseek.com",
-        secret_name: "DEEPSEEK_API_KEY",
+        secret_name: "flowntier/deepseek",
         default_model: "deepseek-chat",
         note: "DeepSeek-V3 (chat), DeepSeek-R1 (reasoning)",
         has_live_models_endpoint: true,
@@ -93,7 +97,7 @@ pub const PRESETS: &[ProviderPreset] = &[
         display_name: "MiniMax",
         kind: "openai-compatible",
         base_url: "https://api.minimaxi.com/v1",
-        secret_name: "MINIMAX_API_KEY",
+        secret_name: "flowntier/minimax",
         default_model: "MiniMax-Text-01",
         note: "abab-6.5s / abab-7 (default MiniMax-Text-01)",
         has_live_models_endpoint: true,
@@ -103,7 +107,7 @@ pub const PRESETS: &[ProviderPreset] = &[
         display_name: "Moonshot Kimi",
         kind: "openai-compatible",
         base_url: "https://api.moonshot.cn/v1",
-        secret_name: "MOONSHOT_API_KEY",
+        secret_name: "flowntier/kimi",
         default_model: "moonshot-v1-128k",
         note: "Kimi K2 (1T MoE), v1-128k long context",
         has_live_models_endpoint: true,
@@ -113,7 +117,7 @@ pub const PRESETS: &[ProviderPreset] = &[
         display_name: "Zhipu GLM",
         kind: "openai-compatible",
         base_url: "https://open.bigmodel.cn/api/paas/v4",
-        secret_name: "GLM_API_KEY",
+        secret_name: "flowntier/glm",
         default_model: "glm-4-plus",
         note: "GLM-4-Plus, GLM-4-Air, GLM-Z1 (reasoning)",
         has_live_models_endpoint: true,
@@ -132,7 +136,7 @@ pub const PRESETS: &[ProviderPreset] = &[
         // the orchestrator's per-phase timeout fired. Verified via
         // `nslookup` + `curl` against the live endpoint.
         base_url: "https://api.xiaomimimo.com/v1",
-        secret_name: "MIMO_API_KEY",
+        secret_name: "flowntier/mimo",
         default_model: "mimo-v1",
         note: "MiMo-7B (preview)",
         has_live_models_endpoint: true,
@@ -142,7 +146,7 @@ pub const PRESETS: &[ProviderPreset] = &[
         display_name: "SiliconFlow",
         kind: "openai-compatible",
         base_url: "https://api.siliconflow.cn/v1",
-        secret_name: "SILICONFLOW_API_KEY",
+        secret_name: "flowntier/siliconflow",
         default_model: "Qwen/Qwen2.5-72B-Instruct",
         note: "Aggregates many OSS models — Qwen, GLM, Yi, DeepSeek",
         has_live_models_endpoint: true,
@@ -249,9 +253,13 @@ mod tests {
     #[test]
     fn every_preset_has_a_secret_name() {
         for p in PRESETS {
+            // v0.4.30 (audit 000130): secret names live in the
+            // `flowntier/<id>` internal namespace so they cannot be
+            // confused with shell env vars. The old `*_API_KEY`
+            // convention was renamed via migration 0008.
             assert!(
-                p.secret_name.ends_with("_API_KEY"),
-                "{}: secret_name must end with _API_KEY",
+                p.secret_name.starts_with("flowntier/"),
+                "{}: secret_name must live in flowntier/<id> namespace",
                 p.id
             );
         }

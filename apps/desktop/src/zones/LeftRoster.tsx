@@ -2,24 +2,9 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AgentCard, type AgentStatus } from '@flowntier/ui';
 import { FileTree } from '../components/FileTree.js';
-
-export interface LeftRosterProps {
-  chiefStatus: AgentStatus;
-  criticAStatus: AgentStatus;
-  criticBStatus: AgentStatus;
-  workerStatus: AgentStatus;
-  /**
-   * v0.4.22 (event 000118, fix 3): per-task worker status
-   * map keyed by the orchestrator's `t{idx}` task id. When
-   * non-empty, render N worker cards (one per plan task)
-   * instead of the single legacy `workerStatus` card. The
-   * single card stays as a fallback for the case where the
-   * runtime hasn't yet emitted any task-tagged events (e.g.
-   * during Phase 1-4 or before Phase 5 dispatches).
-   */
-  workerTaskStatus?: Record<string, AgentStatus>;
-  workerTaskTitles?: Record<string, string>;
-}
+import { useAgentStatus, useEvents } from '../contexts/WorkflowContext.js';
+import { agentIdToHeadRole } from '../lib/agentId.js';
+import { AgentLivePanelTooltip } from './AgentLivePanel.js';
 
 /**
  * Z2 — left roster. Lists every agent with status.
@@ -33,25 +18,46 @@ export interface LeftRosterProps {
  * every 5s and shows the live tree under the runtime's
  * current workspace root, so chief writes are visible
  * without a manual refresh.
+ *
+ * v0.4.29 (Phase A): `workerTaskStatus` is now derived inside
+ * the component from the event stream (text_delta /
+ * tool_started / tool_finished with `task_id`). Previously
+ * App.tsx kept a separate `useState` for it and passed it
+ * down as a prop — which required App.tsx to re-render on
+ * every event. Now the roster subscribes to `useEvents()`
+ * directly so changes are scoped to this subtree.
  */
-export function LeftRoster({
-  chiefStatus,
-  criticAStatus,
-  criticBStatus,
-  workerStatus,
-  workerTaskStatus,
-  workerTaskTitles,
-}: LeftRosterProps) {
+export function LeftRoster() {
   const { t } = useTranslation();
   const [tab, setTab] = useState<'agents' | 'files'>('agents');
-  // v0.4.22 (event 000118, fix 3): if the orchestrator has
-  // tagged any Phase-5 events with a `t{idx}` task id,
-  // render one card per task. Sort by id so `t0`, `t1`, …
-  // stay in plan order rather than event-arrival order
-  // (worker N's first TextDelta arrives before worker N-1's).
-  const perTaskIds = workerTaskStatus
-    ? Object.keys(workerTaskStatus).sort()
-    : [];
+
+  const agentStatus = useAgentStatus();
+  // v0.4.29 (Phase A): derive per-task worker status from the
+  // event stream. The runtime tags every worker event with
+  // `task_id` ∈ {t0, t1, …} so we can render one card per task.
+  const events = useEvents();
+  const workerTaskStatus: Record<string, AgentStatus> = {};
+  const workerTaskTitles: Record<string, string> = {};
+  // Walk the events back-to-front keeping the LAST status / title
+  // seen per task id. This is O(n) per render but `events` is
+  // bounded by `events.slice(-200)` upstream.
+  for (let i = events.length - 1; i >= 0; i--) {
+    const e = events[i];
+    if (!e) continue;
+    if (e.kind === 'task_status' && e.task_id) {
+      if (workerTaskTitles[e.task_id] === undefined && e.task_title) {
+        workerTaskTitles[e.task_id] = e.task_title;
+      }
+      continue;
+    }
+    if (e.kind === 'text_delta' || e.kind === 'tool_started' || e.kind === 'tool_finished') {
+      const tid = e.task_id;
+      if (tid && workerTaskStatus[tid] === undefined) {
+        workerTaskStatus[tid] = e.kind === 'tool_started' ? 'thinking' : 'speaking';
+      }
+    }
+  }
+  const perTaskIds = Object.keys(workerTaskStatus).sort();
 
   return (
     <div className="flex flex-col gap-2">
@@ -95,32 +101,38 @@ export function LeftRoster({
           <h2 className="px-1 text-xs font-semibold uppercase tracking-wide text-text-secondary">
             {t('perTask.agent.chief')}
           </h2>
-          <AgentCard
-            role="chief"
-            name={t('perTask.agent.chief')}
-            status={chiefStatus}
-            statusLabel={t(`agentCard.status.${chiefStatus}`)}
-            subtitle={t('roster.chief.thinking')}
-            progress={chiefStatus === 'thinking' ? 0.5 : undefined}
-          />
+          <AgentLivePanelTooltip role="chief">
+            <AgentCard
+              role="chief"
+              name={t('perTask.agent.chief')}
+              status={agentStatus.chief.status}
+              statusLabel={t(`agentCard.status.${agentStatus.chief.status}`)}
+              subtitle={t('roster.chief.thinking')}
+              progress={agentStatus.chief.status === 'thinking' ? 0.5 : undefined}
+            />
+          </AgentLivePanelTooltip>
 
           <h2 className="mt-3 px-1 text-xs font-semibold uppercase tracking-wide text-text-secondary">
             {t('leftRoster.reviewers')}
           </h2>
-          <AgentCard
-            role="critic-a"
-            name={t('perTask.agent.criticA')}
-            status={criticAStatus}
-            statusLabel={t(`agentCard.status.${criticAStatus}`)}
-            subtitle={t('leftRoster.criticASubtitle')}
-          />
-          <AgentCard
-            role="critic-b"
-            name={t('perTask.agent.criticB')}
-            status={criticBStatus}
-            statusLabel={t(`agentCard.status.${criticBStatus}`)}
-            subtitle={t('leftRoster.criticBSubtitle')}
-          />
+          <AgentLivePanelTooltip role="critic-a">
+            <AgentCard
+              role="critic-a"
+              name={t('perTask.agent.criticA')}
+              status={agentStatus['critic-a'].status}
+              statusLabel={t(`agentCard.status.${agentStatus['critic-a'].status}`)}
+              subtitle={t('leftRoster.criticASubtitle')}
+            />
+          </AgentLivePanelTooltip>
+          <AgentLivePanelTooltip role="critic-b">
+            <AgentCard
+              role="critic-b"
+              name={t('perTask.agent.criticB')}
+              status={agentStatus['critic-b'].status}
+              statusLabel={t(`agentCard.status.${agentStatus['critic-b'].status}`)}
+              subtitle={t('leftRoster.criticBSubtitle')}
+            />
+          </AgentLivePanelTooltip>
 
           <h2 className="mt-3 px-1 text-xs font-semibold uppercase tracking-wide text-text-secondary">
             {t('perTask.agent.worker')}
@@ -130,33 +142,41 @@ export function LeftRoster({
           </h2>
           {perTaskIds.length > 0 ? (
             perTaskIds.map((tid) => {
-              const s = workerTaskStatus![tid] ?? 'idle';
-              const title = workerTaskTitles?.[tid];
+              const s = workerTaskStatus[tid] ?? 'idle';
+              const title = workerTaskTitles[tid];
               const display = title
                 ? `${t('perTask.agent.worker')} · ${tid}: ${title}`
                 : `${t('perTask.agent.worker')} · ${tid}`;
+              // Per-task worker cards still share the same
+              // `worker` AgentLivePanel — the panel shows the
+              // same role-wide timeline because the runtime
+              // emits a single `worker` bucket. Per-task
+              // event-level timeline is in the right panel.
               return (
-                <AgentCard
-                  key={tid}
-                  role="worker"
-                  name={display}
-                  status={s}
-                  statusLabel={t(`agentCard.status.${s}`)}
-                  subtitle={t('leftRoster.workerSubtitle')}
-                />
+                <AgentLivePanelTooltip key={tid} role="worker">
+                  <AgentCard
+                    role="worker"
+                    name={display}
+                    status={s}
+                    statusLabel={t(`agentCard.status.${s}`)}
+                    subtitle={t('leftRoster.workerSubtitle')}
+                  />
+                </AgentLivePanelTooltip>
               );
             })
           ) : (
             // No per-task events yet — fall back to the
             // legacy single worker card so phases before
             // dispatch still get a status row.
-            <AgentCard
-              role="worker"
-              name={t('perTask.agent.worker')}
-              status={workerStatus}
-              statusLabel={t(`agentCard.status.${workerStatus}`)}
-              subtitle={t('leftRoster.workerSubtitle')}
-            />
+            <AgentLivePanelTooltip role="worker">
+              <AgentCard
+                role="worker"
+                name={t('perTask.agent.worker')}
+                status={agentStatus.worker.status}
+                statusLabel={t(`agentCard.status.${agentStatus.worker.status}`)}
+                subtitle={t('leftRoster.workerSubtitle')}
+              />
+            </AgentLivePanelTooltip>
           )}
         </div>
       )}
@@ -169,3 +189,9 @@ export function LeftRoster({
     </div>
   );
 }
+
+// v0.4.29 (Phase B): unused helper retained as a re-export so
+// any future consumer (e.g. AgentLivePanel) can map an event
+// agent_id back to its dashboard head role. The roster no
+// longer needs it itself.
+export { agentIdToHeadRole };

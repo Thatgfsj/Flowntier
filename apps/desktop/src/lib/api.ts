@@ -286,6 +286,49 @@ export async function enableProviderModel(
   );
 }
 
+// v0.4.30 (audit 000130): per-(provider, model) metadata
+// override. The Settings → provider-detail "✎ edit" button
+// uses this to correct e.g. MiniMax-M3's context_length
+// without waiting for an app release. Outer Option = "don't
+// touch this column", inner Option = "explicit null clears
+// the override". Tauri IPC signature passes through
+// `Option<Option<T>>` faithfully.
+export type ModelOverridePatch = {
+  provider_id: string;
+  model_id: string;
+  context_length?: number | null;
+  thinking_strength?: 'low' | 'medium' | 'high' | null;
+};
+
+export async function setModelOverride(
+  patch: ModelOverridePatch,
+): Promise<{ ok: boolean; provider_id: string; model: string }> {
+  const { provider_id, model_id, context_length, thinking_strength } = patch;
+  return invoke<{ ok: boolean; provider_id: string; model: string }>(
+    'set_model_override',
+    {
+      providerId: provider_id,
+      modelId: model_id,
+      // Tauri's invoke expects JS-side camelCase OR snake_case
+      // depending on how the Rust handler is named. Our Rust
+      // fn uses snake_case params so the IPC layer maps
+      // automatically; we send both via the patch shape.
+      contextLength: context_length === undefined ? undefined : context_length,
+      thinkingStrength: thinking_strength === undefined ? undefined : thinking_strength,
+    },
+  );
+}
+
+export async function clearModelOverride(
+  provider_id: string,
+  model_id: string,
+): Promise<{ ok: boolean; removed: boolean; provider_id: string; model: string }> {
+  return invoke<{ ok: boolean; removed: boolean; provider_id: string; model: string }>(
+    'clear_model_override',
+    { providerId: provider_id, modelId: model_id },
+  );
+}
+
 // ── Workflow ─────────────────────────────────────────────────────
 
 export async function startWorkflow(text: string): Promise<{ id: string }> {

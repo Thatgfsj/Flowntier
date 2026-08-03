@@ -1,10 +1,8 @@
 import { useTranslation } from 'react-i18next';
-import { ConsoleLine, type ConsoleSource } from '@flowntier/ui';
-import type { WfEvent, LogLevel } from '@flowntier/shared';
-
-export interface BottomConsoleProps {
-  events: readonly WfEvent[];
-}
+import { ConsoleLine } from '@flowntier/ui';
+import type { LogLevel } from '@flowntier/shared';
+import { useEvents } from '../contexts/WorkflowContext.js';
+import { agentIdToConsoleSource } from '../lib/agentId.js';
 
 // Log-level labels. The key (e.g. 'error') is the LogLevel enum
 // value; the value is the i18n key. We resolve via t() at
@@ -17,22 +15,20 @@ const LEVEL_LABEL_KEYS: Record<LogLevel, string> = {
   trace: 'bottomConsole.levels.trace',
 };
 
-function agentToSource(agentId: string): ConsoleSource {
-  if (agentId === 'agent:chief') return 'chief';
-  if (agentId === 'agent:critic:a') return 'critic-a';
-  if (agentId === 'agent:critic:b') return 'critic-b';
-  if (agentId.startsWith('agent:worker:')) return 'worker';
-  return 'system';
-}
-
 function shortTime(iso: string): string {
   // ISO -> HH:MM:SS
   return iso.slice(11, 19);
 }
 
-export function BottomConsole({ events }: BottomConsoleProps) {
+export function BottomConsole() {
   const { t } = useTranslation();
-  // Show last 200 events; the rest are available in the workflow log.
+  // v0.4.29 (Phase A): BottomConsole now subscribes to the
+  // workflow event stream directly via `useEvents()`. This
+  // collocates the console rendering with the event source —
+  // the previous App.tsx passed `events` as a prop, which
+  // meant every event dispatched into the reducer fired a
+  // re-render of App.tsx, which then re-rendered BottomConsole.
+  const events = useEvents();
   const visible = events.slice(-200);
   const hasContent = visible.some((e) => e.kind === 'console');
   // v0.4.26 (event 000119): chairman flagged the empty panel
@@ -59,7 +55,10 @@ export function BottomConsole({ events }: BottomConsoleProps) {
             <li key={i}>
               <ConsoleLine
                 ts={ts}
-                source={agentToSource(e.agent_id)}
+                // v0.4.29 (Phase B): single source of truth in
+                // `lib/agentId.ts` — replaces the 4-line if/else
+                // chain that used to live here.
+                source={agentIdToConsoleSource(e.agent_id)}
                 text={`[${t(LEVEL_LABEL_KEYS[e.level])}] ${e.message}`}
               />
             </li>

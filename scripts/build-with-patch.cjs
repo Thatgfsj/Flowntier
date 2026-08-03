@@ -39,10 +39,21 @@ const TARGET_SUBDIR = TAURI_TARGET
   : 'target/release/nsis/x64';
 
 const INSTALLER_NSI = path.join(ROOT, TARGET_SUBDIR, 'installer.nsi');
+// v0.4.33 (audit 000131): read VERSION from package.json
+// instead of hardcoding — every previous build since v0.4.27
+// stamped this string with the old version and silently
+// shadowed the actual productVersion on disk.
+const PKG_VERSION = (() => {
+  try {
+    const pkg = JSON.parse(fs.readFileSync(
+      path.join(ROOT, 'apps/desktop/package.json'), 'utf8'));
+    return pkg.version || '0.0.0';
+  } catch { return '0.0.0'; }
+})();
 const BUNDLE_OUT = path.join(
   ROOT,
   TAURI_TARGET ? `target/${TAURI_TARGET}/release` : 'target/release',
-  'bundle/nsis/Flowntier_0.4.27_x64-setup.exe'
+  `bundle/nsis/Flowntier_${PKG_VERSION}_x64-setup.exe`
 );
 
 function step(name, cmd, args, opts = {}) {
@@ -67,6 +78,48 @@ function findMakensis() {
   }
   return null;
 }
+
+// Phase 0 (v0.4.33 — audit 000131, root fix): re-copy the
+// freshly compiled `flowntier-runtime.exe` from target/release
+// into `apps/desktop/src-tauri/binaries/` with the expected
+// `flowntier_runtime-<target-triple>.exe` naming. Without
+// this, the sidecar that the installer packages stays
+// pinned to whatever was last manually placed in `binaries/`
+// — every `cargo build -p pipe-server` afterwards is invisible
+// to end users, and runtime-only fixes (dispatcher wildcard,
+// etc.) never ship.
+//
+// Tauri 2 has an internal sidecar auto-copy path, but it
+// compares by content hash and silently skips the copy when
+// it thinks the artifact is current. Empirically that path
+// has been a no-op in this repo since at least v0.4.27, so
+// we do it explicitly here to guarantee a fresh sidecar.
+function copySidecar() {
+  const targetTriple = TAURI_TARGET || (() => {
+    // Read rustc's host triple as a best-effort default.
+    try {
+      const r = spawnSync('rustc', ['-vV'], { encoding: 'utf8' });
+      const m = r.stdout && r.stdout.match(/host:\s*(\S+)/);
+      if (m) return m[1];
+    } catch {}
+    return 'x86_64-pc-windows-msvc';
+  })();
+
+  const src = TAURI_TARGET
+    ? path.join(ROOT, `target/${TAURI_TARGET}/release/flowntier-runtime.exe`)
+    : path.join(ROOT, 'target/release/flowntier-runtime.exe');
+  const dstDir = path.join(ROOT, 'apps/desktop/src-tauri/binaries');
+  const dst = path.join(dstDir, `flowntier_runtime-${targetTriple}.exe`);
+
+  if (!fs.existsSync(src)) {
+    console.error(`Sidecar source not found: ${src}\nRun \`cargo build --release -p pipe-server\` first.`);
+    process.exit(1);
+  }
+  fs.mkdirSync(dstDir, { recursive: true });
+  fs.copyFileSync(src, dst);
+  console.log(`\n=== Phase 0: sidecar copied ===\n  ${src}\n  → ${dst}\n`);
+}
+copySidecar();
 
 // Phase 1: build everything except bundle.
 const phase1Args = ['exec', 'tauri', 'build', '--no-bundle'];

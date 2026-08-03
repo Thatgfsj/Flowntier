@@ -63,7 +63,7 @@ export function TopBar({
   // a 4-minute workflow.
   const [confirmOpen, setConfirmOpen] = useState(false);
   return (
-    <header className="flex h-14 shrink-0 items-center gap-4 border-b border-border-strong bg-surface-3 px-4">
+    <header className="flex h-12 shrink-0 items-center gap-3 border-b border-border-strong bg-surface-3 px-3">
       <div className="flex items-baseline gap-2">
         <span className="font-semibold tracking-tight text-primary">{projectName}</span>
         <span className="text-xs text-text-secondary">{t('topbar.tagline')}</span>

@@ -690,10 +690,20 @@ export function ChatZone({ onCollapse, activeAgent = null }: ChatZoneProps = {})
           ChatZone panel height stays bounded and the empty
           space above this row is closed. */}
       <div
-        className="grid shrink-0 grid-cols-1 gap-2 border-t border-border bg-surface-1 px-4 py-2 lg:grid-cols-2"
+        // v0.4.29 (Phase D): collapse the right cell when no
+        // head role is active. The previous 2-column grid
+        // allocated ~half the bottom for a transparent empty
+        // div, which chairman flagged as "下方空白" (audit
+        // 000119). Without activeAgent, the row is single-
+        // column and the empty div is gone.
+        className={
+          activeAgent
+            ? 'grid shrink-0 grid-cols-1 gap-2 border-t border-border bg-surface-1 px-4 py-2 lg:grid-cols-2'
+            : 'grid shrink-0 grid-cols-1 gap-2 border-t border-border bg-surface-1 px-4 py-2'
+        }
         aria-label="当前就绪与工具"
       >
-        {activeAgent ? (
+        {activeAgent && (
           <div className="flex min-h-[56px] flex-col gap-1 overflow-y-auto rounded border border-border bg-surface-2 p-2">
             <div className="flex items-center justify-between gap-2">
               <span className="text-[10px] uppercase tracking-wide text-text-secondary">
@@ -734,22 +744,7 @@ export function ChatZone({ onCollapse, activeAgent = null }: ChatZoneProps = {})
               })}
             </p>
           </div>
-        ) : (
-          // No active head-role → worker-only or no workflow.
-          // The chairman's directive is to NOT show "current work"
-          // when the worker is the one moving (workers render their
-          // own cards above). Render an empty cell so the grid
-          // still reserves the column for layout stability.
-          <div className="min-h-[56px] rounded border border-transparent p-2" />
         )}
-        {/* v0.4.24 (event 000119): removed the secondary 工具
-            summary panel here. The full tool timeline is already
-            rendered in the transcript body above (with the count
-            in the header), so a second "{toolEvents.length}" badge
-            + duplicated list here was just visual noise. The grid
-            stays 2-column so the 当前就绪 cell still aligns with
-            other 2-column blocks in the app. */}
-        <div className="min-h-[56px] rounded border border-transparent p-2" aria-hidden="true" />
       </div>
     </section>
   );

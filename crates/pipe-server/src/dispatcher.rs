@@ -174,22 +174,79 @@ impl Dispatcher {
                 .split('/')
                 .filter(|s| !s.is_empty())
                 .collect();
-            if pattern_segments.len() != incoming_segments.len() {
-                continue;
-            }
-            let mut placeholder_values: Vec<(&str, String)> = Vec::new();
+
+            // v0.4.30 (audit 000130): a `{name+}` placeholder is
+            // a greedy wildcard — it consumes one or more
+            // consecutive incoming segments. This lets the
+            // secret-name routes handle values like
+            // `flowntier/minimax` that contain a `/` (the secret
+            // namespace itself does, and so do
+            // `/api/settings/secrets/{name+}/reveal`-style
+            // patterns where the wildcard sits in the middle).
+            //
+            // Strategy: do a 2-pointer scan over pattern vs
+            // incoming. When the pattern segment is a wildcard
+            // (`{name+}`), find the longest tail of incoming
+            // segments that lets the rest of the pattern still
+            // match (greedy from the left).
+            let mut placeholder_values: Vec<(String, String)> = Vec::new();
             let mut matched = true;
-            for (p, i) in pattern_segments.iter().zip(incoming_segments.iter()) {
-                if let Some(name) = p.strip_prefix('{').and_then(|s| s.strip_suffix('}')) {
-                    if i.is_empty() {
+            let mut inc_idx: usize = 0;
+            let mut pc_idx: usize = 0;
+            while pc_idx < pattern_segments.len() {
+                let pat = pattern_segments[pc_idx];
+                if pat.starts_with('{') && pat.ends_with("+}") {
+                    // Find the longest prefix of the remaining
+                    // incoming segments such that the rest of
+                    // the pattern (after this wildcard) still
+                    // matches exactly.
+                    let name = &pat[1..pat.len() - 2]; // strip { and +}
+                    let remaining_pattern = pattern_segments.len() - pc_idx - 1;
+                    let remaining_incoming = incoming_segments.len() - inc_idx;
+                    if remaining_incoming <= remaining_pattern {
                         matched = false;
                         break;
                     }
-                    placeholder_values.push((name, (*i).to_string()));
-                } else if p != i {
+                    // Max number of incoming segments the
+                    // wildcard can consume = remaining_incoming
+                    // - remaining_pattern. Greedy = take them
+                    // all.
+                    let consume = remaining_incoming - remaining_pattern;
+                    if consume == 0 {
+                        // `{name+}` requires at least one
+                        // segment.
+                        matched = false;
+                        break;
+                    }
+                    let value: String = incoming_segments[inc_idx..inc_idx + consume]
+                        .join("/");
+                    placeholder_values.push((name.to_string(), value));
+                    inc_idx += consume;
+                    pc_idx += 1;
+                    continue;
+                }
+                if inc_idx >= incoming_segments.len() {
                     matched = false;
                     break;
                 }
+                if let Some(name) = pat.strip_prefix('{').and_then(|s| s.strip_suffix('}')) {
+                    if incoming_segments[inc_idx].is_empty() {
+                        matched = false;
+                        break;
+                    }
+                    placeholder_values.push((name.to_string(), incoming_segments[inc_idx].to_string()));
+                    inc_idx += 1;
+                    pc_idx += 1;
+                } else if pat == incoming_segments[inc_idx] {
+                    inc_idx += 1;
+                    pc_idx += 1;
+                } else {
+                    matched = false;
+                    break;
+                }
+            }
+            if matched && inc_idx != incoming_segments.len() {
+                matched = false;
             }
             if matched {
                 tracing::info!(target: "dispatcher", req_id = req_id, method = %method, path = %registered_path, "[TRACE] dispatch: PATTERN MATCH found, calling handler");
@@ -197,12 +254,12 @@ impl Dispatcher {
                 // can access them via `body.get("name")` etc.
                 if let Value::Object(ref mut map) = body {
                     for (name, value) in &placeholder_values {
-                        map.insert((*name).to_string(), Value::String(value.clone()));
+                        map.insert(name.clone(), Value::String(value.clone()));
                     }
                 } else {
                     let mut map = serde_json::Map::new();
                     for (name, value) in &placeholder_values {
-                        map.insert((*name).to_string(), Value::String(value.clone()));
+                        map.insert(name.clone(), Value::String(value.clone()));
                     }
                     body = Value::Object(map);
                 }
@@ -322,6 +379,87 @@ mod tests {
         let r = resp.result.expect("ok");
         assert_eq!(r.status, 200);
         assert_eq!(r.body.get("wf_id").and_then(|v| v.as_str()), Some("abc123"));
+    }
+
+    /// v0.4.30 (audit 000130): the trailing-wildcard
+    /// placeholder `{name+}` absorbs one or more path segments
+    /// into a single `/`-joined value. Necessary because
+    /// Flowntier secret names live under
+    /// `flowntier/<id>` (e.g. `flowntier/minimax`) which
+    /// contains a literal `/`.
+    #[tokio::test]
+    async fn wildcard_placeholder_absorbs_slash() {
+        let mut d = Dispatcher::new();
+        d.register("PUT", "/api/settings/secrets/{name+}", |body| {
+            Box::pin(async move {
+                let name = body.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                Ok((200, serde_json::json!({"name": name})))
+            })
+        });
+        // Two-segment name arrives intact.
+        let resp = d
+            .dispatch(1, req("PUT", "/api/settings/secrets/flowntier/minimax"))
+            .await;
+        let r = resp.result.expect("ok");
+        assert_eq!(r.body.get("name").and_then(|v| v.as_str()),
+                   Some("flowntier/minimax"));
+    }
+
+    /// v0.4.30: `{name+}` also works in the middle of a path
+    /// when followed by a literal suffix (e.g. `/reveal`).
+    /// The wildcard is greedy but must leave enough segments
+    /// for the literal suffix.
+    #[tokio::test]
+    async fn wildcard_placeholder_then_literal_suffix() {
+        let mut d = Dispatcher::new();
+        d.register("GET", "/api/settings/secrets/{name+}/reveal", |body| {
+            Box::pin(async move {
+                let name = body.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                Ok((200, serde_json::json!({"name": name})))
+            })
+        });
+        let resp = d
+            .dispatch(2, req("GET", "/api/settings/secrets/flowntier/minimax/reveal"))
+            .await;
+        let r = resp.result.expect("ok");
+        assert_eq!(r.body.get("name").and_then(|v| v.as_str()),
+                   Some("flowntier/minimax"));
+    }
+
+    /// v0.4.31 (audit 000130, follow-up): the trailing-wildcard
+    /// PUT route for `{name+}` against a 2-segment name like
+    /// `flowntier/minimax`. Reproduces the chairman's reported
+    /// "no handler registered for PUT
+    /// /api/settings/secrets/flowntier/minimax" symptom.
+    #[tokio::test]
+    async fn wildcard_put_flowntier_namespace() {
+        let mut d = Dispatcher::new();
+        d.register("PUT", "/api/settings/secrets/{name+}", |body| {
+            Box::pin(async move {
+                let name = body.get("name").and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let value = body.get("value").and_then(|v| v.as_str())
+                    .unwrap_or("");
+                Ok((200, serde_json::json!({
+                    "name": name,
+                    "value_len": value.len(),
+                })))
+            })
+        });
+        let resp = d.dispatch(
+            1,
+            req("PUT", "/api/settings/secrets/flowntier/minimax"),
+        ).await;
+        assert!(
+            resp.error.is_none(),
+            "expected success, got error: {:?}",
+            resp.error
+        );
+        let r = resp.result.expect("ok");
+        assert_eq!(
+            r.body.get("name").and_then(|v| v.as_str()),
+            Some("flowntier/minimax"),
+        );
     }
 }
 

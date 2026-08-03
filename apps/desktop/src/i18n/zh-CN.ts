@@ -88,6 +88,11 @@ const zhCN = {
   'settings.secrets.saveKeyFor': '保存 {{provider}} API 密钥',
   'settings.providers.titleWithCount': '供应商（{{count}}）',
   'settings.providers.configuredCount': '已配置 {{count}}',
+  // v0.4.30: clear-key button tooltip. Aria-label uses the
+  // same string. Says "keychain" explicitly so users don't
+  // think it deletes a shell env var.
+  'settings.providers.clearKey': '清空 keychain 中的 API key',
+  'settings.providers.clearKeyHint': '只删除 keychain 条目，供应商行保留',
   'settings.secrets.placeholder': '粘贴 API 密钥 (sk-...)',
   'settings.secrets.never': '密钥不会离开本机。',
   'settings.headerSubtitle': '管理 LLM 供应商和角色模型',
@@ -96,6 +101,18 @@ const zhCN = {
   'settings.models.available': '可用模型',
   'settings.models.deleteAria': '从列表中隐藏 {{name}}',
   'settings.models.deleteTitle': '隐藏（可恢复）',
+  // v0.4.30: inline edit form for the model metadata
+  // override (context_length + thinking_strength).
+  'settings.models.editRow': '编辑 {{name}} 的元数据',
+  'settings.models.saveOverride': '保存',
+  'settings.models.cancelEdit': '取消',
+  'settings.models.clearOverride': '清除覆盖',
+  'settings.models.clearOverrideConfirm': '清除 {{name}} 的覆盖?',
+  'settings.models.contextLengthLabel': '上下文长度（tokens）',
+  'settings.models.contextLengthPlaceholder': '留空表示清除',
+  'settings.models.thinkingStrengthLabel': '思考强度',
+  'settings.models.thinkingUnset': '未设置（用回退）',
+  'settings.models.displayNamePlaceholder': '显示名称',
   'settings.roles.title': '角色 → 模型 分配',
 
   // ── Buttons / actions ──────────────────────────
@@ -119,6 +136,13 @@ const zhCN = {
   'settings.confirm.deleteCustom.title': '删除中转站 {{name}}?',
   'settings.confirm.deleteCustom.body':
     '该中转站和它的 API key 会被删除。确定吗?',
+  // v0.4.30 (audit 000130): wipe the keychain entry for a
+  // provider (preset OR custom). Confirmation copy reflects
+  // that this only deletes the stored key, not the provider
+  // row itself.
+  'settings.confirm.deleteKey.title': '清空 {{name}} 的 API key?',
+  'settings.confirm.deleteKey.body':
+    '该 keychain 条目会被删除，供应商行保留。可以重新填入新 key。',
 
   // ── Quick add AI (presets) ──────────────────────
   'settings.quickAdd.openai.compatible': 'OpenAI SDK 兼容',
@@ -145,6 +169,11 @@ const zhCN = {
   'settings.custom.baseUrlPlaceholder': 'https://your-relay.com/v1',
   'settings.custom.apiKeyLabel': 'API 密钥',
   'settings.custom.apiKeyPlaceholder': 'sk-...',
+  // v0.4.30 (audit 000130): reassure users the value goes
+  // into the encrypted keychain and the runtime does NOT
+  // read a shell env var of the same name.
+  'settings.custom.keyNotEnv':
+    '只存到 keychain，不读取同名的系统环境变量。',
   'settings.custom.kindLabel': '协议',
   'settings.custom.kind.openai': 'OpenAI SDK 兼容',
   'settings.custom.kind.anthropic': 'Anthropic SDK 兼容',
@@ -216,6 +245,7 @@ const zhCN = {
   'settings.error.missingApiKey': '请填写 API Key',
   'settings.error.invalidBaseUrl': 'Base URL 必须以 http:// 或 https:// 开头',
   'settings.error.deleteCustomFailed': '删除中转站失败',
+  'settings.error.deleteKeyFailed': '清空 key 失败',
   'settings.error.deleteRole': '删除角色失败',
   'settings.error.tErr': '错误：{{error}}',
   // ── Polish 13: remaining strings ──────────────────
@@ -465,6 +495,19 @@ const zhCN = {
   'settings.roles.quota.reset': '重置',
   'chatZone.quotaNudgeTitle': 'Quota Refresh',
   'chatZone.quotaNudge': 'AI 之前疑似到达上限，目前已经刷新，检查工作进度并且继续工作',
+
+  // ── v0.4.29 (Phase C) agentLive hover panel ─────
+  'agentLive.role.chief': '主理',
+  'agentLive.role.critic-a': '审核员 A',
+  'agentLive.role.critic-b': '审核员 B',
+  'agentLive.role.worker': '执行者',
+  'agentLive.status.idle': '空闲',
+  'agentLive.status.thinking': '思考中',
+  'agentLive.status.speaking': '发言中',
+  'agentLive.thinking': '思考',
+  'agentLive.working': '正在做',
+  'agentLive.recent': '最近事件',
+  'agentLive.idleFor': '已空闲 {{seconds}} 秒',
 };
 
 export type Translations = typeof zhCN;

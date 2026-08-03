@@ -703,7 +703,10 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
     });
 
     let put_state = state.clone();
-    d.register("PUT", "/api/settings/secrets/{name}", move |body| {
+    // v0.4.30 (audit 000130): `{name+}` so the trailing
+    // wildcard placeholder can absorb the `/` in secret
+    // names that live under the `flowntier/<id>` namespace.
+    d.register("PUT", "/api/settings/secrets/{name+}", move |body| {
         let s = put_state.clone();
         Box::pin(async move {
             let name = body.get("name").and_then(|v| v.as_str())
@@ -724,7 +727,7 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
     });
 
     let del_state = state.clone();
-    d.register("DELETE", "/api/settings/secrets/{name}", move |body| {
+    d.register("DELETE", "/api/settings/secrets/{name+}", move |body| {
         let s = del_state.clone();
         Box::pin(async move {
             let name = body.get("name").and_then(|v| v.as_str())
@@ -740,7 +743,7 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
     // bridge should NOT expose this to the webview. Used by
     // the agent loop when making provider requests.
     let reveal_state = state.clone();
-    d.register("GET", "/api/settings/secrets/{name}/reveal", move |body| {
+    d.register("GET", "/api/settings/secrets/{name+}/reveal", move |body| {
         let s = reveal_state.clone();
         Box::pin(async move {
             let name = body.get("name").and_then(|v| v.as_str())
@@ -1109,6 +1112,21 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
         Box::pin(async move { delete_custom_provider(body, s).await })
     });
 
+    // v0.4.30 (audit 000130): per-model metadata override.
+    // PUT /api/providers/{id}/models/{model} upserts
+    // context_length + thinking_strength into model_overrides.
+    let model_ovr_put = state.clone();
+    d.register("PUT", "/api/providers/{id}/models/{model}", move |body| {
+        let s = model_ovr_put.clone();
+        Box::pin(async move { put_model_override(body, s).await })
+    });
+    // DELETE removes the override (back to built-in fallback).
+    let model_ovr_del = state.clone();
+    d.register("DELETE", "/api/providers/{id}/models/{model}", move |body| {
+        let s = model_ovr_del.clone();
+        Box::pin(async move { delete_model_override(body, s).await })
+    });
+
     // ── v0.4.22 (event 000068): POST /api/run_workflow ────
     // Body: { task: "<user_request>" }
     //
@@ -1452,85 +1470,6 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
         })
     });
 
-    // ── v0.4.22 (event 000074): Tarot random oracle ──────
-    // Used by the Flwntier Android chief client (apps/ChiefApp).
-    // The chairman's spec (NWT 000073): the Android client
-    // looks like iching-oracle but the data path runs
-    // through this Flwntier runtime endpoint, not a local
-    // 64-gua JSON. Two modes:
-    //   GET  /api/tarot/draw           → single card
-    //   GET  /api/tarot/draw?spread=3  → past/present/future
-    //   GET  /api/tarot/list           → 78-card deck metadata
-    // The card payload is JSON with id, arcana, suit, rank,
-    // name_zh, name_pinyin, name_en, symbol_svg
-    // (100x140 inline SVG the Android app renders as
-    // 翻牌 / 正逆位 image), upright_meaning, reversed_meaning.
-    d.register("GET", "/api/tarot/draw", |body| {
-        // Pull `spread` out of the body BEFORE the async move
-        // so the closure doesn't borrow body across the await
-        // boundary (E0515).
-        let spread = body
-            .get("spread")
-            .and_then(|v| v.as_str())
-            .unwrap_or("1")
-            .to_string();
-        Box::pin(async move {
-            let spread = spread.as_str();
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_millis() as u64)
-                .unwrap_or(0);
-            let drawn: Vec<crate::tarot::DrawnCard> = match spread {
-                "3" | "three" | "past-present-future" => {
-                    crate::tarot::draw_three_card_spread()
-                }
-                _ => vec![crate::tarot::draw_single("抽卡")],
-            };
-            let items: Vec<Value> = drawn.iter().map(|d| json!({
-                "position": d.position,
-                "reversed": d.reversed,
-                "meaning": d.meaning,
-                "card": {
-                    "id": d.card.id,
-                    "arcana": d.card.arcana,
-                    "suit": d.card.suit,
-                    "rank": d.card.rank,
-                    "name_zh": d.card.name_zh,
-                    "name_pinyin": d.card.name_pinyin,
-                    "name_en": d.card.name_en,
-                    "symbol_svg": d.card.symbol_svg,
-                    "upright_meaning": d.card.upright_meaning,
-                    "reversed_meaning": d.card.reversed_meaning,
-                },
-            })).collect();
-            Ok((200, json!({
-                "ok": true,
-                "spread": spread,
-                "count": items.len(),
-                "drawn_at_ms": now,
-                "items": items,
-            })))
-        })
-    });
-
-    d.register("GET", "/api/tarot/list", |_body| {
-        Box::pin(async {
-            let cards: Vec<Value> = crate::tarot::deck().iter().map(|c| json!({
-                "id": c.id,
-                "arcana": c.arcana,
-                "suit": c.suit,
-                "rank": c.rank,
-                "name_zh": c.name_zh,
-                "name_pinyin": c.name_pinyin,
-                "name_en": c.name_en,
-            })).collect();
-            Ok((200, json!({
-                "ok": true,
-                "count": cards.len(),
-                "cards": cards,
-            })))
-        })
-    });
 
     // ── v0.4.22 (event 000091 fix #32): real cancel. Looks
     // up the active workflow in `state.active_workflows`, fires
@@ -1694,7 +1633,13 @@ async fn list_providers(
     }).collect();
 
     let custom: Vec<Value> = custom_rows.iter().map(|c| {
-        let custom_secret = format!("CUSTOM_PROVIDER_KEY_{}", c.id);
+        // v0.4.30 (audit 000130): the previous secret name
+        // `CUSTOM_PROVIDER_KEY_<id>` was visually similar to
+        // shell env var naming. We now use the
+        // `flowntier/custom/<id>` internal namespace (matching
+        // resolve_role_provider's convention). Migration 0008
+        // renames any pre-existing custom rows.
+        let custom_secret = format!("flowntier/custom/{}", c.id);
         json!({
             "id": c.id,
             "kind": "custom",
@@ -1846,46 +1791,63 @@ async fn list_models(
         (custom.base_url.clone(), custom.kind == "openai-compatible")
     };
 
-    // Anthropic has no /v1/models endpoint — return the hard-coded
-    // fallback list directly.
-    if !has_live {
-        // v0.4.16: prefer the per-provider OPENAI_FALLBACK_MODELS
-        // entry if one exists, then fall back to Anthropic's.
-        let entries: &[crate::providers::ModelEntry] =
-            crate::providers::OPENAI_FALLBACK_MODELS.iter()
-                .find(|(pid, _)| *pid == id)
-                .map(|(_, m)| *m)
-                .unwrap_or(crate::providers::ANTHROPIC_FALLBACK_MODELS);
-        let models: Vec<Value> = entries.iter()
-            .map(|m| json!({
-                "id": m.id,
-                "display_name": m.display_name,
-                "thinking_strength": m.thinking_strength,
-                "context_length": m.context_length,
-                "source": "fallback",
-            }))
-            .collect();
-        let body_str = serde_json::to_string(&models).unwrap();
-        let _ = state.repo.put_model_cache(&storage::ModelCacheRow {
-            provider_id: id.clone(),
-            models_json: body_str,
-            fetched_at: chrono::Utc::now().timestamp(),
-        }).await;
-        return Ok((200, json!({
-            "ok": true,
-            "provider_id": id,
-            "models": filter_disabled(models),
-            "cached": false,
-            "fallback": true,
-        })));
-    }
+// Anthropic has no /v1/models endpoint — return the hard-coded
+        // fallback list directly.
+        if !has_live {
+            // v0.4.16: prefer the per-provider OPENAI_FALLBACK_MODELS
+            // entry if one exists, then fall back to Anthropic's.
+            let entries: &[crate::providers::ModelEntry] =
+                crate::providers::OPENAI_FALLBACK_MODELS.iter()
+                    .find(|(pid, _)| *pid == id)
+                    .map(|(_, m)| *m)
+                    .unwrap_or(crate::providers::ANTHROPIC_FALLBACK_MODELS);
+            // v0.4.30 (audit 000130): overlay the user's
+            // per-(provider, model) metadata overrides on top of
+            // the built-in fallback list. Lets the chairman fix
+            // e.g. MiniMax-M3 context_length to 1M without
+            // waiting for an app release.
+            let overrides = state.repo.list_model_overrides_for_provider(&id).await
+                .unwrap_or_default();
+            let ovr_map: std::collections::HashMap<&str, (Option<i64>, Option<String>)> =
+                overrides.iter().map(|(mid, c, t)| (mid.as_str(), (*c, t.clone()))).collect();
+            let models: Vec<Value> = entries.iter()
+                .map(|m| {
+                    let ovr = ovr_map.get(m.id);
+                    json!({
+                        "id": m.id,
+                        "display_name": m.display_name,
+                        "thinking_strength": ovr.and_then(|(_, t)| t.clone())
+                            .unwrap_or_else(|| m.thinking_strength.to_string()),
+                        "context_length": ovr.and_then(|(c, _)| c.as_ref().copied())
+                            .unwrap_or(m.context_length as i64),
+                        "source": "fallback",
+                    })
+                })
+                .collect();
+            let body_str = serde_json::to_string(&models).unwrap();
+            let _ = state.repo.put_model_cache(&storage::ModelCacheRow {
+                provider_id: id.clone(),
+                models_json: body_str,
+                fetched_at: chrono::Utc::now().timestamp(),
+            }).await;
+            return Ok((200, json!({
+                "ok": true,
+                "provider_id": id,
+                "models": filter_disabled(models),
+                "cached": false,
+                "fallback": true,
+            })));
+        }
 
     // OpenAI-compatible fetch.
     let url = format!("{}/models", base_url.trim_end_matches('/'));
     let secret_name = if crate::providers::get(&id).is_some() {
         crate::providers::get(&id).unwrap().secret_name.to_string()
     } else {
-        format!("CUSTOM_PROVIDER_KEY_{id}")
+        // v0.4.30: use the flowntier/custom/<id> namespace
+        // (matches the value baked into list_providers + the
+        // client-side CustomProviderForm).
+        format!("flowntier/custom/{id}")
     };
     let api_key = match state.secrets.reveal(&secret_name).await {
         Ok(k) => k,
@@ -1946,13 +1908,28 @@ async fn list_models(
     };
     // OpenAI-compatible /models response shape:
     // { "object": "list", "data": [{ id, object, ... }, ...] }
+    // v0.4.30 (audit 000130): overlay per-(provider, model)
+    // metadata overrides onto the live list too, so the user
+    // can fix the reported context_length / thinking_strength
+    // even for providers with a real /models endpoint.
+    let overrides = state.repo.list_model_overrides_for_provider(&id).await
+        .unwrap_or_default();
+    let ovr_map: std::collections::HashMap<&str, (Option<i64>, Option<String>)> =
+        overrides.iter().map(|(mid, c, t)| (mid.as_str(), (*c, t.clone()))).collect();
     let models: Vec<Value> = body.get("data")
         .and_then(|d| d.as_array())
-        .map(|arr| arr.iter().filter_map(|m| m.get("id").and_then(|v| v.as_str()).map(|id| json!({
-            "id": id,
-            "display_name": id,
-            "source": "live",
-        }))).collect())
+        .map(|arr| arr.iter().filter_map(|m| {
+            m.get("id").and_then(|v| v.as_str()).map(|id| {
+                let ovr = ovr_map.get(id);
+                json!({
+                    "id": id,
+                    "display_name": id,
+                    "thinking_strength": ovr.and_then(|(_, t)| t.clone()),
+                    "context_length": ovr.and_then(|(c, _)| c.as_ref().copied()),
+                    "source": "live",
+                })
+            })
+        }).collect())
         .unwrap_or_default();
     let body_str = serde_json::to_string(&models).unwrap_or_default();
     let _ = state.repo.put_model_cache(&storage::ModelCacheRow {
@@ -2059,7 +2036,7 @@ async fn provider_exists(state: &Arc<ServerState>, provider_id: &str) -> bool {
 
 /// POST /api/providers/custom — add a relay-station / private-gateway
 /// provider. The api_key lives in the encrypted secret store under
-/// `CUSTOM_PROVIDER_KEY_<id>`.
+/// `flowntier/custom/<id>`.
 async fn add_custom_provider(
     body: Value,
     state: Arc<ServerState>,
@@ -2097,6 +2074,15 @@ async fn add_custom_provider(
     // Empty thinking_strength / context_length collapse to
     // null in the cache so the runtime falls back to "no
     // hint" instead of forcing a default.
+    // v0.4.30 (audit 000130): the user-curated POST body is
+    // already the authoritative metadata, but if the user
+    // previously PUT an override for one of these model ids
+    // (e.g. to force a thinking_strength), overlay it now so
+    // the runtime sees a single merged view.
+    let override_rows = state.repo.list_model_overrides_for_provider(&id).await
+        .unwrap_or_default();
+    let ovr_map: std::collections::HashMap<&str, (Option<i64>, Option<String>)> =
+        override_rows.iter().map(|(mid, c, t)| (mid.as_str(), (*c, t.clone()))).collect();
     let models_rows: Vec<Value> = body.get("models")
         .and_then(|v| v.as_array())
         .map(|arr| arr.iter().filter_map(|m| {
@@ -2108,15 +2094,20 @@ async fn add_custom_provider(
                 .filter(|s| matches!(*s, "low" | "medium" | "high"));
             let context = m.get("context_length").and_then(|x| x.as_i64())
                 .filter(|n| *n > 0);
+            let ovr = ovr_map.get(mid);
+            let thinking_final = ovr.and_then(|(_, t)| t.clone())
+                .or_else(|| thinking.map(String::from));
+            let context_final = ovr.and_then(|(c, _)| c.as_ref().copied())
+                .or(context);
             let mut obj = json!({
                 "id": mid,
                 "display_name": display,
             });
             if let Some(o) = obj.as_object_mut() {
-                if let Some(t) = thinking {
+                if let Some(t) = thinking_final {
                     o.insert("thinking_strength".to_string(), json!(t));
                 }
-                if let Some(c) = context {
+                if let Some(c) = context_final {
                     o.insert("context_length".to_string(), json!(c));
                 }
                 o.insert("source".to_string(), json!("user-curated"));
@@ -2175,7 +2166,7 @@ async fn add_custom_provider(
     // compat) so any caller still works.
     if let Some(key) = body.get("api_key").and_then(|v| v.as_str()) {
         let secret_name = api_key_env.clone()
-            .unwrap_or_else(|| format!("CUSTOM_PROVIDER_KEY_{id}"));
+            .unwrap_or_else(|| format!("flowntier/custom/{id}"));
         state.secrets.put(&secret_name, key).await
             .map_err(|e| format!("put secret: {e}"))?;
     }
@@ -2203,11 +2194,98 @@ async fn delete_custom_provider(
     let removed = state.repo.delete_custom_provider(&id).await
         .map_err(|e| format!("delete_custom: {e}"))?;
     // Best-effort: clean up the associated api_key secret.
-    let secret_name = format!("CUSTOM_PROVIDER_KEY_{id}");
+    // v0.4.30: secret lives in the `flowntier/custom/<id>`
+    // namespace (matches Settings → CustomProviderForm and the
+    // list_providers handler).
+    let secret_name = format!("flowntier/custom/{id}");
     let _ = state.secrets.delete(&secret_name).await;
     Ok((200, json!({
         "id": id,
         "deleted": removed,
+    })))
+}
+
+/// PUT /api/providers/{id}/models/{model} — upsert a
+/// per-(provider, model) metadata override. Used by the
+/// Settings → provider detail "✎ edit" inline form so the
+/// chairman can fix e.g. MiniMax-M3 context_length to 1M
+/// without waiting for an app release.
+///
+/// Body (all fields optional — only what is supplied is
+/// touched, the rest inherits the existing override row):
+///   {
+///     context_length?:    number | null,
+///     thinking_strength?: "low" | "medium" | "high" | null,
+///   }
+///
+/// `context_length: null` and `thinking_strength: null`
+/// explicitly clear that field on the override row (kept as
+/// SQL NULL — the read path then falls back to the built-in
+/// fallback for that field while still honoring the override
+/// row's other column).
+async fn put_model_override(
+    body: Value,
+    state: Arc<ServerState>,
+) -> Result<(u16, Value), String> {
+    let provider_id = body.get("id").and_then(|v| v.as_str())
+        .ok_or_else(|| "missing 'id' in path".to_string())?.to_string();
+    let model_id = body.get("model").and_then(|v| v.as_str())
+        .ok_or_else(|| "missing 'model' in path".to_string())?.to_string();
+
+    // Outer Option = "field absent from body" → don't touch
+    // existing row. Inner Option = "field present and null" →
+    // clear it.
+    let ctx: Option<Option<i64>> = body.get("context_length").map(|v| match v {
+        Value::Null => None,
+        Value::Number(n) => n.as_i64().filter(|x| *x > 0),
+        _ => None,
+    });
+    let ts: Option<Option<String>> = body.get("thinking_strength").map(|v| match v {
+        Value::Null => None,
+        Value::String(s) if matches!(s.as_str(), "low" | "medium" | "high") => {
+            Some(s.to_string())
+        }
+        _ => None,
+    });
+
+    state.repo.upsert_model_override(&provider_id, &model_id, ctx, ts.clone()).await
+        .map_err(|e| format!("upsert_model_override: {e}"))?;
+
+    // Bust the model_cache so the next GET reflects the new
+    // override. Empty fetch triggers the fallback path again,
+    // which re-applies the overlay.
+    let _ = state.repo.delete_model_cache(&provider_id).await;
+
+    Ok((200, json!({
+        "ok": true,
+        "provider_id": provider_id,
+        "model": model_id,
+        "context_length": ctx.and_then(|c| c),
+        "thinking_strength": ts.and_then(|t| t),
+    })))
+}
+
+/// DELETE /api/providers/{id}/models/{model} — remove the
+/// override row entirely. Subsequent reads fall back to the
+/// built-in fallback list (preset) or live /v1/models (custom).
+async fn delete_model_override(
+    body: Value,
+    state: Arc<ServerState>,
+) -> Result<(u16, Value), String> {
+    let provider_id = body.get("id").and_then(|v| v.as_str())
+        .ok_or_else(|| "missing 'id' in path".to_string())?.to_string();
+    let model_id = body.get("model").and_then(|v| v.as_str())
+        .ok_or_else(|| "missing 'model' in path".to_string())?.to_string();
+
+    let removed = state.repo.delete_model_override(&provider_id, &model_id).await
+        .map_err(|e| format!("delete_model_override: {e}"))?;
+    let _ = state.repo.delete_model_cache(&provider_id).await;
+
+    Ok((200, json!({
+        "ok": true,
+        "provider_id": provider_id,
+        "model": model_id,
+        "removed": removed,
     })))
 }
 
@@ -2408,7 +2486,11 @@ async fn resolve_role(
             // v0.4.22 (event 000096): look up the custom
             // provider row by id. Determine the secret name
             // from the row's `kind` (env var name) — by
-            // convention `CUSTOM_<ID>_API_KEY`.
+            // convention `flowntier/custom/<ID>` (lowercased id).
+            // v0.4.30 (audit 000130): the old `CUSTOM_<ID>_API_KEY`
+            // name collided visually with shell env var naming; we
+            // now use the `flowntier/custom/<id>` internal namespace.
+            // Migration 0008 also renames legacy custom rows.
             let cp = state.repo.get_custom_provider(&provider_short).await
                 .map_err(|e| format!("get_custom: {e}"))?
                 .ok_or_else(|| format!(
@@ -2416,19 +2498,81 @@ async fn resolve_role(
                      (Settings → 中转站 → 添加 custom relay, or change default_model)",
                     provider_short, default_model
                 ))?;
-            // The shell saved the secret under an env-var name
-            // like CUSTOM_MIMIMU_API_KEY (uppercased id).
-            // Convention: id + '_API_KEY' uppercase.
-            let secret = format!("CUSTOM_{}_API_KEY", provider_short.to_uppercase());
+            let secret = format!("flowntier/custom/{}", provider_short.to_lowercase());
             (cp.base_url, cp.kind, secret)
         };
     // 4. Reveal the API key from the keychain. Empty defaults give
     //    503 so the chairman knows the cause.
     let api_key: Zeroizing<String> = match state.secrets.reveal(&secret_name).await {
         Ok(z) if !z.is_empty() => z,
-        _ => return Err(format!(
-            "no API key configured for {} (set it in Settings → 供应商)", secret_name
-        )),
+        _ => {
+            // ── v0.4.34 (audit 000132, root fix) ─────────────
+            // The user removed this provider's API key from
+            // Settings (or it was never set after they switched
+            // models in the UI). The orchestrator still drives
+            // this role through `<this provider>:<model>` because
+            // `role_overrides.default_model` / `fallback_chain`
+            // are independent of the secret table.
+            //
+            // Old behaviour: surface a 503 telling the user to
+            // re-save the key. The next workflow run hits the
+            // exact same 503. Patching the UI button to be more
+            // prominent (v0.4.30) didn't help — the user already
+            // *intentionally* removed the key.
+            //
+            // Root fix: cascade. For built-in presets, clear any
+            // role_overrides rows that reference this provider
+            // AND flip the provider row to `enabled=false` so the
+            // Settings UI reflects "not configured" without the
+            // user having to dig. The next workflow run lands on
+            // the existing `default_model.is_empty()` branch
+            // above (line ~2463) which surfaces the *actionable*
+            // error: "open Settings → 角色 → 模型 分配 and pick a
+            // default_model".
+            //
+            // Only built-in presets: custom-provider resolutions
+            // below stay untouched — the user may be mid-typing
+            // into a relay they just added and we shouldn't blow
+            // away their role assignments while they configure.
+            if crate::providers::get(&provider_short).is_some() {
+                tracing::warn!(
+                    target: "flowntier_pipe",
+                    provider = %provider_short,
+                    role = %role,
+                    secret_name = %secret_name,
+                    "audit 000132: cascading cleanup — clearing role_overrides referencing provider with no API key"
+                );
+                match state.repo.clear_role_overrides_for_provider(&provider_short).await {
+                    Ok(n) => tracing::info!(
+                        target: "flowntier_pipe",
+                        provider = %provider_short, rows_cleared = n,
+                        "audit 000132: role_overrides cleanup complete"
+                    ),
+                    Err(e) => tracing::warn!(
+                        target: "flowntier_pipe",
+                        provider = %provider_short, error = %e,
+                        "audit 000132: clear_role_overrides_for_provider failed (continuing)"
+                    ),
+                }
+                // Best-effort disable; the provider row may not
+                // exist yet (lazy-created on first GET).
+                if let Err(e) = state.repo.set_provider_enabled(&provider_short, false).await {
+                    tracing::warn!(
+                        target: "flowntier_pipe",
+                        provider = %provider_short, error = %e,
+                        "audit 000132: set_provider_enabled(false) failed (continuing)"
+                    );
+                }
+                return Err(format!(
+                    "no API key configured for {} — role_overrides referencing this provider \
+                     have been cleared; open Settings → 角色 → 模型 分配 to pick a new default",
+                    secret_name
+                ));
+            }
+            return Err(format!(
+                "no API key configured for {} (set it in Settings → 供应商)", secret_name
+            ));
+        }
     };
     Ok(ResolvedRole {
         role: role.to_string(),

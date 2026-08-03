@@ -1,13 +1,14 @@
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
 import { Card } from '@flowntier/ui';
 import {
-  saveSecret,
+  saveSecret, deleteSecret,
   listProviders, toggleProvider,
   listRouterRoles, listRouterModels, updateRouterRoles,
   fetchProviderModels,
   addCustomProvider, removeCustomProvider,
+  setModelOverride, clearModelOverride,
   getQuotaStatus, resetQuota,
   type ProviderInfo, type RoleInfo,
   type ProviderModel,
@@ -21,21 +22,22 @@ import { tErr } from '../lib/errs.js';
 
 // ── Quick Add AI ─────────────────────────────────────────────────
 
-// v0.4.17: dropped the `envVar` field. The keychain entry name
-// happens to match the old env-var name (e.g. MINIMAX_API_KEY), but
-// the user shouldn't see the env-var flavour in the UI — that
-// language was confusing them into thinking Flowntier still reads
-// process env vars (it doesn't, since v0.4.12).
+// v0.4.30 (audit 000130): secret names moved to the
+// `flowntier/<id>` internal namespace so they cannot be confused
+// with shell env vars. The previous `*_API_KEY` names happened to
+// match shell env var conventions, which made the chairman worry
+// that an old env var was being read. Migration 0008 renames any
+// pre-existing keychain rows.
 const QUICK_PROVIDERS = [
-  { id: 'openai',      name: 'OpenAI',             secretName: 'OPENAI_API_KEY',      placeholder: 'sk-...',      description: 'GPT-5, GPT-5 Mini',          color: '#10a37f' },
-  { id: 'anthropic',   name: 'Anthropic',          secretName: 'ANTHROPIC_API_KEY',  placeholder: 'sk-ant-...',  description: 'Claude Opus, Sonnet, Haiku', color: '#d97706' },
-  { id: 'google',      name: 'Google Gemini',      secretName: 'GOOGLE_API_KEY',     placeholder: 'AIza...',     description: 'Gemini 2.5 Pro, Flash',      color: '#4285f4' },
-  { id: 'deepseek',    name: 'DeepSeek',           secretName: 'DEEPSEEK_API_KEY',   placeholder: 'sk-...',      description: 'DeepSeek Chat, Reasoner',    color: '#6366f1' },
-  { id: 'minimax',     name: 'MiniMax',            secretName: 'MINIMAX_API_KEY',    placeholder: 'eyJ...',      description: 'MiniMax M3',                 color: '#f97316' },
-  { id: 'kimi',        name: 'Kimi (月之暗面)',     secretName: 'MOONSHOT_API_KEY',   placeholder: 'sk-...',      description: 'Kimi K2',                    color: '#8b5cf6' },
-  { id: 'zhipu',       name: 'GLM (智谱)',         secretName: 'ZHIPU_API_KEY',      placeholder: '',             description: 'GLM-4',                      color: '#059669' },
-  { id: 'mimo',        name: 'MIMO (小米)',        secretName: 'MIMO_API_KEY',       placeholder: 'sk-...',      description: '小米 MIMO',                   color: '#ff6900' },
-  { id: 'siliconflow', name: 'SiliconFlow',        secretName: 'SILICONFLOW_API_KEY',placeholder: 'sk-...',      description: 'SiliconFlow (硅基流动)',     color: '#0ea5e9' },
+  { id: 'openai',      name: 'OpenAI',             secretName: 'flowntier/openai',       placeholder: 'sk-...',      description: 'GPT-5, GPT-5 Mini',          color: '#10a37f' },
+  { id: 'anthropic',   name: 'Anthropic',          secretName: 'flowntier/anthropic',    placeholder: 'sk-ant-...',  description: 'Claude Opus, Sonnet, Haiku', color: '#d97706' },
+  { id: 'google',      name: 'Google Gemini',      secretName: 'flowntier/google',       placeholder: 'AIza...',     description: 'Gemini 2.5 Pro, Flash',      color: '#4285f4' },
+  { id: 'deepseek',    name: 'DeepSeek',           secretName: 'flowntier/deepseek',     placeholder: 'sk-...',      description: 'DeepSeek Chat, Reasoner',    color: '#6366f1' },
+  { id: 'minimax',     name: 'MiniMax',            secretName: 'flowntier/minimax',      placeholder: 'eyJ...',      description: 'MiniMax M3',                 color: '#f97316' },
+  { id: 'kimi',        name: 'Kimi (月之暗面)',     secretName: 'flowntier/kimi',         placeholder: 'sk-...',      description: 'Kimi K2',                    color: '#8b5cf6' },
+  { id: 'zhipu',       name: 'GLM (智谱)',         secretName: 'flowntier/glm',          placeholder: '',             description: 'GLM-4',                      color: '#059669' },
+  { id: 'mimo',        name: 'MIMO (小米)',        secretName: 'flowntier/mimo',         placeholder: 'sk-...',      description: '小米 MIMO',                   color: '#ff6900' },
+  { id: 'siliconflow', name: 'SiliconFlow',        secretName: 'flowntier/siliconflow',  placeholder: 'sk-...',      description: 'SiliconFlow (硅基流动)',     color: '#0ea5e9' },
 ];
 
 function QuickAddAI({ onSaved }: { onSaved: () => void }) {
@@ -133,6 +135,13 @@ function QuickAddAI({ onSaved }: { onSaved: () => void }) {
             className="w-full rounded border border-border bg-surface-2 px-3 py-2 font-mono text-sm placeholder:text-text-secondary focus:border-chief focus:outline-none focus:ring-2 focus:ring-chief/50"
             onKeyDown={(e) => { if (e.key === 'Enter' && apiKey.trim()) void handleSave(); }}
           />
+          {/* v0.4.30 (audit 000130): explicit note that the
+              value lands in the encrypted keychain SQLite and
+              the runtime never reads the shell env var of the
+              same name. Reuses the same string as the tooltip
+              next to the secret_name field in the detail
+              panel. */}
+          <p className="text-[10px] text-text-secondary">{t('settings.custom.keyNotEnv')}</p>
           {error && <p role="alert" aria-live="polite" className="text-xs text-status-failed">{error}</p>}
           {success && <p role="status" aria-live="polite" className="text-xs text-status-done">{t('settings.quickAdd.saved')}</p>}
           <button
@@ -288,6 +297,10 @@ export function Settings({ open, onClose, workdir }: SettingsProps) {
   // via `PUT /api/providers/{id}/models/{model}/disable` and
   // filters the entry out of subsequent role/catalog reads.
   const disabledModels = useDisabledModels();
+  // v0.4.30 (audit 000130): which (providerId, modelId) row is
+  // currently in inline-edit mode. Only one at a time. Set to
+  // null when the editor collapses.
+  const [editingModel, setEditingModel] = useState<{ providerId: string; modelId: string } | null>(null);
 
   // BUG-FRONTEND-RT-6 (event 000038): the destructive "Clear
   // local data" action. The dialog has its own phrase check;
@@ -546,6 +559,21 @@ export function Settings({ open, onClose, workdir }: SettingsProps) {
                         alert(err instanceof Error ? err.message : t('settings.error.deleteCustomFailed'));
                       }
                     };
+                    // v0.4.30 (audit 000130): clear the keychain
+                    // entry for ANY provider (preset or custom),
+                    // not just custom providers. The chairman
+                    // wanted to wipe an old polluted key without
+                    // removing the whole provider row.
+                    const handleClearKey = async (e: React.MouseEvent) => {
+                      e.stopPropagation();
+                      if (!confirm(t('settings.confirm.deleteKey.title', { name: p.display_name ?? p.id }))) return;
+                      try {
+                        await deleteSecret(p.secret_name);
+                        refresh();
+                      } catch (err) {
+                        alert(err instanceof Error ? err.message : t('settings.error.deleteKeyFailed'));
+                      }
+                    };
                     return (
                       <button key={p.id} type="button" onClick={() => setSelected(p.id)}
                         className={`flex flex-col items-start gap-1 rounded-md border p-2 text-left transition-colors ${isSel ? 'border-chief bg-surface-1' : 'border-border bg-surface-1 hover:border-text-secondary'} ${!usable ? 'opacity-60' : ''}`}>
@@ -557,6 +585,16 @@ export function Settings({ open, onClose, workdir }: SettingsProps) {
                           </div>
                           <div className="flex items-center gap-1.5">
                             <Toggle on={p.enabled} onChange={(v) => void toggle(p.id, v)} disabled={!usable} />
+                            {p.has_secret && (
+                              // v0.4.30: wipe the keychain entry
+                              // for this provider (any kind). Custom
+                              // providers keep the ✕ button alongside
+                              // it for removing the whole row.
+                              <button type="button" onClick={handleClearKey}
+                                title={String(t('settings.providers.clearKey'))}
+                                aria-label={String(t('settings.providers.clearKey'))}
+                                className="rounded p-0.5 text-[11px] text-text-secondary hover:bg-status-warn/20 hover:text-status-warn">🗑</button>
+                            )}
                             {isCustom && (
                               <button type="button" onClick={handleDeleteCustom} title={String(t('settings.action.deleteCustom'))} className="rounded p-0.5 text-[10px] text-status-failed hover:bg-status-failed/15 hover:text-status-failed">✕</button>
                             )}
@@ -589,7 +627,19 @@ export function Settings({ open, onClose, workdir }: SettingsProps) {
                     <div className="grid grid-cols-2 gap-3 text-xs">
                       <Field label={t('settings.custom.kindLabel')}>{sel.api_kind}</Field>
                       <Field label={t('settings.custom.baseUrlLabel')}><code className="font-mono">{sel.base_url}</code></Field>
-                      <Field label={t('settings.custom.apiKeyLabel')}><code className="font-mono">{sel.secret_name}</code></Field>
+                      {/* v0.4.30 (audit 000130): the secret_name
+                          shown here lives in the internal
+                          `flowntier/<id>` namespace — it cannot
+                          collide with a shell env var. The
+                          tooltip reinforces that explicitly. */}
+                      <Field
+                        label={
+                          <span className="inline-flex items-center gap-1">
+                            {t('settings.custom.apiKeyLabel')}
+                            <span title={String(t('settings.custom.keyNotEnv'))} className="cursor-help text-[10px] text-text-secondary">ⓘ</span>
+                          </span>
+                        }
+                      ><code className="font-mono">{sel.secret_name}</code></Field>
                       <Field label={t('settings.field.keyConfigured')}>
                         {sel.has_secret ? (
                           <span className="text-status-done">{t('settings.field.keyYes')}</span>
@@ -606,23 +656,55 @@ export function Settings({ open, onClose, workdir }: SettingsProps) {
                         <ul className="grid grid-cols-2 gap-1 text-xs">
                           {sel.models
                             .filter((m) => !disabledModels.isDisabled(sel.id, m.id))
-                            .map((m) => (
-                            <li key={m.id} className="flex items-center justify-between rounded bg-surface-2 px-2 py-1 font-mono">
-                              <span className="truncate">
-                                {m.display_name} <span className="ml-1 text-text-secondary">({m.id})</span>
-                              </span>
-                              <button
-                                type="button"
-                                aria-label={t('settings.models.deleteAria', { name: m.display_name ?? m.id })}
-                                title={t('settings.models.deleteTitle', { defaultValue: '从列表中隐藏（可恢复）' })}
-                                disabled={disabledModels.busy}
-                                onClick={() => disabledModels.disable(sel.id, m.id)}
-                                className="ml-1 rounded px-1 text-text-secondary hover:bg-status-fail/20 hover:text-status-fail"
-                              >
-                                ×
-                              </button>
-                            </li>
-                          ))}
+                            .map((m) => {
+                              const isEditing =
+                                editingModel?.providerId === sel.id && editingModel?.modelId === m.id;
+                              return (
+                                <Fragment key={m.id}>
+                                  <li className="flex items-center justify-between rounded bg-surface-2 px-2 py-1 font-mono">
+                                    <span className="truncate">
+                                      {m.display_name} <span className="ml-1 text-text-secondary">({m.id})</span>
+                                    </span>
+                                    <div className="flex items-center gap-0.5">
+                                      {/* v0.4.30: ✎ edits the per-model
+                                          metadata (context_length +
+                                          thinking_strength). Sends a
+                                          PUT to the runtime override
+                                          table. */}
+                                      <button
+                                        type="button"
+                                        aria-label={t('settings.models.editRow', { name: m.display_name ?? m.id })}
+                                        title={String(t('settings.models.editRow', { name: m.display_name ?? m.id }))}
+                                        onClick={() => setEditingModel(
+                                          isEditing ? null : { providerId: sel.id, modelId: m.id },
+                                        )}
+                                        className="ml-1 rounded px-1 text-text-secondary hover:bg-primary/15 hover:text-primary"
+                                      >
+                                        ✎
+                                      </button>
+                                      <button
+                                        type="button"
+                                        aria-label={t('settings.models.deleteAria', { name: m.display_name ?? m.id })}
+                                        title={t('settings.models.deleteTitle', { defaultValue: '从列表中隐藏（可恢复）' })}
+                                        disabled={disabledModels.busy}
+                                        onClick={() => disabledModels.disable(sel.id, m.id)}
+                                        className="rounded px-1 text-text-secondary hover:bg-status-fail/20 hover:text-status-fail"
+                                      >
+                                        ×
+                                      </button>
+                                    </div>
+                                  </li>
+                                  {isEditing && (
+                                    <ModelOverrideEditor
+                                      providerId={sel.id}
+                                      model={m}
+                                      onClose={() => setEditingModel(null)}
+                                      onSaved={() => { setEditingModel(null); refresh(); }}
+                                    />
+                                  )}
+                                </Fragment>
+                              );
+                            })}
                         </ul>
                       </div>
                     )}
@@ -825,7 +907,7 @@ export function Settings({ open, onClose, workdir }: SettingsProps) {
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({ label, children }: { label: React.ReactNode; children: React.ReactNode }) {
   return (
     <div>
       <div className="mb-0.5 text-text-secondary">{label}</div>
@@ -1563,6 +1645,11 @@ function CustomProviderForm({ onSaved }: { onSaved: () => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+  // v0.4.30 (audit 000130): which row of the local `models`
+  // array is in inline-edit mode. Editing here mutates the
+  // local state only — the final values are POSTed when the
+  // user clicks 保存 (handleSubmit).
+  const [editingModelId, setEditingModelId] = useState<string | null>(null);
 
   const reset = () => {
     setId(''); setDisplayName(''); setKind('openai'); setBaseUrl('');
@@ -1623,8 +1710,12 @@ function CustomProviderForm({ onSaved }: { onSaved: () => void }) {
 
     setBusy(true); setError(null);
     try {
-      // 1. Save API key to keychain
-      const envVarName = `CUSTOM_${idTrim.toUpperCase()}_API_KEY`;
+      // 1. Save API key to keychain. v0.4.30 (audit 000130): use
+      // the `flowntier/custom/<id>` internal namespace so the
+      //    stored secret name cannot be confused with shell env
+      //    vars. The Rust side reads with the same convention
+      //    (see handlers.rs::resolve_role_provider).
+      const envVarName = `flowntier/custom/${idTrim.toLowerCase()}`;
       const saveResult = await saveSecret(envVarName, apiKey.trim());
       if (!saveResult || !saveResult.saved) {
         setError(t('settings.error.saveFailed'));
@@ -1723,22 +1814,75 @@ function CustomProviderForm({ onSaved }: { onSaved: () => void }) {
           <span className="text-text-secondary">{t('settings.models.list')}</span>
           {models.length > 0 && (
             <ul className="flex flex-col gap-1">
-              {models.map((m) => (
-                <li key={m.id} className="flex items-center gap-2 rounded bg-surface-2 px-2 py-1 text-[11px]">
-                  <span className="min-w-0 flex-1 truncate text-primary" title={m.id}>
-                    {m.display_name} <span className="text-[10px] text-text-secondary">({m.id})</span>
-                  </span>
-                  <span className="shrink-0 text-[10px] text-text-secondary">
-                    {m.context_length
-                      ? `${m.context_length.toLocaleString()} ${t('settings.models.tokens')}`
-                      : t('settings.models.defaultContext')}
-                  </span>
-                  <span className="shrink-0 rounded bg-surface-3 px-1.5 py-0.5 text-[10px] text-text-primary">
-                    {t(`settings.models.thinking.${m.thinking_strength}`)}
-                  </span>
-                  <button type="button" onClick={() => removeModelRow(m.id)} className="shrink-0 text-[10px] text-status-failed hover:text-status-failed">✕</button>
-                </li>
-              ))}
+              {models.map((m) => {
+                const isEditing = editingModelId === m.id;
+                return (
+                  <Fragment key={m.id}>
+                    <li className="flex items-center gap-2 rounded bg-surface-2 px-2 py-1 text-[11px]">
+                      <span className="min-w-0 flex-1 truncate text-primary" title={m.id}>
+                        {m.display_name} <span className="text-[10px] text-text-secondary">({m.id})</span>
+                      </span>
+                      <span className="shrink-0 text-[10px] text-text-secondary">
+                        {m.context_length
+                          ? `${m.context_length.toLocaleString()} ${t('settings.models.tokens')}`
+                          : t('settings.models.defaultContext')}
+                      </span>
+                      <span className="shrink-0 rounded bg-surface-3 px-1.5 py-0.5 text-[10px] text-text-primary">
+                        {t(`settings.models.thinking.${m.thinking_strength}`)}
+                      </span>
+                      {/* v0.4.30: edit display_name / context_length /
+                          thinking_strength inline before POSTing. */}
+                      <button
+                        type="button"
+                        onClick={() => setEditingModelId(isEditing ? null : m.id)}
+                        title={String(t('settings.models.editRow', { name: m.display_name }))}
+                        className="shrink-0 text-[10px] text-text-secondary hover:text-primary"
+                      >✎</button>
+                      <button type="button" onClick={() => removeModelRow(m.id)} className="shrink-0 text-[10px] text-status-failed hover:text-status-failed">✕</button>
+                    </li>
+                    {isEditing && (
+                      <li className="flex flex-wrap items-center gap-1.5 rounded border border-border bg-surface-1 px-2 py-1.5 text-[11px]">
+                        <input
+                          value={m.display_name}
+                          onChange={(e) => setModels(models.map((row) =>
+                            row.id === m.id ? { ...row, display_name: e.target.value } : row,
+                          ))}
+                          placeholder={String(t('settings.models.displayNamePlaceholder'))}
+                          className="min-w-[120px] flex-1 rounded border border-border bg-surface-2 px-2 py-1 text-primary outline-none focus:border-chief"
+                        />
+                        <input
+                          type="number"
+                          min={0}
+                          value={m.context_length != null ? String(m.context_length) : ''}
+                          onChange={(e) => setModels(models.map((row) =>
+                            row.id === m.id
+                              ? { ...row, context_length: e.target.value.trim() === '' ? null : Number(e.target.value) }
+                              : row,
+                          ))}
+                          placeholder={String(t('settings.models.contextLengthPlaceholder'))}
+                          className="w-[110px] rounded border border-border bg-surface-2 px-2 py-1 font-mono outline-none focus:border-chief"
+                        />
+                        <select
+                          value={m.thinking_strength}
+                          onChange={(e) => setModels(models.map((row) =>
+                            row.id === m.id ? { ...row, thinking_strength: e.target.value as ThinkingStrength } : row,
+                          ))}
+                          className="rounded border border-border bg-surface-2 px-2 py-1 outline-none focus:border-chief"
+                        >
+                          <option value="">{t('settings.models.thinkingUnset')}</option>
+                          <option value="low">{t('settings.models.thinking.low')}</option>
+                          <option value="medium">{t('settings.models.thinking.medium')}</option>
+                          <option value="high">{t('settings.models.thinking.high')}</option>
+                        </select>
+                        <button type="button" onClick={() => setEditingModelId(null)}
+                          className="shrink-0 rounded bg-primary px-2 py-1 text-[10px] text-white hover:bg-primary/90">
+                          {t('settings.models.saveOverride')}
+                        </button>
+                      </li>
+                    )}
+                  </Fragment>
+                );
+              })}
             </ul>
           )}
           {/* Per-model fields. Per the chairman: model name + display
@@ -1881,5 +2025,127 @@ function QuotaStatusBlock({ rows, onReset }: QuotaStatusBlockProps) {
         </ol>
       )}
     </Card>
+  );
+}
+
+// ── ModelOverrideEditor ───────────────────────────────────────────
+// v0.4.30 (audit 000130): inline form for editing one
+// (provider_id, model_id) row's metadata — context_length +
+// thinking_strength. Saves via setModelOverride, refreshes the
+// parent on success.
+
+function ModelOverrideEditor({
+  providerId,
+  model,
+  onClose,
+  onSaved,
+}: {
+  providerId: string;
+  model: ProviderModel;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const { t } = useTranslation();
+  // Seed with the current values (which may already be the
+  // built-in fallback or a previously-saved override — either
+  // way editing is the same UX).
+  const [contextLength, setContextLength] = useState<string>(
+    model.context_length != null ? String(model.context_length) : '',
+  );
+  const [thinking, setThinking] = useState<'low' | 'medium' | 'high' | ''>(
+    ((): 'low' | 'medium' | 'high' | '' => {
+      const v = (model.thinking_strength ?? '').toLowerCase();
+      if (v === 'low' || v === 'medium' || v === 'high') return v;
+      return '';
+    })(),
+  );
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const save = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      const patch: {
+        provider_id: string;
+        model_id: string;
+        context_length?: number | null;
+        thinking_strength?: 'low' | 'medium' | 'high' | null;
+      } = { provider_id: providerId, model_id: model.id };
+      // Empty string in the input means "explicit null" —
+      // clears the override row for that column. Same for
+      // thinking select.
+      const ctxTrim = contextLength.trim();
+      patch.context_length = ctxTrim === '' ? null : Number(ctxTrim);
+      patch.thinking_strength = thinking === '' ? null : thinking;
+      await setModelOverride(patch);
+      onSaved();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const clear = async () => {
+    if (!confirm(t('settings.models.clearOverrideConfirm', { name: model.display_name ?? model.id }))) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await clearModelOverride(providerId, model.id);
+      onSaved();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <li className="col-span-2 mt-1 rounded border border-border bg-surface-1 p-2 font-sans">
+      <div className="grid grid-cols-2 gap-2">
+        <label className="text-[11px]">
+          <span className="block text-text-secondary">{t('settings.models.contextLengthLabel')}</span>
+          <input
+            type="number"
+            min={0}
+            value={contextLength}
+            onChange={(e) => setContextLength(e.target.value)}
+            placeholder={String(t('settings.models.contextLengthPlaceholder'))}
+            disabled={saving}
+            className="mt-1 w-full rounded border border-border bg-surface-2 px-2 py-1 font-mono text-xs"
+          />
+        </label>
+        <label className="text-[11px]">
+          <span className="block text-text-secondary">{t('settings.models.thinkingStrengthLabel')}</span>
+          <select
+            value={thinking}
+            onChange={(e) => setThinking(e.target.value as 'low' | 'medium' | 'high' | '')}
+            disabled={saving}
+            className="mt-1 w-full rounded border border-border bg-surface-2 px-2 py-1 text-xs"
+          >
+            <option value="">{t('settings.models.thinkingUnset')}</option>
+            <option value="low">low</option>
+            <option value="medium">medium</option>
+            <option value="high">high</option>
+          </select>
+        </label>
+      </div>
+      {error && <p className="mt-1 text-[11px] text-status-failed">{error}</p>}
+      <div className="mt-2 flex items-center justify-end gap-1">
+        <button type="button" onClick={clear} disabled={saving}
+          className="rounded px-2 py-1 text-[11px] text-text-secondary hover:bg-status-warn/15 hover:text-status-warn">
+          {t('settings.models.clearOverride')}
+        </button>
+        <button type="button" onClick={onClose} disabled={saving}
+          className="rounded px-2 py-1 text-[11px] text-text-secondary hover:bg-surface-3">
+          {t('settings.models.cancelEdit')}
+        </button>
+        <button type="button" onClick={save} disabled={saving}
+          className="rounded bg-primary px-2 py-1 text-[11px] text-white hover:bg-primary/90 disabled:opacity-50">
+          {t('settings.models.saveOverride')}
+        </button>
+      </div>
+    </li>
   );
 }

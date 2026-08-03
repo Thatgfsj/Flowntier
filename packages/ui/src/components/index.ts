@@ -10,3 +10,4 @@ export { ReasoningBubble } from './ReasoningBubble.js';
 export { ReviewVerdict } from './ReviewVerdict.js';
 export { ConsoleLine } from './ConsoleLine.js';
 export type { ConsoleSource } from './ConsoleLine.js';
+export { Tooltip } from './Tooltip.js';

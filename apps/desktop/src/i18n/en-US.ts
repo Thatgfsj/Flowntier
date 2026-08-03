@@ -90,6 +90,11 @@ const enUS: Translations = {
   'settings.secrets.saveKeyFor': 'Save {{provider}} API key',
   'settings.providers.titleWithCount': 'Providers ({{count}})',
   'settings.providers.configuredCount': '{{count}} configured',
+  // v0.4.30: clear-key button tooltip. Aria-label uses the
+  // same string. Says "keychain" explicitly so users don't
+  // think it deletes a shell env var.
+  'settings.providers.clearKey': 'Clear API key from keychain',
+  'settings.providers.clearKeyHint': 'Only removes the keychain entry; the provider row stays',
   'settings.secrets.placeholder': 'Paste API key (sk-...)',
   'settings.secrets.never': 'Keys never leave this machine.',
   'settings.headerSubtitle': 'Manage LLM providers and per-role models',
@@ -98,6 +103,18 @@ const enUS: Translations = {
   'settings.models.available': 'Available models',
   'settings.models.deleteAria': 'Hide {{name}} from the list',
   'settings.models.deleteTitle': 'Hide from list (recoverable)',
+  // v0.4.30: inline edit form for the model metadata
+  // override (context_length + thinking_strength).
+  'settings.models.editRow': 'Edit metadata for {{name}}',
+  'settings.models.saveOverride': 'Save',
+  'settings.models.cancelEdit': 'Cancel',
+  'settings.models.clearOverride': 'Clear override',
+  'settings.models.clearOverrideConfirm': 'Clear override for {{name}}?',
+  'settings.models.contextLengthLabel': 'Context length (tokens)',
+  'settings.models.contextLengthPlaceholder': 'Empty clears the override',
+  'settings.models.thinkingStrengthLabel': 'Thinking strength',
+  'settings.models.thinkingUnset': 'Unset (use fallback)',
+  'settings.models.displayNamePlaceholder': 'Display name',
   'settings.roles.title': 'Role -> model assignment',
 
   // ── Buttons / actions ──────────────────────────
@@ -121,6 +138,13 @@ const enUS: Translations = {
   'settings.confirm.deleteCustom.title': 'Delete relay station {{name}}?',
   'settings.confirm.deleteCustom.body':
     'This relay station and its API key will be deleted. Continue?',
+  // v0.4.30 (audit 000130): wipe the keychain entry for a
+  // provider (preset OR custom). Confirmation copy reflects
+  // that this only deletes the stored key, not the provider
+  // row itself.
+  'settings.confirm.deleteKey.title': 'Clear API key for {{name}}?',
+  'settings.confirm.deleteKey.body':
+    'The keychain entry will be removed; the provider row stays. You can paste a new key any time.',
 
   // ── Quick add AI (presets) ──────────────────────
   'settings.quickAdd.openai.compatible': 'OpenAI SDK compatible',
@@ -146,6 +170,11 @@ const enUS: Translations = {
   'settings.custom.baseUrlLabel': 'Base URL',
   'settings.custom.baseUrlPlaceholder': 'https://your-relay.com/v1',
   'settings.custom.apiKeyLabel': 'API key',
+  // v0.4.30 (audit 000130): reassure users the value goes
+  // into the encrypted keychain and the runtime does NOT
+  // read a shell env var of the same name.
+  'settings.custom.keyNotEnv':
+    'Stored only in the keychain; no shell env var of the same name is read.',
   'settings.custom.apiKeyPlaceholder': 'sk-...',
   'settings.custom.kindLabel': 'Protocol',
   'settings.custom.kind.openai': 'OpenAI SDK compatible',
@@ -217,6 +246,7 @@ const enUS: Translations = {
   'settings.error.missingApiKey': 'Please enter an API key',
   'settings.error.invalidBaseUrl': 'Base URL must start with http:// or https://',
   'settings.error.deleteCustomFailed': 'Failed to delete relay station',
+  'settings.error.deleteKeyFailed': 'Failed to clear key',
   'settings.error.deleteRole': 'Failed to delete role',
   'settings.error.tErr': 'Error: {{error}}',
   // ── Polish 13: remaining strings ──────────────────
@@ -467,6 +497,19 @@ const enUS: Translations = {
   'settings.roles.quota.reset': 'Reset',
   'chatZone.quotaNudgeTitle': 'Quota Refresh',
   'chatZone.quotaNudge': 'AI may have hit a quota limit; quota has now refreshed. Resume work.',
+
+  // ── v0.4.29 (Phase C) agentLive hover panel ─────
+  'agentLive.role.chief': 'Chief',
+  'agentLive.role.critic-a': 'Critic A',
+  'agentLive.role.critic-b': 'Critic B',
+  'agentLive.role.worker': 'Worker',
+  'agentLive.status.idle': 'Idle',
+  'agentLive.status.thinking': 'Thinking',
+  'agentLive.status.speaking': 'Speaking',
+  'agentLive.thinking': 'Thinking',
+  'agentLive.working': 'Working on',
+  'agentLive.recent': 'Recent events',
+  'agentLive.idleFor': 'Idle for {{seconds}}s',
 };
 
 export default enUS;
