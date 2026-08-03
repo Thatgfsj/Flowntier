@@ -188,8 +188,8 @@ async fn secret_roundtrip_persists_across_clients() {
             "id": 10,
             "method": "PUT",
             "params": {
-                "path": "/api/settings/secrets/OPENAI_API_KEY",
-                "body": { "name": "OPENAI_API_KEY", "value": "sk-test-1234567890" }
+                "path": "/api/settings/secrets/flowntier/openai",
+                "body": { "name": "flowntier/openai", "value": "sk-test-1234567890" }
             }
         }),
     )
@@ -210,7 +210,7 @@ async fn secret_roundtrip_persists_across_clients() {
     assert_eq!(resp["result"]["status"], 200);
     let secrets = resp["result"]["body"]["secrets"].as_array().unwrap();
     assert_eq!(secrets.len(), 1, "expected 1 secret, got {secrets:?}");
-    assert_eq!(secrets[0]["name"], "OPENAI_API_KEY");
+    assert_eq!(secrets[0]["name"], "flowntier/openai");
     assert_eq!(secrets[0]["has_value"], serde_json::json!(true));
     assert!(secrets[0].get("value").is_none());
     assert!(secrets[0].get("ciphertext").is_none());
@@ -222,8 +222,8 @@ async fn secret_roundtrip_persists_across_clients() {
             "id": 12,
             "method": "GET",
             "params": {
-                "path": "/api/settings/secrets/OPENAI_API_KEY/reveal",
-                "body": { "name": "OPENAI_API_KEY" }
+                "path": "/api/settings/secrets/flowntier/openai/reveal",
+                "body": { "name": "flowntier/openai" }
             }
         }),
     )
@@ -241,8 +241,8 @@ async fn secret_roundtrip_persists_across_clients() {
             "id": 13,
             "method": "DELETE",
             "params": {
-                "path": "/api/settings/secrets/OPENAI_API_KEY",
-                "body": { "name": "OPENAI_API_KEY" }
+                "path": "/api/settings/secrets/flowntier/openai",
+                "body": { "name": "flowntier/openai" }
             }
         }),
     )
@@ -257,8 +257,8 @@ async fn secret_roundtrip_persists_across_clients() {
             "id": 14,
             "method": "GET",
             "params": {
-                "path": "/api/settings/secrets/OPENAI_API_KEY/reveal",
-                "body": { "name": "OPENAI_API_KEY" }
+                "path": "/api/settings/secrets/flowntier/openai/reveal",
+                "body": { "name": "flowntier/openai" }
             }
         }),
     )
@@ -279,8 +279,8 @@ async fn providers_list_returns_presets_with_has_secret_join() {
             "id": 20,
             "method": "PUT",
             "params": {
-                "path": "/api/settings/secrets/OPENAI_API_KEY",
-                "body": { "name": "OPENAI_API_KEY", "value": "sk-test" }
+                "path": "/api/settings/secrets/flowntier/openai",
+                "body": { "name": "flowntier/openai", "value": "sk-test" }
             }
         }),
     )
@@ -302,7 +302,7 @@ async fn providers_list_returns_presets_with_has_secret_join() {
 
     let openai = presets.iter().find(|p| p["id"] == "openai").unwrap();
     assert_eq!(openai["has_secret"], serde_json::json!(true));
-    assert_eq!(openai["secret_name"], "OPENAI_API_KEY");
+    assert_eq!(openai["secret_name"], "flowntier/openai");
 
     let anthropic = presets.iter().find(|p| p["id"] == "anthropic").unwrap();
     assert_eq!(anthropic["has_secret"], serde_json::json!(false));
@@ -615,7 +615,7 @@ async fn list_providers_returns_presets_with_has_secret_set_after_put() {
     let (addr, handle) = spawn_server("provlist").await;
     tokio::time::sleep(std::time::Duration::from_millis(300)).await;
 
-    // 1. PUT MINIMAX_API_KEY
+    // 1. PUT flowntier/minimax secret (v0.4.30 renamed from MINIMAX_API_KEY)
     let put_resp = client::connect_and_request(
         &addr,
         serde_json::json!({
@@ -623,8 +623,8 @@ async fn list_providers_returns_presets_with_has_secret_set_after_put() {
             "id": 1,
             "method": "PUT",
             "params": {
-                "path": "/api/settings/secrets/MINIMAX_API_KEY",
-                "body": { "value": "sk-minimax-fake-1234" }
+                "path": "/api/settings/secrets/flowntier/minimax",
+                "body": { "name": "flowntier/minimax", "value": "sk-minimax-fake-1234" }
             }
         }),
     )
@@ -710,9 +710,10 @@ async fn list_providers_returns_presets_with_has_secret_set_after_put() {
 
 // v0.4.14 (event 000050): chairman reported "保存失败：no handler
 // registered for path /api/settings/secrets/MINIMAX_API_KEY".
-// This test pins the exact request shape the Tauri shell sends
-// and asserts the PUT handler is found. Without this test the
-// regression would only surface in production (real keyring).
+// v0.4.30 (audit 000130): secret namespace renamed to flowntier/<id>;
+// the same dispatcher wildcard that fixed the v0.4.14 regression
+// now matches "flowntier/minimax". This test pins the request shape
+// the Tauri shell sends and asserts the PUT handler is found.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn put_secret_handler_is_registered() {
     let (addr, handle) = spawn_server("putsec").await;
@@ -724,8 +725,8 @@ async fn put_secret_handler_is_registered() {
             "id": 1,
             "method": "PUT",
             "params": {
-                "path": "/api/settings/secrets/MINIMAX_API_KEY",
-                "body": { "value": "sk-minimax-test-1234" }
+                "path": "/api/settings/secrets/flowntier/minimax",
+                "body": { "name": "flowntier/minimax", "value": "sk-minimax-test-1234" }
             }
         }),
     )
@@ -1120,7 +1121,7 @@ async fn get_role_resolve_returns_no_key_error_when_keychain_empty() {
 
     // 2. GET resolve. The DB row resolves provider_short +
     //    model_id fine, but the keychain has nothing for
-    //    MINIMAX_API_KEY, so the error path fires.
+    //    flowntier/minimax, so the error path fires.
     let resp = client::connect_and_request(
         &addr,
         serde_json::json!({
@@ -1141,8 +1142,8 @@ async fn get_role_resolve_returns_no_key_error_when_keychain_empty() {
     assert_eq!(body["ok"], serde_json::json!(false),
         "ok:false because keychain empty; resp={resp_text}");
     let err = body["error"].as_str().unwrap_or("");
-    assert!(err.contains("MINIMAX_API_KEY") || err.contains("no API key"),
-        "error must mention MINIMAX_API_KEY or 'no API key'; got '{err}'");
+    assert!(err.contains("flowntier/minimax") || err.contains("no API key"),
+        "error must mention flowntier/minimax or 'no API key'; got '{err}'");
     assert_eq!(body["role"], serde_json::json!("agent:chief"));
     handle.abort();
 }

@@ -28,6 +28,7 @@ import {
   usePhaseStates,
   useMilestones,
 } from './contexts/WorkflowContext.js';
+import { DisabledModelsProvider } from './contexts/DisabledModelsContext.js';
 import type { PhaseName } from './contexts/workflowReducer.js';
 import { PHASES } from './contexts/workflowReducer.js';
 
@@ -181,7 +182,9 @@ export function App() {
 
   return (
     <WorkflowProvider>
-      <WorkbenchApp workdir={workdir} />
+      <DisabledModelsProvider>
+        <WorkbenchApp workdir={workdir} />
+      </DisabledModelsProvider>
     </WorkflowProvider>
   );
 // v0.4.29 (Phase A): the workbench body. All workflow state

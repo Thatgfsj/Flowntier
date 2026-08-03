@@ -864,6 +864,14 @@ async fn enable_provider_model(
     .await
 }
 
+// v0.4.35 (event 000135): DisabledModelsProvider hydrates from
+//   this on mount so Settings → Providers sees the persisted
+//   truth, not an empty Set.
+#[tauri::command]
+async fn list_disabled_models() -> Result<serde_json::Value, String> {
+    pipe_request("GET", "/api/disabled-models", None).await
+}
+
 #[tauri::command]
 async fn invoke_plugin(
     name: String,
@@ -1953,7 +1961,7 @@ pub fn run() {
             get_quota_status, reset_quota, get_role_quota_status,
             list_plugins, invoke_plugin, fetch_provider_models,
             add_custom_provider, remove_custom_provider,
-            disable_provider_model, enable_provider_model,
+            disable_provider_model, enable_provider_model, list_disabled_models,
             set_model_override, clear_model_override,
             start_workflow_cmd, get_workflow, cancel_workflow,
             run_agent_task, run_workflow,

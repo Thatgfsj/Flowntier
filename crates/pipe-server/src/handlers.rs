@@ -1084,6 +1084,26 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
         Box::pin(async move { enable_model(body, s).await })
     });
 
+    // event 000135 (v0.4.35): GET /api/disabled-models — return
+    //   every (provider_id, model_id) pair the user has hidden.
+    //   Used by the desktop DisabledModelsProvider on mount so
+    //   Settings → Providers starts with the persisted truth,
+    //   not an empty Set that only sees local mutations.
+    let list_disabled_state = state.clone();
+    d.register("GET", "/api/disabled-models", move |_body| {
+        let s = list_disabled_state.clone();
+        Box::pin(async move {
+            match s.repo.list_disabled_models().await {
+                Ok(rows) => Ok((200, json!({
+                    "models": rows.into_iter().map(|(provider_id, model_id)| {
+                        json!({"provider_id": provider_id, "model_id": model_id})
+                    }).collect::<Vec<_>>()
+                }))),
+                Err(e) => Ok((500, json!({"error": format!("list_disabled_models: {e}")}))),
+            }
+        })
+    });
+
     // GET /api/providers/{id}/models — list models. Tries the
     // provider's /v1/models endpoint (if has_live_models_endpoint
     // is true); falls back to ANTHROPIC_FALLBACK_MODELS for

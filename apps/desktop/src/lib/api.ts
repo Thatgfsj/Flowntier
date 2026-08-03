@@ -286,6 +286,16 @@ export async function enableProviderModel(
   );
 }
 
+// v0.4.35 (event 000135): DisabledModelsProvider hydrates from
+//   this on mount so Settings → Providers reflects persisted
+//   truth. Response shape matches the storage layer directly:
+//   { models: [{ provider_id, model_id }] }
+export async function listDisabledModels(): Promise<{ models: Array<{ provider_id: string; model_id: string }> }> {
+  return invoke<{ models: Array<{ provider_id: string; model_id: string }> }>(
+    'list_disabled_models',
+  );
+}
+
 // v0.4.30 (audit 000130): per-(provider, model) metadata
 // override. The Settings → provider-detail "✎ edit" button
 // uses this to correct e.g. MiniMax-M3's context_length
