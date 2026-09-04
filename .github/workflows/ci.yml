@@ -77,13 +77,13 @@ jobs:
               --exclude-dir=.nwt \
               --exclude=pnpm-lock.yaml \
               --exclude=Cargo.lock \
-              --exclude=tools/replace_in_files.py \
+              --exclude=replace_in_files.py \
               --exclude=Makefile \
               --exclude=CHANGELOG.md \
-              --exclude=docs/DEPRECATIONS.md \
-              --exclude=docs/SECURITY.md \
-              --exclude=.github/workflows/release.yml \
-              --exclude=.github/workflows/ci.yml \
+              --exclude=DEPRECATIONS.md \
+              --exclude=SECURITY.md \
+              --exclude=release.yml \
+              --exclude=ci.yml \
               . || true)
           if [ -n "$HITS" ]; then
             echo "::error::Brand regression: old ACO / Agent Company OS strings found"
@@ -104,7 +104,6 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.85
           components: rustfmt, clippy
 
       - name: Install Linux GUI / WebKit dependencies
