@@ -120,17 +120,8 @@ jobs:
       - name: cargo fmt --check
         run: cargo fmt --all -- --check
 
-      - name: Create Linux sidecar stub for Tauri build check
-        # Tauri's build.rs validates that all externalBin paths exist at
-        # build time.  The Linux sidecar is built in the e2e-windows job
-        # and is never committed to the repo.  An empty stub satisfies
-        # the existence check so clippy can run on the full workspace.
-        run: |
-          mkdir -p apps/desktop/src-tauri/binaries
-          touch apps/desktop/src-tauri/binaries/flowntier_runtime-x86_64-unknown-linux-gnu
-
       - name: cargo clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets --exclude flowntier-desktop -- -D warnings
 
       - name: cargo test
         # The cancel_kills_long_running_bash test in agent-core is a
@@ -139,8 +130,10 @@ jobs:
         # because the test only spawns a non-existent process on
         # Linux). We skip it here; it runs on the Windows e2e runner
         # below where it has a chance to pass.
+        # flowntier-desktop is excluded because it is a Tauri desktop shell
+        # covered by the e2e-windows job.
         run: |
-          cargo test --workspace --all-features \
+          cargo test --workspace --all-features --exclude flowntier-desktop \
             -- --skip tool::bash::cap_tests::cancel_kills_long_running_bash
 
   # ──────────────────────────────────────────────────────────────
