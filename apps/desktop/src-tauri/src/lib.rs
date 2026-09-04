@@ -21,7 +21,7 @@ use tauri_core::logging::{self, LoggingGuard};
 use tauri_core::{AppState, NewWorkflowResponse};
 use tauri_plugin_shell::ShellExt;
 #[cfg(windows)]
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::AsyncWriteExt;
 #[cfg(windows)]
 use tokio::net::windows::named_pipe::ClientOptions;
 
@@ -172,19 +172,32 @@ async fn read_response_bytes(
 ) -> std::io::Result<Vec<u8>> {
     use tokio::io::AsyncReadExt;
     let mut buf = Vec::with_capacity(4096);
-    let mut byte = [0u8; 1];
+    let mut chunk = [0u8; 4096];
     loop {
-        conn.read_exact(&mut byte).await?;
-        if byte[0] == b'\n' {
+        let n = conn.read(&mut chunk).await?;
+        if n == 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "pipe closed before newline delimiter",
+            ));
+        }
+        if let Some(pos) = chunk[..n].iter().position(|&b| b == b'\n') {
+            buf.extend_from_slice(&chunk[..pos]);
+            if buf.len() > max_bytes {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("pipe response exceeds {max_bytes} bytes"),
+                ));
+            }
             return Ok(buf);
         }
-        if buf.len() >= max_bytes {
+        buf.extend_from_slice(&chunk[..n]);
+        if buf.len() > max_bytes {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 format!("pipe response exceeds {max_bytes} bytes"),
             ));
         }
-        buf.push(byte[0]);
     }
 }
 
@@ -391,57 +404,40 @@ async fn events_bridge(_app: tauri::AppHandle) {}
 
 #[cfg(windows)]
 async fn events_bridge(app: tauri::AppHandle) {
+    use tokio::io::{AsyncBufReadExt, BufReader};
     tracing::info!(target: "tauri_events", "[TRACE] events_bridge: starting — connecting to events pipe");
     let mut backoff_ms = 200u64;
     loop {
-        match ClientOptions::new().open(EVENTS_PIPE) {
-            Ok(mut conn) => {
+        let open_res = tokio::task::spawn_blocking(move || {
+            ClientOptions::new().open(EVENTS_PIPE)
+        })
+        .await;
+
+        match open_res {
+            Ok(Ok(conn)) => {
                 tracing::info!(target: "tauri_events", "[TRACE] events_bridge: connected to events pipe");
                 backoff_ms = 200;
-                let mut buf = Vec::new();
-                let mut byte = [0u8; 1];
-                loop {
-                    match conn.read_exact(&mut byte).await {
-                        Ok(_) => {
-                            if byte[0] == b'\n' {
-                                if buf.is_empty() {
-                                    continue;
-                                }
-                                if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&buf) {
-                                    // The events pipe is newline-delimited JSON;
-                                    // each line is a serialised value of one of
-                                    // two shapes:
-                                    //   - WfEvent   : {"event": "<kind>", ...}
-                                    //   - AgentEvent: {"kind": "<kind>", ...}
-                                    //
-                                    // Both are forwarded to the webview under
-                                    // the same `wf:event` channel — the
-                                    // frontend `useAgentStream` hook filters
-                                    // by `kind` field (AgentEvent) so WfEvent
-                                    // payloads are ignored at the JS layer.
-                                    //
-                                    // v0.4.20 bug: only the WfEvent branch
-                                    // was forwarded (v.get("event")) — chief
-                                    // AgentEvent was silently dropped, leaving
-                                    // the ChatZone transcript empty.
-                                    if let Err(e) = app.emit("wf:event", v) {
-                                        eprintln!("[flowntier] emit wf:event failed: {e}");
-                                    }
-                                }
-                                buf.clear();
-                            } else if buf.len() < MAX_LINE {
-                                buf.push(byte[0]);
-                            }
-                        }
-                        Err(e) => {
-                            eprintln!("[flowntier] events pipe read err: {e}; reconnecting");
-                            break;
+                let mut lines = BufReader::new(conn).lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    let trimmed = line.trim();
+                    if trimmed.is_empty() {
+                        continue;
+                    }
+                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(trimmed) {
+                        if let Err(e) = app.emit("wf:event", v) {
+                            eprintln!("[flowntier] emit wf:event failed: {e}");
                         }
                     }
                 }
+                eprintln!("[flowntier] events pipe disconnected; reconnecting");
+            }
+            Ok(Err(e)) => {
+                eprintln!("[flowntier] events pipe open err: {e}; retry in {backoff_ms}ms");
+                tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
+                backoff_ms = (backoff_ms * 2).min(5_000);
             }
             Err(e) => {
-                eprintln!("[flowntier] events pipe open err: {e}; retry in {backoff_ms}ms");
+                eprintln!("[flowntier] events pipe spawn_blocking panic: {e}; retry in {backoff_ms}ms");
                 tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
                 backoff_ms = (backoff_ms * 2).min(5_000);
             }
@@ -962,6 +958,27 @@ async fn get_workflow(
             obj.insert("tasksDone".into(), serde_json::json!(done));
             obj.insert("tasks_total".into(), serde_json::json!(total));
             obj.insert("tasksTotal".into(), serde_json::json!(total));
+            let tasks_json: Vec<serde_json::Value> = tasks
+                .into_iter()
+                .map(|t| {
+                    serde_json::json!({
+                        "id": t.id,
+                        "workflow_id": t.wf_id,
+                        "workflowId": t.wf_id,
+                        "parent_id": t.parent_id,
+                        "title": t.title,
+                        "status": t.status,
+                        "state": t.status,
+                        "assigned_to": t.assigned_to,
+                        "repair_count": t.repair_count,
+                        "repairCount": t.repair_count,
+                        "result": t.result,
+                        "started_at": t.started_at,
+                        "finished_at": t.finished_at,
+                    })
+                })
+                .collect();
+            obj.insert("tasks".into(), serde_json::json!(tasks_json));
         }
     }
     Ok(Some(json))

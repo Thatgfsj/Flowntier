@@ -12,7 +12,6 @@
 //!    `similar` crate and apply it via `similar::udiff::apply_patches`.
 
 use async_trait::async_trait;
-use similar::{ChangeTag, TextDiff};
 
 use super::{Tool, ToolContext, ToolError, ToolOutput};
 
@@ -120,12 +119,8 @@ impl Tool for PatchTool {
 
 fn replace_once(haystack: &str, needle: &str, replacement: &str) -> Result<String, ToolError> {
     let count = haystack.matches(needle).count();
-    if count == 0 {
-        return Err(ToolError::Other(format!(
-            "old_text not found in file (needle was {} chars); \
-             check whitespace, indentation, line endings, or re-read the file first",
-            needle.len()
-        )));
+    if count == 1 {
+        return Ok(haystack.replacen(needle, replacement, 1));
     }
     if count > 1 {
         return Err(ToolError::Other(format!(
@@ -133,27 +128,90 @@ fn replace_once(haystack: &str, needle: &str, replacement: &str) -> Result<Strin
              Include more surrounding context to disambiguate"
         )));
     }
-    Ok(haystack.replacen(needle, replacement, 1))
+
+    // Direct match failed (count == 0). Try CRLF / LF normalization.
+    // Windows files frequently have \r\n while LLM-generated edits use \n.
+    if haystack.contains("\r\n") || needle.contains("\r\n") {
+        let haystack_lf = haystack.replace("\r\n", "\n");
+        let needle_lf = needle.replace("\r\n", "\n");
+        let replacement_lf = replacement.replace("\r\n", "\n");
+
+        let count_lf = haystack_lf.matches(&needle_lf).count();
+        if count_lf == 1 {
+            let replaced_lf = haystack_lf.replacen(&needle_lf, &replacement_lf, 1);
+            return if haystack.contains("\r\n") {
+                Ok(replaced_lf.replace('\n', "\r\n"))
+            } else {
+                Ok(replaced_lf)
+            };
+        }
+        if count_lf > 1 {
+            return Err(ToolError::Other(format!(
+                "old_text matches {count_lf} locations (after CRLF normalization); must match exactly once. \
+                 Include more surrounding context to disambiguate"
+            )));
+        }
+    }
+
+    Err(ToolError::Other(format!(
+        "old_text not found in file (needle was {} chars); \
+         check whitespace, indentation, line endings, or re-read the file first",
+        needle.len()
+    )))
 }
 
 fn apply_unified_diff(original: &str, diff_text: &str) -> Result<String, ToolError> {
-    // We re-derive the new text from `similar` instead of using
-    // its udiff patch applier so we can give the agent a clean
-    // error if the hunk doesn't apply.
-    let diff = TextDiff::from_lines(original, diff_text);
-    let mut out = String::with_capacity(original.len());
-    for change in diff.iter_all_changes() {
-        match change.tag() {
-            ChangeTag::Equal | ChangeTag::Insert => out.push_str(change.value()),
-            ChangeTag::Delete => {} // skip
+    // Parse unified diff hunks (lines starting with @@)
+    let lines: Vec<&str> = diff_text.lines().collect();
+    let mut hunks: Vec<(String, String)> = Vec::new();
+    let mut in_hunk = false;
+    let mut old_chunk = String::new();
+    let mut new_chunk = String::new();
+
+    for line in lines {
+        if line.starts_with("@@") {
+            if in_hunk && (!old_chunk.is_empty() || !new_chunk.is_empty()) {
+                hunks.push((old_chunk, new_chunk));
+                old_chunk = String::new();
+                new_chunk = String::new();
+            }
+            in_hunk = true;
+            continue;
+        }
+        if !in_hunk {
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix('-') {
+            old_chunk.push_str(rest);
+            old_chunk.push('\n');
+        } else if let Some(rest) = line.strip_prefix('+') {
+            new_chunk.push_str(rest);
+            new_chunk.push('\n');
+        } else if let Some(rest) = line.strip_prefix(' ') {
+            old_chunk.push_str(rest);
+            old_chunk.push('\n');
+            new_chunk.push_str(rest);
+            new_chunk.push('\n');
+        } else if line.is_empty() {
+            old_chunk.push('\n');
+            new_chunk.push('\n');
         }
     }
-    if out == original {
+    if in_hunk && (!old_chunk.is_empty() || !new_chunk.is_empty()) {
+        hunks.push((old_chunk, new_chunk));
+    }
+
+    if hunks.is_empty() {
         return Err(ToolError::Other(
-            "diff produced no change against current file; hunk may not apply".into(),
+            "no valid unified diff hunks found (expected @@ ... @@). Use old_text/new_text instead.".into(),
         ));
     }
-    Ok(out)
+
+    let mut current = original.to_string();
+    for (old, new) in hunks {
+        current = replace_once(&current, &old, &new)?;
+    }
+    Ok(current)
 }
 
 #[cfg(test)]
@@ -186,6 +244,64 @@ mod tests {
             .unwrap();
         assert!(!out.is_error);
         assert_eq!(std::fs::read_to_string(&p).unwrap(), "hello rust\n");
+    }
+
+    #[tokio::test]
+    async fn search_replace_handles_crlf() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("crlf.txt");
+        // File has Windows CRLF
+        std::fs::write(&p, "line 1\r\nline 2\r\nline 3\r\n").unwrap();
+        let ctx = ToolContext {
+            workspace: Workspace::new(dir.path(), "t"),
+            approved: false,
+            ..Default::default()
+        };
+        // LLM sends LF only
+        let out = PatchTool
+            .execute(
+                serde_json::json!({
+                    "path": "crlf.txt",
+                    "old_text": "line 2\n",
+                    "new_text": "line two\n",
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert!(!out.is_error);
+        assert_eq!(
+            std::fs::read_to_string(&p).unwrap(),
+            "line 1\r\nline two\r\nline 3\r\n"
+        );
+    }
+
+    #[tokio::test]
+    async fn unified_diff_works() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("diff.txt");
+        std::fs::write(&p, "fn main() {\n    println!(\"old\");\n}\n").unwrap();
+        let ctx = ToolContext {
+            workspace: Workspace::new(dir.path(), "t"),
+            approved: false,
+            ..Default::default()
+        };
+        let diff_str = "--- a/diff.txt\n+++ b/diff.txt\n@@ -1,3 +1,3 @@\n fn main() {\n-    println!(\"old\");\n+    println!(\"new\");\n }\n";
+        let out = PatchTool
+            .execute(
+                serde_json::json!({
+                    "path": "diff.txt",
+                    "diff": diff_str,
+                }),
+                &ctx,
+            )
+            .await
+            .unwrap();
+        assert!(!out.is_error);
+        assert_eq!(
+            std::fs::read_to_string(&p).unwrap(),
+            "fn main() {\n    println!(\"new\");\n}\n"
+        );
     }
 
     #[tokio::test]

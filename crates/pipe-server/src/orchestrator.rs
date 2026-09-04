@@ -93,13 +93,19 @@ pub const PHASES: [&str; 8] = [
 /// are the exact fields the spec calls out for Worker handoff
 /// (PROJECT_SPEC.md §Phase 4). Kept as plain strings so the
 /// chief's LLM output is easy to JSON-parse.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct WorkerTask {
+    #[serde(default)]
     pub id: String,
+    #[serde(default)]
     pub title: String,
+    #[serde(default)]
     pub objective: String,
+    #[serde(default)]
     pub interfaces: String,
+    #[serde(default)]
     pub dependencies: Vec<String>,
+    #[serde(default)]
     pub requirements: String,
     /// Optional worker label (Backend / Frontend / Database /
     /// API / Testing / Documentation). When the chief picks one
@@ -153,15 +159,15 @@ impl PlanDoc {
     /// doc only if all parsing attempts fail.
     pub fn from_chief_text(raw_text: &str, fallback_request: &str) -> Self {
         // Strip thinking blocks emitted by reasoning models (DeepSeek-R1, Qwen, etc.)
-        let text_owned = if let Some(start) = raw_text.find("<think>") {
-            if let Some(end) = raw_text[start..].find("</think>") {
-                format!("{}{}", &raw_text[..start], &raw_text[start + end + 8..])
+        let mut text_owned = raw_text.to_string();
+        while let Some(start) = text_owned.find("<think>") {
+            if let Some(end_rel) = text_owned[start..].find("</think>") {
+                text_owned.replace_range(start..start + end_rel + 8, "");
             } else {
-                raw_text.to_string()
+                text_owned.truncate(start);
+                break;
             }
-        } else {
-            raw_text.to_string()
-        };
+        }
         let text = text_owned.as_str();
 
         // 1. Try ```json ... ``` blocks
@@ -1603,6 +1609,24 @@ impl Orchestrator {
         // ── Phase 8: delivery ─────────────────────────────
         phase_idx = 7;
         self.emit_phase(Some(PHASES[6]), PHASES[phase_idx]).await;
+        let workers_summary = worker_results
+            .iter()
+            .enumerate()
+            .map(|(i, w)| {
+                let task_title = plan
+                    .tasks
+                    .get(i)
+                    .map(|t| t.title.as_str())
+                    .unwrap_or("任务");
+                let snippet: String = w.text.chars().take(200).collect();
+                format!(
+                    "- 任务「{}」(状态: {}): 摘要: {}",
+                    task_title, w.status, snippet
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
         let delivery = self.run_agent(AgentRunSpec {
             role: Role::Chief,
             task: format!(
@@ -1616,7 +1640,7 @@ impl Orchestrator {
                 critic_verdict(&final_a),
                 critic_verdict(&final_b),
             ),
-            context: None,
+            context: Some(format!("Worker 实际执行产出列表:\n{}", workers_summary)),
         }).await;
         self.persist_task_row(&delivery, "8-delivery", 0).await;
 
@@ -1786,26 +1810,44 @@ impl Orchestrator {
 /// a usable verdict instead of "UNKNOWN".
 ///
 /// Looks at the text and summary for the most recent verdict
-/// token; if none found, returns "UNKNOWN". Note the priority
-/// order PASS → REWRITE → REPAIR — historically this gave
-/// false positives when a reviewer said "是否应该 PASS?" mid-
-/// paragraph. The structured JSON path avoids that entirely.
+/// token; if none found, returns "UNKNOWN".
+/// Priority order: REWRITE → REPAIR → PASS.
+/// Word boundary and negation checks prevent false matches (e.g. "password", "cannot pass", "不通过").
 fn verdict_of(o: &TaskOutcome) -> String {
-    let s = o.text.to_uppercase();
-    for v in &["PASS", "REWRITE", "REPAIR"] {
-        if s.contains(v) {
-            return v.to_string();
+    scan_text_verdict(&o.text)
+        .or_else(|| o.summary.as_ref().and_then(|s| scan_text_verdict(s)))
+        .unwrap_or_else(|| "UNKNOWN".into())
+}
+
+fn scan_text_verdict(raw: &str) -> Option<String> {
+    let upper = raw.to_uppercase();
+    // 1. Highest severity: REWRITE / 重写
+    if upper.contains("REWRITE") || raw.contains("重写") || raw.contains("需重写") {
+        return Some("REWRITE".into());
+    }
+    // 2. Medium severity: REPAIR / 需修复 / 修复
+    if upper.contains("REPAIR") || raw.contains("需修复") || raw.contains("修复") {
+        return Some("REPAIR".into());
+    }
+    // 3. Negations for PASS: if it says "NOT PASS", "CANNOT PASS", "不通过", "未通过", treat as REPAIR
+    if upper.contains("NOT PASS")
+        || upper.contains("CANNOT PASS")
+        || upper.contains("CAN NOT PASS")
+        || raw.contains("不通过")
+        || raw.contains("未通过")
+    {
+        return Some("REPAIR".into());
+    }
+    // 4. PASS / 通过 with boundary checks (avoid password, bypass, compass)
+    if raw.contains("通过") {
+        return Some("PASS".into());
+    }
+    for word in upper.split(|c: char| !c.is_alphabetic()) {
+        if word == "PASS" {
+            return Some("PASS".into());
         }
     }
-    if let Some(s) = &o.summary {
-        let su = s.to_uppercase();
-        for v in &["PASS", "REWRITE", "REPAIR"] {
-            if su.contains(v) {
-                return v.to_string();
-            }
-        }
-    }
-    "UNKNOWN".into()
+    None
 }
 
 /// v0.4.22 (event 000115): convenience wrapper around
@@ -1900,12 +1942,18 @@ fn extract_fenced_verdict_block(text: &str) -> Option<ReviewerVerdictJson> {
 /// as UNKNOWN so downstream severity logic (REWRITE > REPAIR)
 /// never crashes on a typo.
 fn normalize_verdict_token(raw: &str) -> String {
-    match raw.trim().to_uppercase().as_str() {
-        "PASS" => "PASS".into(),
-        "REPAIR" => "REPAIR".into(),
-        "REWRITE" => "REWRITE".into(),
-        _ => "UNKNOWN".into(),
+    let trimmed = raw.trim();
+    let upper = trimmed.to_uppercase();
+    if upper == "PASS" || trimmed == "通过" {
+        return "PASS".into();
     }
+    if upper == "REPAIR" || trimmed == "需修复" || trimmed == "修复" {
+        return "REPAIR".into();
+    }
+    if upper == "REWRITE" || trimmed == "重写" || trimmed == "需重写" {
+        return "REWRITE".into();
+    }
+    "UNKNOWN".into()
 }
 
 /// First non-empty sentence of the text, falling back to the
@@ -2109,5 +2157,43 @@ mod tests {
         assert_eq!(stages[1], vec![1]);
         // Stage 2 should contain w_ui (index 2)
         assert_eq!(stages[2], vec![2]);
+    }
+
+    #[test]
+    fn test_worker_task_serde_defaults() {
+        let json = r#"{"id": "w1", "title": "Task 1"}"#;
+        let task: WorkerTask = serde_json::from_str(json).expect("should deserialize with defaults");
+        assert_eq!(task.id, "w1");
+        assert_eq!(task.title, "Task 1");
+        assert_eq!(task.objective, "");
+        assert_eq!(task.interfaces, "");
+        assert!(task.dependencies.is_empty());
+        assert_eq!(task.requirements, "");
+        assert_eq!(task.label, "");
+    }
+
+    #[test]
+    fn test_verdict_of_severity_and_boundaries() {
+        let make_outcome = |text: &str| TaskOutcome {
+            role_id: "agent:critic:a".into(),
+            role_display: "Critic".into(),
+            text: text.into(),
+            summary: None,
+            status: "DONE".into(),
+            elapsed_ms: 100,
+            structured_verdict: None,
+        };
+
+        // Word boundary check: password must not be PASS
+        assert_eq!(verdict_of(&make_outcome("Please enter your password")), "UNKNOWN");
+        // Negation check: cannot pass must be REPAIR
+        assert_eq!(verdict_of(&make_outcome("The tests cannot pass yet")), "REPAIR");
+        assert_eq!(verdict_of(&make_outcome("验收不通过，请修正")), "REPAIR");
+        // Chinese checks
+        assert_eq!(verdict_of(&make_outcome("代码编写完成，通过")), "PASS");
+        assert_eq!(verdict_of(&make_outcome("发现死锁风险，需修复")), "REPAIR");
+        assert_eq!(verdict_of(&make_outcome("严重设计缺陷，必须重写")), "REWRITE");
+        // Severity precedence: REWRITE > REPAIR > PASS
+        assert_eq!(verdict_of(&make_outcome("虽然部分测试 PASS，但架构缺陷需要 REWRITE")), "REWRITE");
     }
 }
