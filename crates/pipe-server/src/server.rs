@@ -33,7 +33,7 @@ fn socket_paths() -> (std::path::PathBuf, std::path::PathBuf) {
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| {
             dirs_cache_dir()
-                .unwrap_or_else(|| std::env::temp_dir())
+                .unwrap_or_else(std::env::temp_dir)
                 .join("flowntier")
         });
     let _ = std::fs::create_dir_all(&base);
