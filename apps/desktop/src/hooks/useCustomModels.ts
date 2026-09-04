@@ -12,10 +12,10 @@
  *   { [providerId: string]: { [modelId: string]: ProviderModel } }
  */
 
-import { useCallback, useEffect, useState } from 'react';
-import type { ProviderModel } from '../lib/api.js';
+import { useCallback, useEffect, useState } from "react";
+import type { ProviderModel } from "../lib/api.js";
 
-const STORAGE_KEY = 'aco.custom_models.v1';
+const STORAGE_KEY = "aco.custom_models.v1";
 
 type CustomModelMap = Record<string, Record<string, ProviderModel>>;
 
@@ -82,10 +82,7 @@ export function useCustomModels() {
 
   // Total count across all providers — used as a stable dep for effects
   // that need to react to changes without re-running on every render.
-  const totalCount = Object.values(map).reduce(
-    (acc, mm) => acc + Object.keys(mm).length,
-    0,
-  );
+  const totalCount = Object.values(map).reduce((acc, mm) => acc + Object.keys(mm).length, 0);
 
   return { map, getForProvider, addMany, remove, clear, totalCount };
 }

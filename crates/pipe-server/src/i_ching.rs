@@ -56,7 +56,11 @@ impl Hexagram {
             let yang = (self.binary >> i) & 1 == 1;
             slot.position = (i as u8) + 1;
             slot.kind = if yang { LineKind::Yang } else { LineKind::Yin };
-            slot.glyph = if yang { "━━━━━━━━━━" } else { "━━    ━━" };
+            slot.glyph = if yang {
+                "━━━━━━━━━━"
+            } else {
+                "━━    ━━"
+            };
         }
         out
     }
@@ -87,7 +91,11 @@ fn cache() -> &'static Vec<Hexagram> {
         );
         // Validate canonical ordering: ids 1..=64.
         for (i, h) in parsed.hexagrams.iter().enumerate() {
-            assert_eq!(h.id as usize, i + 1, "hexagrams.json must use canonical 1..=64 ids");
+            assert_eq!(
+                h.id as usize,
+                i + 1,
+                "hexagrams.json must use canonical 1..=64 ids"
+            );
         }
         parsed.hexagrams
     })
@@ -123,7 +131,13 @@ mod tests {
     fn ids_are_1_through_64() {
         let hexes = cache();
         for (i, h) in hexes.iter().enumerate() {
-            assert_eq!(h.id as usize, i + 1, "id at index {} should be {}", i, i + 1);
+            assert_eq!(
+                h.id as usize,
+                i + 1,
+                "id at index {} should be {}",
+                i,
+                i + 1
+            );
         }
     }
 

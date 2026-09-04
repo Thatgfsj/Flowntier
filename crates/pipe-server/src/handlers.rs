@@ -7,7 +7,7 @@
 use agent_core::provider::openai::OpenAiProvider;
 use agent_core::tool::ToolRegistry;
 use agent_core::workspace::Workspace;
-use agent_core::{Agent, AgentConfig, AgentEvent, Message, message::parse_chat_history};
+use agent_core::{message::parse_chat_history, Agent, AgentConfig, AgentEvent, Message};
 use serde_json::{json, Value};
 use std::sync::Arc;
 use tokio::sync::broadcast;
@@ -121,16 +121,17 @@ impl ActiveWorkflows {
         let m = self.inner.lock().expect("ActiveWorkflows mutex poisoned");
         m.len()
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 }
 
 impl ServerState {
     /// New default state. Opens the SQLite repo at
     /// `<data_dir>/storage.sqlite` and constructs a SecretStore
     /// bound to the same data dir.
-    pub async fn new(
-        workspace_root: std::path::PathBuf,
-        data_dir: std::path::PathBuf,
-    ) -> Self {
+    pub async fn new(workspace_root: std::path::PathBuf, data_dir: std::path::PathBuf) -> Self {
         let (events, _rx) = broadcast::channel(8192);
 
         let db_path = data_dir.join("storage.sqlite");
@@ -152,9 +153,10 @@ impl ServerState {
         Self {
             events,
             tools: Arc::new(ToolRegistry::with_builtins()),
-            workspace: Arc::new(std::sync::RwLock::new(
-                Workspace::new(workspace_root, "flowntier"),
-            )),
+            workspace: Arc::new(std::sync::RwLock::new(Workspace::new(
+                workspace_root,
+                "flowntier",
+            ))),
             errors: Arc::new(std::sync::Mutex::new(
                 std::collections::VecDeque::with_capacity(200),
             )),
@@ -174,10 +176,7 @@ impl ServerState {
     /// `POST /api/run_task` lands, so in practice the swap is
     /// observed by every new task.
     pub fn set_workspace(&self, root: std::path::PathBuf) {
-        let mut g = self
-            .workspace
-            .write()
-            .expect("workspace rwlock poisoned");
+        let mut g = self.workspace.write().expect("workspace rwlock poisoned");
         *g = Workspace::new(root, "flowntier");
         tracing::info!(
             target: "pipe_server",
@@ -207,7 +206,9 @@ impl ServerState {
     /// badge when count > 0.
     pub fn push_error(&self, rec: ErrorRecord) {
         if let Ok(mut g) = self.errors.lock() {
-            if g.len() >= 200 { g.pop_front(); }
+            if g.len() >= 200 {
+                g.pop_front();
+            }
             g.push_back(rec);
         }
     }
@@ -228,7 +229,10 @@ impl ServerState {
     /// v0.4.20: clone the dispatcher handle. Used by the quota
     /// scheduler (Phase-2) to dispatch internal retry requests.
     pub fn dispatcher(&self) -> Option<Arc<Dispatcher>> {
-        self.dispatcher.lock().expect("dispatcher mutex poisoned").clone()
+        self.dispatcher
+            .lock()
+            .expect("dispatcher mutex poisoned")
+            .clone()
     }
 }
 
@@ -241,11 +245,14 @@ pub fn register_all(d: &mut Dispatcher, state: ServerState) {
     d.register("GET", "/api/ping", move |_body| {
         let _ = &s1;
         Box::pin(async {
-            Ok((200, json!({
-                "ok": true,
-                "runtime": "flowntier-rs",
-                "version": env!("CARGO_PKG_VERSION"),
-            })))
+            Ok((
+                200,
+                json!({
+                    "ok": true,
+                    "runtime": "flowntier-rs",
+                    "version": env!("CARGO_PKG_VERSION"),
+                }),
+            ))
         })
     });
 
@@ -311,8 +318,11 @@ pub fn register_all(d: &mut Dispatcher, state: ServerState) {
     d.register("GET", "/api/kv/{key}", move |body| {
         let s = kv_get_state.clone();
         Box::pin(async move {
-            let key = body.get("key").and_then(|v| v.as_str())
-                .ok_or_else(|| "missing 'key'".to_string())?.to_string();
+            let key = body
+                .get("key")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| "missing 'key'".to_string())?
+                .to_string();
             match s.repo.kv_get(&key).await {
                 Ok(Some(v)) => match serde_json::from_str::<Value>(&v) {
                     Ok(parsed) => Ok((200, json!({ "k": key, "v": parsed }))),
@@ -329,11 +339,13 @@ pub fn register_all(d: &mut Dispatcher, state: ServerState) {
     d.register("POST", "/api/kv/{key}", move |body| {
         let s = kv_set_state.clone();
         Box::pin(async move {
-            let key = body.get("key").and_then(|v| v.as_str())
-                .ok_or_else(|| "missing 'key'".to_string())?.to_string();
+            let key = body
+                .get("key")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| "missing 'key'".to_string())?
+                .to_string();
             let value = body.get("value").cloned().unwrap_or(Value::Null);
-            let value_str = serde_json::to_string(&value)
-                .map_err(|e| format!("serialize: {e}"))?;
+            let value_str = serde_json::to_string(&value).map_err(|e| format!("serialize: {e}"))?;
             if let Err(e) = s.repo.kv_set(&key, &value_str).await {
                 return Ok((500, json!({ "error": format!("kv_set: {e}") })));
             }
@@ -358,8 +370,11 @@ pub fn register_all(d: &mut Dispatcher, state: ServerState) {
     // GET /api/sample/{name}  — returns a serialized WorkflowRun
     // envelope. The frontend can submit it via run_agent_task.
     d.register("GET", "/api/sample/{name}", |body| {
-        let name = body.get("name").and_then(|v| v.as_str())
-            .unwrap_or("auth_login").to_string();
+        let name = body
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("auth_login")
+            .to_string();
         Box::pin(async move { Ok((200, sample_workflow(&name))) })
     });
 
@@ -374,15 +389,20 @@ pub fn register_all(d: &mut Dispatcher, state: ServerState) {
                 Ok(r) => r,
                 Err(e) => return Ok((500, json!({ "ok": false, "error": format!("list: {e}") }))),
             };
-            let items: Vec<Value> = rows.into_iter().map(|r| json!({
-                "role_id": r.role_id,
-                "model_id": r.model_id,
-                "last_error_at": r.last_error_at,
-                "last_error_message": r.last_error_message,
-                "status": r.status,
-                "attempt_count": r.attempt_count,
-                "next_attempt_at": r.next_attempt_at,
-            })).collect();
+            let items: Vec<Value> = rows
+                .into_iter()
+                .map(|r| {
+                    json!({
+                        "role_id": r.role_id,
+                        "model_id": r.model_id,
+                        "last_error_at": r.last_error_at,
+                        "last_error_message": r.last_error_message,
+                        "status": r.status,
+                        "attempt_count": r.attempt_count,
+                        "next_attempt_at": r.next_attempt_at,
+                    })
+                })
+                .collect();
             Ok((200, json!({ "ok": true, "rows": items })))
         })
     });
@@ -414,48 +434,64 @@ pub fn register_all(d: &mut Dispatcher, state: ServerState) {
     let s_tasks = state.clone();
     d.register("GET", "/api/tasks", move |body| {
         let s = s_tasks.clone();
-        let wf_id = body.get("wf_id").and_then(|v| v.as_str())
-            .unwrap_or("").to_string();
+        let wf_id = body
+            .get("wf_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         Box::pin(async move {
             if wf_id.is_empty() {
-                return Ok((400, json!({
-                    "ok": false,
-                    "error": "missing 'wf_id'",
-                })));
+                return Ok((
+                    400,
+                    json!({
+                        "ok": false,
+                        "error": "missing 'wf_id'",
+                    }),
+                ));
             }
             match s.repo.list_tasks_for(&wf_id).await {
                 Ok(rows) => {
-                    let items: Vec<Value> = rows.into_iter().map(|t| json!({
-                        "id": t.id,
-                        "wf_id": t.wf_id,
-                        "parent_id": t.parent_id,
-                        "title": t.title,
-                        "status": t.status,
-                        "assigned_to": t.assigned_to,
-                        "model": t.model,
-                        "repair_count": t.repair_count,
-                        "input_tokens": t.input_tokens,
-                        "output_tokens": t.output_tokens,
-                        "cost_usd": t.cost_usd,
-                        "files_modified": t.files_modified,
-                        "started_at": t.started_at,
-                        "finished_at": t.finished_at,
-                        "result": t.result,
-                    })).collect();
-                    let (done, total) = s.repo.count_tasks(&wf_id).await
-                        .unwrap_or((0, 0));
-                    Ok((200, json!({
-                        "ok": true,
-                        "wf_id": wf_id,
-                        "done": done,
-                        "total": total,
-                        "rows": items,
-                    })))
+                    let items: Vec<Value> = rows
+                        .into_iter()
+                        .map(|t| {
+                            json!({
+                                "id": t.id,
+                                "wf_id": t.wf_id,
+                                "parent_id": t.parent_id,
+                                "title": t.title,
+                                "status": t.status,
+                                "assigned_to": t.assigned_to,
+                                "model": t.model,
+                                "repair_count": t.repair_count,
+                                "input_tokens": t.input_tokens,
+                                "output_tokens": t.output_tokens,
+                                "cost_usd": t.cost_usd,
+                                "files_modified": t.files_modified,
+                                "started_at": t.started_at,
+                                "finished_at": t.finished_at,
+                                "result": t.result,
+                            })
+                        })
+                        .collect();
+                    let (done, total) = s.repo.count_tasks(&wf_id).await.unwrap_or((0, 0));
+                    Ok((
+                        200,
+                        json!({
+                            "ok": true,
+                            "wf_id": wf_id,
+                            "done": done,
+                            "total": total,
+                            "rows": items,
+                        }),
+                    ))
                 }
-                Err(e) => Ok((500, json!({
-                    "ok": false,
-                    "error": format!("list_tasks: {e}"),
-                }))),
+                Err(e) => Ok((
+                    500,
+                    json!({
+                        "ok": false,
+                        "error": format!("list_tasks: {e}"),
+                    }),
+                )),
             }
         })
     });
@@ -471,11 +507,14 @@ pub fn register_all(d: &mut Dispatcher, state: ServerState) {
         let s = s_wsget.clone();
         Box::pin(async move {
             let ws = s.workspace_snapshot();
-            Ok((200, json!({
-                "ok": true,
-                "root": ws.root.to_string_lossy(),
-                "name": ws.name,
-            })))
+            Ok((
+                200,
+                json!({
+                    "ok": true,
+                    "root": ws.root.to_string_lossy(),
+                    "name": ws.name,
+                }),
+            ))
         })
     });
 
@@ -502,10 +541,13 @@ pub fn register_all(d: &mut Dispatcher, state: ServerState) {
                     detail: None,
                 };
                 s.push_error(rec);
-                return Ok((400, json!({
-                    "ok": false,
-                    "error": "missing 'path'",
-                })));
+                return Ok((
+                    400,
+                    json!({
+                        "ok": false,
+                        "error": "missing 'path'",
+                    }),
+                ));
             };
             let p = std::path::PathBuf::from(path);
             if !p.exists() {
@@ -517,10 +559,13 @@ pub fn register_all(d: &mut Dispatcher, state: ServerState) {
                     detail: None,
                 };
                 s.push_error(rec);
-                return Ok((400, json!({
-                    "ok": false,
-                    "error": format!("path does not exist: {}", p.display()),
-                })));
+                return Ok((
+                    400,
+                    json!({
+                        "ok": false,
+                        "error": format!("path does not exist: {}", p.display()),
+                    }),
+                ));
             }
             if !p.is_dir() {
                 let rec = ErrorRecord {
@@ -531,24 +576,35 @@ pub fn register_all(d: &mut Dispatcher, state: ServerState) {
                     detail: None,
                 };
                 s.push_error(rec);
-                return Ok((400, json!({
-                    "ok": false,
-                    "error": format!("not a directory: {}", p.display()),
-                })));
+                return Ok((
+                    400,
+                    json!({
+                        "ok": false,
+                        "error": format!("not a directory: {}", p.display()),
+                    }),
+                ));
             }
             let abs = match p.canonicalize() {
-                Ok(a) => a,
-                Err(e) => return Ok((500, json!({
-                    "ok": false,
-                    "error": format!("canonicalize: {e}"),
-                }))),
+                Ok(a) => agent_core::workspace::normalize_path(&a),
+                Err(e) => {
+                    return Ok((
+                        500,
+                        json!({
+                            "ok": false,
+                            "error": format!("canonicalize: {e}"),
+                        }),
+                    ))
+                }
             };
             s.set_workspace(abs.clone());
-            Ok((200, json!({
-                "ok": true,
-                "root": abs.to_string_lossy(),
-                "previous_root": s.workspace_snapshot().root.to_string_lossy(),
-            })))
+            Ok((
+                200,
+                json!({
+                    "ok": true,
+                    "root": abs.to_string_lossy(),
+                    "previous_root": s.workspace_snapshot().root.to_string_lossy(),
+                }),
+            ))
         })
     });
 
@@ -561,12 +617,21 @@ pub fn register_all(d: &mut Dispatcher, state: ServerState) {
     let s_wstree = state.clone();
     d.register("GET", "/api/workspace/tree", move |body| {
         let s = s_wstree.clone();
-        let rel = body.get("path").and_then(|v| v.as_str())
-            .unwrap_or("").to_string();
-        let depth = body.get("depth").and_then(|v| v.as_u64())
-            .unwrap_or(2).min(8) as usize;
-        let max_entries = body.get("max_entries").and_then(|v| v.as_u64())
-            .unwrap_or(200).min(2000) as usize;
+        let rel = body
+            .get("path")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let depth = body
+            .get("depth")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(2)
+            .min(8) as usize;
+        let max_entries = body
+            .get("max_entries")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(200)
+            .min(2000) as usize;
         Box::pin(async move {
             let ws = s.workspace_snapshot();
             let target = if rel.is_empty() {
@@ -575,30 +640,39 @@ pub fn register_all(d: &mut Dispatcher, state: ServerState) {
                 let candidate = ws.resolve(&rel);
                 // Safety: refuse paths that escape the workspace.
                 if !ws.contains(&candidate) {
-                    return Ok((403, json!({
-                        "ok": false,
-                        "error": format!("path escapes workspace: {}", candidate.display()),
-                    })));
+                    return Ok((
+                        403,
+                        json!({
+                            "ok": false,
+                            "error": format!("path escapes workspace: {}", candidate.display()),
+                        }),
+                    ));
                 }
                 candidate
             };
             if !target.exists() {
-                return Ok((404, json!({
-                    "ok": false,
-                    "error": format!("path does not exist: {}", target.display()),
-                })));
+                return Ok((
+                    404,
+                    json!({
+                        "ok": false,
+                        "error": format!("path does not exist: {}", target.display()),
+                    }),
+                ));
             }
             let mut entries: Vec<Value> = Vec::new();
             let mut truncated = false;
             walk_tree(&target, depth, max_entries, &mut entries, &mut truncated);
-            Ok((200, json!({
-                "ok": true,
-                "root": ws.root.to_string_lossy(),
-                "path": ws.relativize(&target).to_string_lossy(),
-                "entries": entries,
-                "truncated": truncated,
-                "count": entries.len(),
-            })))
+            Ok((
+                200,
+                json!({
+                    "ok": true,
+                    "root": ws.root.to_string_lossy(),
+                    "path": ws.relativize(&target).to_string_lossy(),
+                    "entries": entries,
+                    "truncated": truncated,
+                    "count": entries.len(),
+                }),
+            ))
         })
     });
 
@@ -614,15 +688,21 @@ pub fn register_all(d: &mut Dispatcher, state: ServerState) {
     let s_errors = state.clone();
     d.register("GET", "/api/errors/recent", move |body| {
         let s = s_errors.clone();
-        let limit = body.get("limit").and_then(|v| v.as_u64())
-            .unwrap_or(10).min(200) as usize;
+        let limit = body
+            .get("limit")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(10)
+            .min(200) as usize;
         Box::pin(async move {
             let rows = s.recent_errors(limit);
-            Ok((200, json!({
-                "ok": true,
-                "count": rows.len(),
-                "rows": rows,
-            })))
+            Ok((
+                200,
+                json!({
+                    "ok": true,
+                    "count": rows.len(),
+                    "rows": rows,
+                }),
+            ))
         })
     });
 
@@ -637,18 +717,24 @@ pub fn register_all(d: &mut Dispatcher, state: ServerState) {
     let s_resolve = state.clone();
     d.register("GET", "/api/router/roles/{role}/resolve", move |body| {
         let s = s_resolve.clone();
-        let role = body.get("role").and_then(|v| v.as_str())
-            .unwrap_or("").to_string();
+        let role = body
+            .get("role")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         Box::pin(async move {
             let resolved = match resolve_role(&s, &role).await {
                 Ok(r) => r,
                 Err(e) => {
-                    return Ok((200, json!({
-                        "ok": false,
-                        "role": role,
-                        "error": e,
-                        "hint": "open Settings → 角色 → 模型 分配",
-                    })));
+                    return Ok((
+                        200,
+                        json!({
+                            "ok": false,
+                            "role": role,
+                            "error": e,
+                            "hint": "open Settings → 角色 → 模型 分配",
+                        }),
+                    ));
                 }
             };
             let quota_status = match s.repo.quota_status_for(&role, &resolved.model_id).await {
@@ -661,17 +747,20 @@ pub fn register_all(d: &mut Dispatcher, state: ServerState) {
                 })),
                 _ => None,
             };
-            Ok((200, json!({
-                "ok": true,
-                "role": resolved.role,
-                "provider_short": resolved.provider_short,
-                "model_id": resolved.model_id,
-                "base_url": resolved.base_url,
-                "api_kind": resolved.api_kind,
-                "has_key": !resolved.api_key.is_empty(),
-                "fallback_chain": resolved.fallback_chain,
-                "quota_status": quota_status,
-            })))
+            Ok((
+                200,
+                json!({
+                    "ok": true,
+                    "role": resolved.role,
+                    "provider_short": resolved.provider_short,
+                    "model_id": resolved.model_id,
+                    "base_url": resolved.base_url,
+                    "api_kind": resolved.api_kind,
+                    "has_key": !resolved.api_key.is_empty(),
+                    "fallback_chain": resolved.fallback_chain,
+                    "quota_status": quota_status,
+                }),
+            ))
         })
     });
 
@@ -709,10 +798,16 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
     d.register("PUT", "/api/settings/secrets/{name+}", move |body| {
         let s = put_state.clone();
         Box::pin(async move {
-            let name = body.get("name").and_then(|v| v.as_str())
-                .ok_or_else(|| "missing 'name' in path".to_string())?.to_string();
-            let value = body.get("value").and_then(|v| v.as_str())
-                .ok_or_else(|| "missing 'value' in body".to_string())?.to_string();
+            let name = body
+                .get("name")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| "missing 'name' in path".to_string())?
+                .to_string();
+            let value = body
+                .get("value")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| "missing 'value' in body".to_string())?
+                .to_string();
             if value.len() > 4096 {
                 return Ok((400, json!({ "error": "secret value exceeds 4 KiB cap" })));
             }
@@ -730,8 +825,11 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
     d.register("DELETE", "/api/settings/secrets/{name+}", move |body| {
         let s = del_state.clone();
         Box::pin(async move {
-            let name = body.get("name").and_then(|v| v.as_str())
-                .ok_or_else(|| "missing 'name' in path".to_string())?.to_string();
+            let name = body
+                .get("name")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| "missing 'name' in path".to_string())?
+                .to_string();
             match s.secrets.delete(&name).await {
                 Ok(removed) => Ok((200, json!({ "deleted": removed, "name": name }))),
                 Err(e) => Ok((500, json!({ "error": format!("delete_secret: {e}") }))),
@@ -746,8 +844,11 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
     d.register("GET", "/api/settings/secrets/{name+}/reveal", move |body| {
         let s = reveal_state.clone();
         Box::pin(async move {
-            let name = body.get("name").and_then(|v| v.as_str())
-                .ok_or_else(|| "missing 'name' in path".to_string())?.to_string();
+            let name = body
+                .get("name")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| "missing 'name' in path".to_string())?
+                .to_string();
             match s.secrets.reveal(&name).await {
                 Ok(value) => Ok((200, json!({ "name": name, "value": value.as_str() }))),
                 Err(crate::secrets::SecretStoreError::NotFound(_)) => {
@@ -766,10 +867,13 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
         Box::pin(async move {
             let legacy = s.secrets.data_dir().join("secrets.json");
             match s.secrets.migrate_legacy_plaintext(&legacy).await {
-                Ok(n) => Ok((200, json!({
-                    "seeded": n,
-                    "source": legacy.display().to_string(),
-                }))),
+                Ok(n) => Ok((
+                    200,
+                    json!({
+                        "seeded": n,
+                        "source": legacy.display().to_string(),
+                    }),
+                )),
                 Err(e) => Ok((500, json!({ "error": format!("seed: {e}") }))),
             }
         })
@@ -814,7 +918,8 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
                     }),
                 );
             }
-            let roles_array: Vec<Value> = roles.into_iter()
+            let roles_array: Vec<Value> = roles
+                .into_iter()
                 .map(|(role, body)| {
                     let mut obj = json!({ "role": role });
                     if let Some(obj_mut) = obj.as_object_mut() {
@@ -841,10 +946,8 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
             // Lazy fetch: if any provider's cache is older than
             // 1h, refresh it in the background. We don't block.
             let _ = refresh_stale_caches(&s).await;
-            let providers = s.repo.list_providers().await
-                .unwrap_or_default();
-            let custom = s.repo.list_custom_providers().await
-                .unwrap_or_default();
+            let providers = s.repo.list_providers().await.unwrap_or_default();
+            let custom = s.repo.list_custom_providers().await.unwrap_or_default();
             // event 000110 (fix D1): filter out any model the user
             // has hidden via disable_model. Keyed by raw provider_id
             // for presets and by `custom:<id>` for custom providers
@@ -901,15 +1004,15 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
             for preset in crate::providers::PRESETS.iter() {
                 match by_id.get(preset.id) {
                     Some(cache) => {
-                        if let Ok(m) =
-                            serde_json::from_str::<Vec<Value>>(&cache.models_json)
-                        {
+                        if let Ok(m) = serde_json::from_str::<Vec<Value>>(&cache.models_json) {
                             for mm in m {
                                 // event 000110 (fix D1): skip
                                 // user-disabled models so the role
                                 // router cannot pick them.
                                 if let Some(mid) = mm.get("id").and_then(|v| v.as_str()) {
-                                    if disabled_pairs.contains(&(preset.id.to_string(), mid.to_string())) {
+                                    if disabled_pairs
+                                        .contains(&(preset.id.to_string(), mid.to_string()))
+                                    {
                                         continue;
                                     }
                                 }
@@ -923,7 +1026,10 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
                                 let mut row = mm;
                                 if let Some(obj) = row.as_object_mut() {
                                     obj.insert("provider".to_string(), json!(preset.id));
-                                    obj.insert("provider_display".to_string(), json!(preset.display_name));
+                                    obj.insert(
+                                        "provider_display".to_string(),
+                                        json!(preset.display_name),
+                                    );
                                 }
                                 models.push(row);
                             }
@@ -938,7 +1044,9 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
                             .find(|(pid, _)| *pid == preset.id)
                         {
                             for entry in *entries {
-                                if disabled_pairs.contains(&(preset.id.to_string(), entry.id.to_string())) {
+                                if disabled_pairs
+                                    .contains(&(preset.id.to_string(), entry.id.to_string()))
+                                {
                                     continue;
                                 }
                                 models.push(json!({
@@ -977,9 +1085,7 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
                     by_id.insert(c.id.clone(), cache);
                 }
                 if let Some(cache) = by_id.get(c.id.as_str()) {
-                    if let Ok(m) =
-                        serde_json::from_str::<Vec<Value>>(&cache.models_json)
-                    {
+                    if let Ok(m) = serde_json::from_str::<Vec<Value>>(&cache.models_json) {
                         for mm in m {
                             if let Some(mid) = mm.get("id").and_then(|v| v.as_str()) {
                                 if disabled_pairs.contains(&(custom_pid.clone(), mid.to_string())) {
@@ -1012,10 +1118,13 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
                     }
                 }
             }
-            Ok((200, json!({
-                "models": models,
-                "count": models.len(),
-            })))
+            Ok((
+                200,
+                json!({
+                    "models": models,
+                    "count": models.len(),
+                }),
+            ))
         })
     });
 
@@ -1028,29 +1137,39 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
     d.register("GET", "/api/router/roles/{role}/resolve", move |body| {
         let s = resolve_state.clone();
         Box::pin(async move {
-            let role = body.get("role")
+            let role = body
+                .get("role")
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string();
             if role.is_empty() {
-                return Ok((200, json!({ "ok": false, "error": "missing 'role' in path" })));
+                return Ok((
+                    200,
+                    json!({ "ok": false, "error": "missing 'role' in path" }),
+                ));
             }
             match resolve_role(&s, &role).await {
-                Ok(r) => Ok((200, json!({
-                    "ok": true,
-                    "role": r.role,
-                    "provider_short": r.provider_short,
-                    "model_id": r.model_id,
-                    "base_url": r.base_url,
-                    "api_kind": r.api_kind,
-                    "has_key": true,
-                    "fallback_chain": r.fallback_chain,
-                }))),
-                Err(e) => Ok((200, json!({
-                    "ok": false,
-                    "role": role,
-                    "error": e,
-                }))),
+                Ok(r) => Ok((
+                    200,
+                    json!({
+                        "ok": true,
+                        "role": r.role,
+                        "provider_short": r.provider_short,
+                        "model_id": r.model_id,
+                        "base_url": r.base_url,
+                        "api_kind": r.api_kind,
+                        "has_key": true,
+                        "fallback_chain": r.fallback_chain,
+                    }),
+                )),
+                Err(e) => Ok((
+                    200,
+                    json!({
+                        "ok": false,
+                        "role": role,
+                        "error": e,
+                    }),
+                )),
             }
         })
     });
@@ -1074,15 +1193,41 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
     // DELETE /api/providers/{id}/models/{model}/disable
     //   re-enable a previously hidden model.
     let disable_state = state.clone();
-    d.register("PUT", "/api/providers/{id}/models/{model}/disable", move |body| {
-        let s = disable_state.clone();
-        Box::pin(async move { disable_model(body, s).await })
-    });
+    d.register(
+        "PUT",
+        "/api/providers/{id}/models/{model}/disable",
+        move |body| {
+            let s = disable_state.clone();
+            Box::pin(async move { disable_model(body, s).await })
+        },
+    );
+    let disable_state2 = state.clone();
+    d.register(
+        "PUT",
+        "/api/providers/{provider_id}/models/{model_id}/disable",
+        move |body| {
+            let s = disable_state2.clone();
+            Box::pin(async move { disable_model(body, s).await })
+        },
+    );
     let enable_state = state.clone();
-    d.register("DELETE", "/api/providers/{id}/models/{model}/disable", move |body| {
-        let s = enable_state.clone();
-        Box::pin(async move { enable_model(body, s).await })
-    });
+    d.register(
+        "DELETE",
+        "/api/providers/{id}/models/{model}/disable",
+        move |body| {
+            let s = enable_state.clone();
+            Box::pin(async move { enable_model(body, s).await })
+        },
+    );
+    let enable_state2 = state.clone();
+    d.register(
+        "DELETE",
+        "/api/providers/{provider_id}/models/{model_id}/disable",
+        move |body| {
+            let s = enable_state2.clone();
+            Box::pin(async move { enable_model(body, s).await })
+        },
+    );
 
     // event 000135 (v0.4.35): GET /api/disabled-models — return
     //   every (provider_id, model_id) pair the user has hidden.
@@ -1094,11 +1239,14 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
         let s = list_disabled_state.clone();
         Box::pin(async move {
             match s.repo.list_disabled_models().await {
-                Ok(rows) => Ok((200, json!({
-                    "models": rows.into_iter().map(|(provider_id, model_id)| {
-                        json!({"provider_id": provider_id, "model_id": model_id})
-                    }).collect::<Vec<_>>()
-                }))),
+                Ok(rows) => Ok((
+                    200,
+                    json!({
+                        "models": rows.into_iter().map(|(provider_id, model_id)| {
+                            json!({"provider_id": provider_id, "model_id": model_id})
+                        }).collect::<Vec<_>>()
+                    }),
+                )),
                 Err(e) => Ok((500, json!({"error": format!("list_disabled_models: {e}")}))),
             }
         })
@@ -1142,10 +1290,14 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
     });
     // DELETE removes the override (back to built-in fallback).
     let model_ovr_del = state.clone();
-    d.register("DELETE", "/api/providers/{id}/models/{model}", move |body| {
-        let s = model_ovr_del.clone();
-        Box::pin(async move { delete_model_override(body, s).await })
-    });
+    d.register(
+        "DELETE",
+        "/api/providers/{id}/models/{model}",
+        move |body| {
+            let s = model_ovr_del.clone();
+            Box::pin(async move { delete_model_override(body, s).await })
+        },
+    );
 
     // ── v0.4.22 (event 000068): POST /api/run_workflow ────
     // Body: { task: "<user_request>" }
@@ -1260,14 +1412,20 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
     let s_wfstatus = state.clone();
     d.register("GET", "/api/workflow/{wf_id}/status", move |body| {
         let s = s_wfstatus.clone();
-        let wf_id = body.get("wf_id").and_then(|v| v.as_str())
-            .unwrap_or("").to_string();
+        let wf_id = body
+            .get("wf_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         Box::pin(async move {
             if wf_id.is_empty() {
-                return Ok((400, json!({
-                    "ok": false,
-                    "error": "missing 'wf_id' in path placeholder",
-                })));
+                return Ok((
+                    400,
+                    json!({
+                        "ok": false,
+                        "error": "missing 'wf_id' in path placeholder",
+                    }),
+                ));
             }
             let wf_row = s.repo.get_workflow(&wf_id).await.unwrap_or(None);
             // If workflows row missing, orchestrator hasn't
@@ -1282,22 +1440,35 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
                     // a simple string suffix match works.
                     let state_str = format!("{:?}", w.state).to_lowercase();
                     let phase_str = format!("{:?}", w.phase).to_lowercase();
-                    (state_str, phase_str, w.summary.clone(), w.user_request.clone())
+                    (
+                        state_str,
+                        phase_str,
+                        w.summary.clone(),
+                        w.user_request.clone(),
+                    )
                 }
-                None => ("unknown".to_string(), "unknown".to_string(), None, String::new()),
+                None => (
+                    "unknown".to_string(),
+                    "unknown".to_string(),
+                    None,
+                    String::new(),
+                ),
             };
             // Count tasks for this wf_id to show progress.
             let (done, total) = s.repo.count_tasks(&wf_id).await.unwrap_or((0, 0));
-            Ok((200, json!({
-                "ok": true,
-                "wf_id": wf_id,
-                "status": state,
-                "phase": phase,
-                "summary": summary,
-                "user_request": user_request,
-                "tasks_done": done,
-                "tasks_total": total,
-            })))
+            Ok((
+                200,
+                json!({
+                    "ok": true,
+                    "wf_id": wf_id,
+                    "status": state,
+                    "phase": phase,
+                    "summary": summary,
+                    "user_request": user_request,
+                    "tasks_done": done,
+                    "tasks_total": total,
+                }),
+            ))
         })
     });
 
@@ -1312,13 +1483,19 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
     d.register("POST", "/api/workflow/cancel", move |body| {
         let s = s_wfcancel.clone();
         Box::pin(async move {
-            let wf_id = body.get("wf_id").and_then(|v| v.as_str())
-                .map(|s| s.to_string()).unwrap_or_default();
+            let wf_id = body
+                .get("wf_id")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .unwrap_or_default();
             if wf_id.is_empty() {
-                return Ok((400, json!({
-                    "ok": false,
-                    "error": "missing 'wf_id' in body",
-                })));
+                return Ok((
+                    400,
+                    json!({
+                        "ok": false,
+                        "error": "missing 'wf_id' in body",
+                    }),
+                ));
             }
             let token_opt = s.active_workflows.get(&wf_id);
             match token_opt {
@@ -1329,12 +1506,15 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
                         "[TRACE] /api/workflow/cancel: firing cancel_token"
                     );
                     token.cancel();
-                    Ok((200, json!({
-                        "ok": true,
-                        "wf_id": wf_id,
-                        "status": "cancelling",
-                        "note": "cancel_token fired; orchestrator should exit within 1s",
-                    })))
+                    Ok((
+                        200,
+                        json!({
+                            "ok": true,
+                            "wf_id": wf_id,
+                            "status": "cancelling",
+                            "note": "cancel_token fired; orchestrator should exit within 1s",
+                        }),
+                    ))
                 }
                 None => {
                     // Workflow finished already (or wf_id is wrong).
@@ -1344,12 +1524,15 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
                         wf_id = %wf_id,
                         "[TRACE] /api/workflow/cancel: no active workflow (already done?)"
                     );
-                    Ok((200, json!({
-                        "ok": true,
-                        "wf_id": wf_id,
-                        "status": "not_active",
-                        "note": "no active workflow with this id (already finished?)",
-                    })))
+                    Ok((
+                        200,
+                        json!({
+                            "ok": true,
+                            "wf_id": wf_id,
+                            "status": "not_active",
+                            "note": "no active workflow with this id (already finished?)",
+                        }),
+                    ))
                 }
             }
         })
@@ -1369,10 +1552,13 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
         let s = Arc::clone(&state_for_router_roles);
         Box::pin(async move {
             let Some(roles_arr) = body.get("roles").and_then(|v| v.as_array()) else {
-                return Ok((400, json!({
-                    "ok": false,
-                    "error": "missing 'roles' array in body",
-                })));
+                return Ok((
+                    400,
+                    json!({
+                        "ok": false,
+                        "error": "missing 'roles' array in body",
+                    }),
+                ));
             };
             let mut updated = 0usize;
             let mut bad: Vec<String> = Vec::new();
@@ -1382,26 +1568,36 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
                     continue;
                 };
                 let default_model = role
-                    .get("default_model").and_then(|v| v.as_str()).unwrap_or("");
+                    .get("default_model")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
                 let fallback_chain: Vec<String> = role
-                    .get("fallback_chain").and_then(|v| v.as_array())
-                    .map(|arr| arr.iter()
-                        .filter_map(|x| x.as_str().map(String::from))
-                        .collect())
+                    .get("fallback_chain")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|x| x.as_str().map(String::from))
+                            .collect()
+                    })
                     .unwrap_or_default();
-                if let Err(e) = s.repo.upsert_role_override(
-                    role_id, default_model, &fallback_chain,
-                ).await {
+                if let Err(e) = s
+                    .repo
+                    .upsert_role_override(role_id, default_model, &fallback_chain)
+                    .await
+                {
                     bad.push(format!("{}: {}", role_id, e));
                     continue;
                 }
                 updated += 1;
             }
-            Ok((200, json!({
-                "ok": true,
-                "updated": updated,
-                "errors": bad,
-            })))
+            Ok((
+                200,
+                json!({
+                    "ok": true,
+                    "updated": updated,
+                    "errors": bad,
+                }),
+            ))
         })
     });
 
@@ -1490,7 +1686,6 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
         })
     });
 
-
     // ── v0.4.22 (event 000091 fix #32): real cancel. Looks
     // up the active workflow in `state.active_workflows`, fires
     // its `CancellationToken` (so the in-flight agent loop
@@ -1558,44 +1753,59 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
             .min(10_000) as usize;
         Box::pin(async move {
             if !crate::logs::log_api_enabled() {
-                return Ok((403, json!({
-                    "ok": false,
-                    "error": "FLWNTIER_LOG_API is not set; \
-                              log API is a development feature \
-                              (event 000080).",
-                })));
+                return Ok((
+                    403,
+                    json!({
+                        "ok": false,
+                        "error": "FLWNTIER_LOG_API is not set; \
+                                  log API is a development feature \
+                                  (event 000080).",
+                    }),
+                ));
             }
             let path = crate::logs::resolve_log_path();
             let lines = crate::logs::read_tail(tail, None);
-            Ok((200, json!({
-                "ok": true,
-                "log_file": path.as_ref().map(|p| p.display().to_string()),
-                "log_file_enabled": path.is_some(),
-                "tail": lines.len(),
-                "lines": lines,
-            })))
+            Ok((
+                200,
+                json!({
+                    "ok": true,
+                    "log_file": path.as_ref().map(|p| p.display().to_string()),
+                    "log_file_enabled": path.is_some(),
+                    "tail": lines.len(),
+                    "lines": lines,
+                }),
+            ))
         })
     });
     d.register("POST", "/api/logs/clear", |_body| {
         Box::pin(async move {
             if !crate::logs::log_api_enabled() {
-                return Ok((403, json!({
-                    "ok": false,
-                    "error": "FLWNTIER_LOG_API is not set; \
-                              log API is a development feature \
-                              (event 000080).",
-                })));
+                return Ok((
+                    403,
+                    json!({
+                        "ok": false,
+                        "error": "FLWNTIER_LOG_API is not set; \
+                                  log API is a development feature \
+                                  (event 000080).",
+                    }),
+                ));
             }
             match crate::logs::clear_log(None) {
-                Ok(path) => Ok((200, json!({
-                    "ok": true,
-                    "path": path.display().to_string(),
-                    "cleared_at": chrono::Utc::now().to_rfc3339(),
-                }))),
-                Err(e) => Ok((500, json!({
-                    "ok": false,
-                    "error": e.to_string(),
-                }))),
+                Ok(path) => Ok((
+                    200,
+                    json!({
+                        "ok": true,
+                        "path": path.display().to_string(),
+                        "cleared_at": chrono::Utc::now().to_rfc3339(),
+                    }),
+                )),
+                Err(e) => Ok((
+                    500,
+                    json!({
+                        "ok": false,
+                        "error": e.to_string(),
+                    }),
+                )),
             }
         })
     });
@@ -1606,16 +1816,22 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
 /// GET /api/providers — list built-in presets + custom providers,
 /// joined with the per-preset `provider` row for overrides and
 /// `secret` table for `has_secret`.
-async fn list_providers(
-    _body: Value,
-    state: Arc<ServerState>,
-) -> Result<(u16, Value), String> {
+async fn list_providers(_body: Value, state: Arc<ServerState>) -> Result<(u16, Value), String> {
     // Pull all rows once.
-    let preset_rows = state.repo.list_providers().await
+    let preset_rows = state
+        .repo
+        .list_providers()
+        .await
         .map_err(|e| format!("list_providers: {e}"))?;
-    let secret_rows = state.secrets.list().await
+    let secret_rows = state
+        .secrets
+        .list()
+        .await
         .map_err(|e| format!("list_secrets: {e}"))?;
-    let custom_rows = state.repo.list_custom_providers().await
+    let custom_rows = state
+        .repo
+        .list_custom_providers()
+        .await
         .map_err(|e| format!("list_custom: {e}"))?;
 
     // Index overrides + secrets by id.
@@ -1624,74 +1840,88 @@ async fn list_providers(
     let secret_names: std::collections::HashSet<&str> =
         secret_rows.iter().map(|s| s.name.as_str()).collect();
 
-    let presets: Vec<Value> = crate::providers::PRESETS.iter().map(|p| {
-        let ovr = override_by_id.get(p.id);
-        let enabled = ovr.map(|r| r.enabled).unwrap_or(true);
-        let default_model = ovr.and_then(|r| r.default_model.clone())
-            .unwrap_or_else(|| p.default_model.to_string());
-        let base_url = ovr.and_then(|r| r.base_url.clone())
-            .unwrap_or_else(|| p.base_url.to_string());
-        json!({
-            "id": p.id,
-            "kind": "preset",
-            "display_name": p.display_name,
-            "api_kind": p.kind,
-            "base_url": base_url,
-            "default_model": default_model,
-            "secret_name": p.secret_name,
-            "has_secret": secret_names.contains(p.secret_name),
-            "enabled": enabled,
-            "note": p.note,
-            "has_live_models_endpoint": p.has_live_models_endpoint,
-            // v0.4.15 (event 000051): emit empty models array +
-            // is_local:false so the TS ProviderInfo type can read
-            // both fields without runtime undefined. UI must hit
-            // discover_models to populate models[].
-            "models": [],
-            "is_local": false,
+    let presets: Vec<Value> = crate::providers::PRESETS
+        .iter()
+        .map(|p| {
+            let ovr = override_by_id.get(p.id);
+            let enabled = ovr.map(|r| r.enabled).unwrap_or(true);
+            let default_model = ovr
+                .and_then(|r| r.default_model.clone())
+                .unwrap_or_else(|| p.default_model.to_string());
+            let base_url = ovr
+                .and_then(|r| r.base_url.clone())
+                .unwrap_or_else(|| p.base_url.to_string());
+            json!({
+                "id": p.id,
+                "kind": "preset",
+                "display_name": p.display_name,
+                "api_kind": p.kind,
+                "base_url": base_url,
+                "default_model": default_model,
+                "secret_name": p.secret_name,
+                "has_secret": secret_names.contains(p.secret_name),
+                "enabled": enabled,
+                "note": p.note,
+                "has_live_models_endpoint": p.has_live_models_endpoint,
+                // v0.4.15 (event 000051): emit empty models array +
+                // is_local:false so the TS ProviderInfo type can read
+                // both fields without runtime undefined. UI must hit
+                // discover_models to populate models[].
+                "models": [],
+                "is_local": false,
+            })
         })
-    }).collect();
+        .collect();
 
-    let custom: Vec<Value> = custom_rows.iter().map(|c| {
-        // v0.4.30 (audit 000130): the previous secret name
-        // `CUSTOM_PROVIDER_KEY_<id>` was visually similar to
-        // shell env var naming. We now use the
-        // `flowntier/custom/<id>` internal namespace (matching
-        // resolve_role_provider's convention). Migration 0008
-        // renames any pre-existing custom rows.
-        let custom_secret = format!("flowntier/custom/{}", c.id);
-        json!({
-            "id": c.id,
-            "kind": "custom",
-            "display_name": c.name,
-            "api_kind": c.kind,
-            "base_url": c.base_url,
-            "default_model": c.default_model,
-            "secret_name": custom_secret,
-            "has_secret": secret_names.contains(custom_secret.as_str()),
-            "enabled": c.enabled,
-            "note": null,
-            "has_live_models_endpoint": c.kind == "openai-compatible",
+    let custom: Vec<Value> = custom_rows
+        .iter()
+        .map(|c| {
+            // v0.4.30 (audit 000130): the previous secret name
+            // `CUSTOM_PROVIDER_KEY_<id>` was visually similar to
+            // shell env var naming. We now use the
+            // `flowntier/custom/<id>` internal namespace (matching
+            // resolve_role_provider's convention). Migration 0008
+            // renames any pre-existing custom rows.
+            let custom_secret = format!("flowntier/custom/{}", c.id);
+            let legacy_secret = format!("CUSTOM_PROVIDER_KEY_{}", c.id);
+            let has_sec = secret_names.contains(custom_secret.as_str())
+                || secret_names.contains(legacy_secret.as_str());
+            json!({
+                "id": c.id,
+                "kind": "custom",
+                "display_name": c.name,
+                "api_kind": c.kind,
+                "base_url": c.base_url,
+                "default_model": c.default_model,
+                "secret_name": custom_secret,
+                "has_secret": has_sec,
+                "enabled": c.enabled,
+                "note": null,
+                "has_live_models_endpoint": c.kind == "openai-compatible",
+            })
         })
-    }).collect();
+        .collect();
 
-    Ok((200, json!({
-        "providers": presets,
-        "custom_providers": custom,
-        "count": presets.len() + custom.len(),
-    })))
+    Ok((
+        200,
+        json!({
+            "providers": presets,
+            "custom_providers": custom,
+            "count": presets.len() + custom.len(),
+        }),
+    ))
 }
 
 /// PATCH /api/providers/{id} — toggle enabled, override
 /// default_model, override base_url. Reads from body:
 ///   { enabled?: bool, default_model?: string|null,
 ///     base_url?: string|null }
-async fn patch_provider(
-    body: Value,
-    state: Arc<ServerState>,
-) -> Result<(u16, Value), String> {
-    let id = body.get("id").and_then(|v| v.as_str())
-        .ok_or_else(|| "missing 'id' in path".to_string())?.to_string();
+async fn patch_provider(body: Value, state: Arc<ServerState>) -> Result<(u16, Value), String> {
+    let id = body
+        .get("id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "missing 'id' in path".to_string())?
+        .to_string();
 
     // Built-in presets: validate id + upsert into the `provider`
     // table (which was pre-populated by migration 0003).
@@ -1700,7 +1930,10 @@ async fn patch_provider(
     }
 
     // Load current row, merge with patch fields.
-    let mut row = state.repo.get_provider(&id).await
+    let mut row = state
+        .repo
+        .get_provider(&id)
+        .await
         .map_err(|e| format!("get_provider: {e}"))?
         .unwrap_or_else(|| storage::ProviderRow {
             id: id.clone(),
@@ -1725,26 +1958,32 @@ async fn patch_provider(
         changed.push("base_url");
     }
     row.updated_at = now;
-    state.repo.upsert_provider(&row).await
+    state
+        .repo
+        .upsert_provider(&row)
+        .await
         .map_err(|e| format!("upsert_provider: {e}"))?;
 
-    Ok((200, json!({
-        "id": id,
-        "updated": changed,
-        "enabled": row.enabled,
-        "default_model": row.default_model,
-        "base_url": row.base_url,
-    })))
+    Ok((
+        200,
+        json!({
+            "id": id,
+            "updated": changed,
+            "enabled": row.enabled,
+            "default_model": row.default_model,
+            "base_url": row.base_url,
+        }),
+    ))
 }
 
 /// GET /api/providers/{id}/models — fetch available models.
 /// Cached for 1 hour per provider id.
-async fn list_models(
-    body: Value,
-    state: Arc<ServerState>,
-) -> Result<(u16, Value), String> {
-    let id = body.get("id").and_then(|v| v.as_str())
-        .ok_or_else(|| "missing 'id' in path".to_string())?.to_string();
+async fn list_models(body: Value, state: Arc<ServerState>) -> Result<(u16, Value), String> {
+    let id = body
+        .get("id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "missing 'id' in path".to_string())?
+        .to_string();
 
     // event 000110 (fix D1): the user may have hidden some models
     // via `PUT /api/providers/{id}/models/{model}/disable`. Load
@@ -1780,15 +2019,18 @@ async fn list_models(
     if let Ok(Some(cached)) = state.repo.get_model_cache(&id).await {
         let now = chrono::Utc::now().timestamp();
         if now - cached.fetched_at < 3600 {
-            let models: Vec<Value> = serde_json::from_str(&cached.models_json)
-                .unwrap_or_else(|_| Vec::new());
-            return Ok((200, json!({
-                "ok": true,
-                "provider_id": id,
-                "models": filter_disabled(models),
-                "cached": true,
-                "fetched_at": cached.fetched_at,
-            })));
+            let models: Vec<Value> =
+                serde_json::from_str(&cached.models_json).unwrap_or_else(|_| Vec::new());
+            return Ok((
+                200,
+                json!({
+                    "ok": true,
+                    "provider_id": id,
+                    "models": filter_disabled(models),
+                    "cached": true,
+                    "fetched_at": cached.fetched_at,
+                }),
+            ));
         }
     }
 
@@ -1800,64 +2042,85 @@ async fn list_models(
         (preset.base_url.to_string(), preset.has_live_models_endpoint)
     } else {
         // Look up custom_provider.
-        let custom = match state.repo.get_custom_provider(&id).await
-            .map_err(|e| format!("get_custom: {e}"))? {
+        let custom = match state
+            .repo
+            .get_custom_provider(&id)
+            .await
+            .map_err(|e| format!("get_custom: {e}"))?
+        {
             Some(c) => c,
-            None => return Ok((404, json!({
-                "ok": false,
-                "error": format!("unknown provider: {id}"),
-            }))),
+            None => {
+                return Ok((
+                    404,
+                    json!({
+                        "ok": false,
+                        "error": format!("unknown provider: {id}"),
+                    }),
+                ))
+            }
         };
         (custom.base_url.clone(), custom.kind == "openai-compatible")
     };
 
-// Anthropic has no /v1/models endpoint — return the hard-coded
-        // fallback list directly.
-        if !has_live {
-            // v0.4.16: prefer the per-provider OPENAI_FALLBACK_MODELS
-            // entry if one exists, then fall back to Anthropic's.
-            let entries: &[crate::providers::ModelEntry] =
-                crate::providers::OPENAI_FALLBACK_MODELS.iter()
-                    .find(|(pid, _)| *pid == id)
-                    .map(|(_, m)| *m)
-                    .unwrap_or(crate::providers::ANTHROPIC_FALLBACK_MODELS);
-            // v0.4.30 (audit 000130): overlay the user's
-            // per-(provider, model) metadata overrides on top of
-            // the built-in fallback list. Lets the chairman fix
-            // e.g. MiniMax-M3 context_length to 1M without
-            // waiting for an app release.
-            let overrides = state.repo.list_model_overrides_for_provider(&id).await
-                .unwrap_or_default();
-            let ovr_map: std::collections::HashMap<&str, (Option<i64>, Option<String>)> =
-                overrides.iter().map(|(mid, c, t)| (mid.as_str(), (*c, t.clone()))).collect();
-            let models: Vec<Value> = entries.iter()
-                .map(|m| {
-                    let ovr = ovr_map.get(m.id);
-                    json!({
-                        "id": m.id,
-                        "display_name": m.display_name,
-                        "thinking_strength": ovr.and_then(|(_, t)| t.clone())
-                            .unwrap_or_else(|| m.thinking_strength.to_string()),
-                        "context_length": ovr.and_then(|(c, _)| c.as_ref().copied())
-                            .unwrap_or(m.context_length as i64),
-                        "source": "fallback",
-                    })
+    // Anthropic has no /v1/models endpoint — return the hard-coded
+    // fallback list directly.
+    if !has_live {
+        // v0.4.16: prefer the per-provider OPENAI_FALLBACK_MODELS
+        // entry if one exists, then fall back to Anthropic's.
+        let entries: &[crate::providers::ModelEntry] = crate::providers::OPENAI_FALLBACK_MODELS
+            .iter()
+            .find(|(pid, _)| *pid == id)
+            .map(|(_, m)| *m)
+            .unwrap_or(crate::providers::ANTHROPIC_FALLBACK_MODELS);
+        // v0.4.30 (audit 000130): overlay the user's
+        // per-(provider, model) metadata overrides on top of
+        // the built-in fallback list. Lets the chairman fix
+        // e.g. MiniMax-M3 context_length to 1M without
+        // waiting for an app release.
+        let overrides = state
+            .repo
+            .list_model_overrides_for_provider(&id)
+            .await
+            .unwrap_or_default();
+        let ovr_map: std::collections::HashMap<&str, (Option<i64>, Option<String>)> = overrides
+            .iter()
+            .map(|(mid, c, t)| (mid.as_str(), (*c, t.clone())))
+            .collect();
+        let models: Vec<Value> = entries
+            .iter()
+            .map(|m| {
+                let ovr = ovr_map.get(m.id);
+                json!({
+                    "id": m.id,
+                    "display_name": m.display_name,
+                    "thinking_strength": ovr.and_then(|(_, t)| t.clone())
+                        .unwrap_or_else(|| m.thinking_strength.to_string()),
+                    "context_length": ovr.and_then(|(c, _)| c.as_ref().copied())
+                        .unwrap_or(m.context_length as i64),
+                    "source": "fallback",
                 })
-                .collect();
-            let body_str = serde_json::to_string(&models).unwrap();
-            let _ = state.repo.put_model_cache(&storage::ModelCacheRow {
+            })
+            .collect();
+        let body_str = serde_json::to_string(&models).unwrap();
+        let _ = state
+            .repo
+            .put_model_cache(&storage::ModelCacheRow {
                 provider_id: id.clone(),
                 models_json: body_str,
                 fetched_at: chrono::Utc::now().timestamp(),
-            }).await;
-            return Ok((200, json!({
+            })
+            .await;
+        return Ok((
+            200,
+            json!({
                 "ok": true,
                 "provider_id": id,
                 "models": filter_disabled(models),
                 "cached": false,
                 "fallback": true,
-            })));
-        }
+            }),
+        ));
+    }
 
     // OpenAI-compatible fetch.
     let url = format!("{}/models", base_url.trim_end_matches('/'));
@@ -1872,58 +2135,92 @@ async fn list_models(
     let api_key = match state.secrets.reveal(&secret_name).await {
         Ok(k) => k,
         Err(crate::secrets::SecretStoreError::NotFound(_)) => {
-            return Ok((200, json!({
-                "ok": false,
-                "error": "no API key configured",
-                "secret_name": secret_name,
-                "url": url,
-                "provider_id": id,
-            })));
+            let legacy_name = format!("CUSTOM_PROVIDER_KEY_{id}");
+            match state.secrets.reveal(&legacy_name).await {
+                Ok(k) => k,
+                Err(crate::secrets::SecretStoreError::NotFound(_)) => {
+                    return Ok((
+                        200,
+                        json!({
+                            "ok": false,
+                            "error": "no API key configured",
+                            "secret_name": secret_name,
+                            "url": url,
+                            "provider_id": id,
+                        }),
+                    ));
+                }
+                Err(e) => {
+                    return Ok((
+                        200,
+                        json!({
+                            "ok": false,
+                            "error": format!("reveal: {e}"),
+                            "provider_id": id,
+                        }),
+                    ))
+                }
+            }
         }
-        Err(e) => return Ok((200, json!({
-            "ok": false,
-            "error": format!("reveal: {e}"),
-            "provider_id": id,
-        }))),
+        Err(e) => {
+            return Ok((
+                200,
+                json!({
+                    "ok": false,
+                    "error": format!("reveal: {e}"),
+                    "provider_id": id,
+                }),
+            ))
+        }
     };
 
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(15))
         .build()
         .map_err(|e| format!("reqwest build: {e}"))?;
-    let resp = match client.get(&url)
+    let resp = match client
+        .get(&url)
         .header("Authorization", format!("Bearer {}", api_key.as_str()))
         .send()
         .await
     {
         Ok(r) => r,
         Err(e) => {
-            return Ok((200, json!({
-                "ok": false,
-                "error": format!("network error: {e}"),
-                "url": url,
-                "provider_id": id,
-            })));
+            return Ok((
+                200,
+                json!({
+                    "ok": false,
+                    "error": format!("network error: {e}"),
+                    "url": url,
+                    "provider_id": id,
+                }),
+            ));
         }
     };
     let status = resp.status();
     if !status.is_success() {
-        return Ok((200, json!({
-            "ok": false,
-            "error": format!("provider returned {status}"),
-            "url": url,
-            "provider_id": id,
-        })));
+        return Ok((
+            200,
+            json!({
+                "ok": false,
+                "error": format!("provider returned {status}"),
+                "url": url,
+                "provider_id": id,
+            }),
+        ));
     }
     let body: Value = match resp.json().await {
         Ok(b) => b,
         Err(e) => {
-            return Ok((200, json!({
-                "ok": false,
-                "error": format!("parse {url}: {e}"),
-                "url": url,
-                "provider_id": id,
-            })));
+            return Ok((
+                200,
+                json!({
+                    "ok": false,
+                    "error": format!("parse {url}: {e}"),
+                    "url": url,
+                    "provider_id": id,
+                }),
+            ));
         }
     };
     // OpenAI-compatible /models response shape:
@@ -1932,40 +2229,56 @@ async fn list_models(
     // metadata overrides onto the live list too, so the user
     // can fix the reported context_length / thinking_strength
     // even for providers with a real /models endpoint.
-    let overrides = state.repo.list_model_overrides_for_provider(&id).await
+    let overrides = state
+        .repo
+        .list_model_overrides_for_provider(&id)
+        .await
         .unwrap_or_default();
-    let ovr_map: std::collections::HashMap<&str, (Option<i64>, Option<String>)> =
-        overrides.iter().map(|(mid, c, t)| (mid.as_str(), (*c, t.clone()))).collect();
-    let models: Vec<Value> = body.get("data")
+    let ovr_map: std::collections::HashMap<&str, (Option<i64>, Option<String>)> = overrides
+        .iter()
+        .map(|(mid, c, t)| (mid.as_str(), (*c, t.clone())))
+        .collect();
+    let models: Vec<Value> = body
+        .get("data")
         .and_then(|d| d.as_array())
-        .map(|arr| arr.iter().filter_map(|m| {
-            m.get("id").and_then(|v| v.as_str()).map(|id| {
-                let ovr = ovr_map.get(id);
-                json!({
-                    "id": id,
-                    "display_name": id,
-                    "thinking_strength": ovr.and_then(|(_, t)| t.clone()),
-                    "context_length": ovr.and_then(|(c, _)| c.as_ref().copied()),
-                    "source": "live",
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|m| {
+                    m.get("id").and_then(|v| v.as_str()).map(|id| {
+                        let ovr = ovr_map.get(id);
+                        json!({
+                            "id": id,
+                            "display_name": id,
+                            "thinking_strength": ovr.and_then(|(_, t)| t.clone()),
+                            "context_length": ovr.and_then(|(c, _)| c.as_ref().copied()),
+                            "source": "live",
+                        })
+                    })
                 })
-            })
-        }).collect())
+                .collect()
+        })
         .unwrap_or_default();
     let body_str = serde_json::to_string(&models).unwrap_or_default();
-    let _ = state.repo.put_model_cache(&storage::ModelCacheRow {
-        provider_id: id.clone(),
-        models_json: body_str,
-        fetched_at: chrono::Utc::now().timestamp(),
-    }).await;
-    Ok((200, json!({
-        "ok": true,
-        "provider_id": id,
-        "models": filter_disabled(models),
-        "cached": false,
-        "fallback": false,
-        "url": url,
-    })))
-    }
+    let _ = state
+        .repo
+        .put_model_cache(&storage::ModelCacheRow {
+            provider_id: id.clone(),
+            models_json: body_str,
+            fetched_at: chrono::Utc::now().timestamp(),
+        })
+        .await;
+    Ok((
+        200,
+        json!({
+            "ok": true,
+            "provider_id": id,
+            "models": filter_disabled(models),
+            "cached": false,
+            "fallback": false,
+            "url": url,
+        }),
+    ))
+}
 
 // ── event 000110 (fix D1): disable / enable a model ──────────
 //
@@ -1985,15 +2298,16 @@ async fn list_models(
 // custom) — they refuse to write a `disabled_models` row for a
 // provider that does not exist, so the table cannot drift from the
 // provider catalog.
-async fn disable_model(
-    body: Value,
-    state: Arc<ServerState>,
-) -> Result<(u16, Value), String> {
-    let provider_id = body.get("provider_id")
+async fn disable_model(body: Value, state: Arc<ServerState>) -> Result<(u16, Value), String> {
+    let provider_id = body
+        .get("provider_id")
+        .or_else(|| body.get("id"))
         .and_then(|v| v.as_str())
         .ok_or_else(|| "missing 'provider_id' in path".to_string())?
         .to_string();
-    let model_id = body.get("model_id")
+    let model_id = body
+        .get("model_id")
+        .or_else(|| body.get("model"))
         .and_then(|v| v.as_str())
         .ok_or_else(|| "missing 'model_id' in path".to_string())?
         .to_string();
@@ -2001,44 +2315,63 @@ async fn disable_model(
         return Ok((400, json!({ "error": "model_id must be 1..=256 chars" })));
     }
     if !provider_exists(&state, &provider_id).await {
-        return Ok((404, json!({
-            "error": format!("unknown provider: {provider_id}"),
-        })));
+        return Ok((
+            404,
+            json!({
+                "error": format!("unknown provider: {provider_id}"),
+            }),
+        ));
     }
-    state.repo.disable_model(&provider_id, &model_id).await
+    state
+        .repo
+        .disable_model(&provider_id, &model_id)
+        .await
         .map_err(|e| format!("disable_model: {e}"))?;
-    Ok((200, json!({
-        "disabled": true,
-        "provider_id": provider_id,
-        "model_id": model_id,
-    })))
+    Ok((
+        200,
+        json!({
+            "disabled": true,
+            "provider_id": provider_id,
+            "model_id": model_id,
+        }),
+    ))
 }
 
-async fn enable_model(
-    body: Value,
-    state: Arc<ServerState>,
-) -> Result<(u16, Value), String> {
-    let provider_id = body.get("provider_id")
+async fn enable_model(body: Value, state: Arc<ServerState>) -> Result<(u16, Value), String> {
+    let provider_id = body
+        .get("provider_id")
+        .or_else(|| body.get("id"))
         .and_then(|v| v.as_str())
         .ok_or_else(|| "missing 'provider_id' in path".to_string())?
         .to_string();
-    let model_id = body.get("model_id")
+    let model_id = body
+        .get("model_id")
+        .or_else(|| body.get("model"))
         .and_then(|v| v.as_str())
         .ok_or_else(|| "missing 'model_id' in path".to_string())?
         .to_string();
     if !provider_exists(&state, &provider_id).await {
-        return Ok((404, json!({
-            "error": format!("unknown provider: {provider_id}"),
-        })));
+        return Ok((
+            404,
+            json!({
+                "error": format!("unknown provider: {provider_id}"),
+            }),
+        ));
     }
-    let was_disabled = state.repo.enable_model(&provider_id, &model_id).await
+    let was_disabled = state
+        .repo
+        .enable_model(&provider_id, &model_id)
+        .await
         .map_err(|e| format!("enable_model: {e}"))?;
-    Ok((200, json!({
-        "enabled": true,
-        "was_disabled": was_disabled,
-        "provider_id": provider_id,
-        "model_id": model_id,
-    })))
+    Ok((
+        200,
+        json!({
+            "enabled": true,
+            "was_disabled": was_disabled,
+            "provider_id": provider_id,
+            "model_id": model_id,
+        }),
+    ))
 }
 
 /// Returns true if `provider_id` resolves to either a preset (built-in)
@@ -2048,19 +2381,16 @@ async fn provider_exists(state: &Arc<ServerState>, provider_id: &str) -> bool {
     if crate::providers::get(provider_id).is_some() {
         return true;
     }
-    match state.repo.get_custom_provider(provider_id).await {
-        Ok(Some(_)) => true,
-        _ => false,
-    }
+    matches!(
+        state.repo.get_custom_provider(provider_id).await,
+        Ok(Some(_))
+    )
 }
 
 /// POST /api/providers/custom — add a relay-station / private-gateway
 /// provider. The api_key lives in the encrypted secret store under
 /// `flowntier/custom/<id>`.
-async fn add_custom_provider(
-    body: Value,
-    state: Arc<ServerState>,
-) -> Result<(u16, Value), String> {
+async fn add_custom_provider(body: Value, state: Arc<ServerState>) -> Result<(u16, Value), String> {
     // v0.4.22 (event 000096): the Tauri shell
     // (`apps/desktop/src-tauri/src/lib.rs:add_custom_provider`)
     // sends a body with keys: id, display_name, kind, base_url,
@@ -2076,15 +2406,29 @@ async fn add_custom_provider(
     // models (so the UI's display matches reality); save the API
     // key under the env var name the shell specified, NOT
     // auto-generated.
-    let id = body.get("id").and_then(|v| v.as_str())
-        .ok_or_else(|| "missing 'id'".to_string())?.to_string();
-    let display_name = body.get("display_name").and_then(|v| v.as_str())
-        .ok_or_else(|| "missing 'display_name'".to_string())?.to_string();
-    let base_url = body.get("base_url").and_then(|v| v.as_str())
-        .ok_or_else(|| "missing 'base_url'".to_string())?.to_string();
-    let kind = body.get("kind").and_then(|v| v.as_str())
-        .unwrap_or("openai-compatible").to_string();
-    let api_key_env = body.get("api_key_env").and_then(|v| v.as_str())
+    let id = body
+        .get("id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "missing 'id'".to_string())?
+        .to_string();
+    let display_name = body
+        .get("display_name")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "missing 'display_name'".to_string())?
+        .to_string();
+    let base_url = body
+        .get("base_url")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "missing 'base_url'".to_string())?
+        .to_string();
+    let kind = body
+        .get("kind")
+        .and_then(|v| v.as_str())
+        .unwrap_or("openai-compatible")
+        .to_string();
+    let api_key_env = body
+        .get("api_key_env")
+        .and_then(|v| v.as_str())
         .map(|s| s.to_string());
     // v0.4.22 (event 000096 + 000118-fix4): the user's
     // models now carry their own display_name /
@@ -2099,43 +2443,60 @@ async fn add_custom_provider(
     // previously PUT an override for one of these model ids
     // (e.g. to force a thinking_strength), overlay it now so
     // the runtime sees a single merged view.
-    let override_rows = state.repo.list_model_overrides_for_provider(&id).await
+    let override_rows = state
+        .repo
+        .list_model_overrides_for_provider(&id)
+        .await
         .unwrap_or_default();
-    let ovr_map: std::collections::HashMap<&str, (Option<i64>, Option<String>)> =
-        override_rows.iter().map(|(mid, c, t)| (mid.as_str(), (*c, t.clone()))).collect();
-    let models_rows: Vec<Value> = body.get("models")
+    let ovr_map: std::collections::HashMap<&str, (Option<i64>, Option<String>)> = override_rows
+        .iter()
+        .map(|(mid, c, t)| (mid.as_str(), (*c, t.clone())))
+        .collect();
+    let models_rows: Vec<Value> = body
+        .get("models")
         .and_then(|v| v.as_array())
-        .map(|arr| arr.iter().filter_map(|m| {
-            let mid = m.get("id").and_then(|x| x.as_str())?;
-            let display = m.get("display_name").and_then(|x| x.as_str())
-                .filter(|s| !s.is_empty())
-                .unwrap_or(mid);
-            let thinking = m.get("thinking_strength").and_then(|x| x.as_str())
-                .filter(|s| matches!(*s, "low" | "medium" | "high"));
-            let context = m.get("context_length").and_then(|x| x.as_i64())
-                .filter(|n| *n > 0);
-            let ovr = ovr_map.get(mid);
-            let thinking_final = ovr.and_then(|(_, t)| t.clone())
-                .or_else(|| thinking.map(String::from));
-            let context_final = ovr.and_then(|(c, _)| c.as_ref().copied())
-                .or(context);
-            let mut obj = json!({
-                "id": mid,
-                "display_name": display,
-            });
-            if let Some(o) = obj.as_object_mut() {
-                if let Some(t) = thinking_final {
-                    o.insert("thinking_strength".to_string(), json!(t));
-                }
-                if let Some(c) = context_final {
-                    o.insert("context_length".to_string(), json!(c));
-                }
-                o.insert("source".to_string(), json!("user-curated"));
-            }
-            Some(obj)
-        }).collect())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|m| {
+                    let mid = m.get("id").and_then(|x| x.as_str())?;
+                    let display = m
+                        .get("display_name")
+                        .and_then(|x| x.as_str())
+                        .filter(|s| !s.is_empty())
+                        .unwrap_or(mid);
+                    let thinking = m
+                        .get("thinking_strength")
+                        .and_then(|x| x.as_str())
+                        .filter(|s| matches!(*s, "low" | "medium" | "high"));
+                    let context = m
+                        .get("context_length")
+                        .and_then(|x| x.as_i64())
+                        .filter(|n| *n > 0);
+                    let ovr = ovr_map.get(mid);
+                    let thinking_final = ovr
+                        .and_then(|(_, t)| t.clone())
+                        .or_else(|| thinking.map(String::from));
+                    let context_final = ovr.and_then(|(c, _)| c.as_ref().copied()).or(context);
+                    let mut obj = json!({
+                        "id": mid,
+                        "display_name": display,
+                    });
+                    if let Some(o) = obj.as_object_mut() {
+                        if let Some(t) = thinking_final {
+                            o.insert("thinking_strength".to_string(), json!(t));
+                        }
+                        if let Some(c) = context_final {
+                            o.insert("context_length".to_string(), json!(c));
+                        }
+                        o.insert("source".to_string(), json!("user-curated"));
+                    }
+                    Some(obj)
+                })
+                .collect()
+        })
         .unwrap_or_default();
-    let default_model = models_rows.first()
+    let default_model = models_rows
+        .first()
         .and_then(|m| m.get("id").and_then(|x| x.as_str()))
         .map(String::from);
 
@@ -2146,10 +2507,16 @@ async fn add_custom_provider(
         return Ok((400, json!({ "error": "display_name must be 1..=64 chars" })));
     }
     if !base_url.starts_with("https://") && !base_url.starts_with("http://") {
-        return Ok((400, json!({ "error": "base_url must start with http(s)://" })));
+        return Ok((
+            400,
+            json!({ "error": "base_url must start with http(s)://" }),
+        ));
     }
     if kind != "openai-compatible" && kind != "anthropic-compatible" {
-        return Ok((400, json!({ "error": "kind must be openai-compatible or anthropic-compatible" })));
+        return Ok((
+            400,
+            json!({ "error": "kind must be openai-compatible or anthropic-compatible" }),
+        ));
     }
 
     let now = chrono::Utc::now().timestamp();
@@ -2163,7 +2530,10 @@ async fn add_custom_provider(
         created_at: now,
         updated_at: now,
     };
-    state.repo.insert_custom_provider(&row).await
+    state
+        .repo
+        .insert_custom_provider(&row)
+        .await
         .map_err(|e| format!("insert_custom: {e}"))?;
 
     // v0.4.22 (event 000096): persist the models list. The
@@ -2172,11 +2542,14 @@ async fn add_custom_provider(
     // Settings UI can render them.
     if !models_rows.is_empty() {
         let body_str = serde_json::to_string(&models_rows).unwrap_or_else(|_| "[]".into());
-        let _ = state.repo.put_model_cache(&storage::ModelCacheRow {
-            provider_id: format!("custom:{id}"),
-            models_json: body_str,
-            fetched_at: now,
-        }).await;
+        let _ = state
+            .repo
+            .put_model_cache(&storage::ModelCacheRow {
+                provider_id: format!("custom:{id}"),
+                models_json: body_str,
+                fetched_at: now,
+            })
+            .await;
     }
 
     // If an api_key was supplied in the same POST (the Tauri
@@ -2185,21 +2558,28 @@ async fn add_custom_provider(
     // also fall back to reading api_key directly (legacy
     // compat) so any caller still works.
     if let Some(key) = body.get("api_key").and_then(|v| v.as_str()) {
-        let secret_name = api_key_env.clone()
+        let secret_name = api_key_env
+            .clone()
             .unwrap_or_else(|| format!("flowntier/custom/{id}"));
-        state.secrets.put(&secret_name, key).await
+        state
+            .secrets
+            .put(&secret_name, key)
+            .await
             .map_err(|e| format!("put secret: {e}"))?;
     }
 
-    Ok((201, json!({
-        "id": id,
-        "name": display_name,
-        "base_url": base_url,
-        "kind": kind,
-        "default_model": models_rows.first(),
-        "models": models_rows,
-        "enabled": true,
-    })))
+    Ok((
+        201,
+        json!({
+            "id": id,
+            "name": display_name,
+            "base_url": base_url,
+            "kind": kind,
+            "default_model": models_rows.first(),
+            "models": models_rows,
+            "enabled": true,
+        }),
+    ))
 }
 
 /// DELETE /api/providers/custom/{id} — remove a custom provider
@@ -2208,10 +2588,16 @@ async fn delete_custom_provider(
     body: Value,
     state: Arc<ServerState>,
 ) -> Result<(u16, Value), String> {
-    let id = body.get("id").and_then(|v| v.as_str())
-        .ok_or_else(|| "missing 'id' in path".to_string())?.to_string();
+    let id = body
+        .get("id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "missing 'id' in path".to_string())?
+        .to_string();
 
-    let removed = state.repo.delete_custom_provider(&id).await
+    let removed = state
+        .repo
+        .delete_custom_provider(&id)
+        .await
         .map_err(|e| format!("delete_custom: {e}"))?;
     // Best-effort: clean up the associated api_key secret.
     // v0.4.30: secret lives in the `flowntier/custom/<id>`
@@ -2219,10 +2605,13 @@ async fn delete_custom_provider(
     // list_providers handler).
     let secret_name = format!("flowntier/custom/{id}");
     let _ = state.secrets.delete(&secret_name).await;
-    Ok((200, json!({
-        "id": id,
-        "deleted": removed,
-    })))
+    Ok((
+        200,
+        json!({
+            "id": id,
+            "deleted": removed,
+        }),
+    ))
 }
 
 /// PUT /api/providers/{id}/models/{model} — upsert a
@@ -2243,14 +2632,17 @@ async fn delete_custom_provider(
 /// SQL NULL — the read path then falls back to the built-in
 /// fallback for that field while still honoring the override
 /// row's other column).
-async fn put_model_override(
-    body: Value,
-    state: Arc<ServerState>,
-) -> Result<(u16, Value), String> {
-    let provider_id = body.get("id").and_then(|v| v.as_str())
-        .ok_or_else(|| "missing 'id' in path".to_string())?.to_string();
-    let model_id = body.get("model").and_then(|v| v.as_str())
-        .ok_or_else(|| "missing 'model' in path".to_string())?.to_string();
+async fn put_model_override(body: Value, state: Arc<ServerState>) -> Result<(u16, Value), String> {
+    let provider_id = body
+        .get("id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "missing 'id' in path".to_string())?
+        .to_string();
+    let model_id = body
+        .get("model")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "missing 'model' in path".to_string())?
+        .to_string();
 
     // Outer Option = "field absent from body" → don't touch
     // existing row. Inner Option = "field present and null" →
@@ -2262,13 +2654,14 @@ async fn put_model_override(
     });
     let ts: Option<Option<String>> = body.get("thinking_strength").map(|v| match v {
         Value::Null => None,
-        Value::String(s) if matches!(s.as_str(), "low" | "medium" | "high") => {
-            Some(s.to_string())
-        }
+        Value::String(s) if matches!(s.as_str(), "low" | "medium" | "high") => Some(s.to_string()),
         _ => None,
     });
 
-    state.repo.upsert_model_override(&provider_id, &model_id, ctx, ts.clone()).await
+    state
+        .repo
+        .upsert_model_override(&provider_id, &model_id, ctx, ts.clone())
+        .await
         .map_err(|e| format!("upsert_model_override: {e}"))?;
 
     // Bust the model_cache so the next GET reflects the new
@@ -2276,13 +2669,16 @@ async fn put_model_override(
     // which re-applies the overlay.
     let _ = state.repo.delete_model_cache(&provider_id).await;
 
-    Ok((200, json!({
-        "ok": true,
-        "provider_id": provider_id,
-        "model": model_id,
-        "context_length": ctx.and_then(|c| c),
-        "thinking_strength": ts.and_then(|t| t),
-    })))
+    Ok((
+        200,
+        json!({
+            "ok": true,
+            "provider_id": provider_id,
+            "model": model_id,
+            "context_length": ctx.and_then(|c| c),
+            "thinking_strength": ts.and_then(|t| t),
+        }),
+    ))
 }
 
 /// DELETE /api/providers/{id}/models/{model} — remove the
@@ -2292,21 +2688,33 @@ async fn delete_model_override(
     body: Value,
     state: Arc<ServerState>,
 ) -> Result<(u16, Value), String> {
-    let provider_id = body.get("id").and_then(|v| v.as_str())
-        .ok_or_else(|| "missing 'id' in path".to_string())?.to_string();
-    let model_id = body.get("model").and_then(|v| v.as_str())
-        .ok_or_else(|| "missing 'model' in path".to_string())?.to_string();
+    let provider_id = body
+        .get("id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "missing 'id' in path".to_string())?
+        .to_string();
+    let model_id = body
+        .get("model")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "missing 'model' in path".to_string())?
+        .to_string();
 
-    let removed = state.repo.delete_model_override(&provider_id, &model_id).await
+    let removed = state
+        .repo
+        .delete_model_override(&provider_id, &model_id)
+        .await
         .map_err(|e| format!("delete_model_override: {e}"))?;
     let _ = state.repo.delete_model_cache(&provider_id).await;
 
-    Ok((200, json!({
-        "ok": true,
-        "provider_id": provider_id,
-        "model": model_id,
-        "removed": removed,
-    })))
+    Ok((
+        200,
+        json!({
+            "ok": true,
+            "provider_id": provider_id,
+            "model": model_id,
+            "removed": removed,
+        }),
+    ))
 }
 
 /// Walk every provider's model_cache; if any entry is older than
@@ -2327,35 +2735,40 @@ async fn refresh_stale_caches(state: &Arc<ServerState>) -> usize {
     // /v1/models has ever been fetched.
     for preset in crate::providers::PRESETS {
         if !preset.has_live_models_endpoint {
-            let cached = state.repo.get_model_cache(preset.id).await
-                .ok().flatten();
+            let cached = state.repo.get_model_cache(preset.id).await.ok().flatten();
             if cached.is_none() {
                 let entries: &[crate::providers::ModelEntry] =
-                    crate::providers::OPENAI_FALLBACK_MODELS.iter()
+                    crate::providers::OPENAI_FALLBACK_MODELS
+                        .iter()
                         .find(|(pid, _)| *pid == preset.id)
                         .map(|(_, m)| *m)
                         .unwrap_or(crate::providers::ANTHROPIC_FALLBACK_MODELS);
-                let models: Vec<Value> = entries.iter()
-                    .map(|m| json!({
-                        "id": m.id,
-                        "display_name": m.display_name,
-                        "thinking_strength": m.thinking_strength,
-                        "context_length": m.context_length,
-                        "source": "fallback",
-                    }))
+                let models: Vec<Value> = entries
+                    .iter()
+                    .map(|m| {
+                        json!({
+                            "id": m.id,
+                            "display_name": m.display_name,
+                            "thinking_strength": m.thinking_strength,
+                            "context_length": m.context_length,
+                            "source": "fallback",
+                        })
+                    })
                     .collect();
                 let body = serde_json::to_string(&models).unwrap_or_default();
-                let _ = state.repo.put_model_cache(&storage::ModelCacheRow {
-                    provider_id: preset.id.to_string(),
-                    models_json: body,
-                    fetched_at: now,
-                }).await;
+                let _ = state
+                    .repo
+                    .put_model_cache(&storage::ModelCacheRow {
+                        provider_id: preset.id.to_string(),
+                        models_json: body,
+                        fetched_at: now,
+                    })
+                    .await;
                 stale += 1;
             }
             continue;
         }
-        let cached = state.repo.get_model_cache(preset.id).await
-            .ok().flatten();
+        let cached = state.repo.get_model_cache(preset.id).await.ok().flatten();
         let needs_refresh = match cached {
             Some(c) => now - c.fetched_at > 3600,
             None => true,
@@ -2374,27 +2787,39 @@ async fn refresh_stale_caches(state: &Arc<ServerState>) -> usize {
                 .timeout(std::time::Duration::from_secs(10))
                 .build()
             {
-                if let Ok(resp) = client.get(&url)
+                if let Ok(resp) = client
+                    .get(&url)
                     .header("Authorization", format!("Bearer {}", api_key.as_str()))
-                    .send().await
+                    .send()
+                    .await
                 {
                     if resp.status().is_success() {
                         if let Ok(body) = resp.json::<Value>().await {
-                            let models: Vec<Value> = body.get("data")
+                            let models: Vec<Value> = body
+                                .get("data")
                                 .and_then(|d| d.as_array())
-                                .map(|arr| arr.iter().filter_map(|m|
-                                    m.get("id").and_then(|v| v.as_str()).map(|id| json!({
-                                        "id": id, "display_name": id,
-                                        "source": "live",
-                                    }))
-                                ).collect())
+                                .map(|arr| {
+                                    arr.iter()
+                                        .filter_map(|m| {
+                                            m.get("id").and_then(|v| v.as_str()).map(|id| {
+                                                json!({
+                                                    "id": id, "display_name": id,
+                                                    "source": "live",
+                                                })
+                                            })
+                                        })
+                                        .collect()
+                                })
                                 .unwrap_or_default();
                             let body_str = serde_json::to_string(&models).unwrap_or_default();
-                            let _ = state.repo.put_model_cache(&storage::ModelCacheRow {
-                                provider_id: preset.id.to_string(),
-                                models_json: body_str,
-                                fetched_at: now,
-                            }).await;
+                            let _ = state
+                                .repo
+                                .put_model_cache(&storage::ModelCacheRow {
+                                    provider_id: preset.id.to_string(),
+                                    models_json: body_str,
+                                    fetched_at: now,
+                                })
+                                .await;
                             stale += 1;
                         }
                     }
@@ -2406,8 +2831,7 @@ async fn refresh_stale_caches(state: &Arc<ServerState>) -> usize {
     // Custom providers: just check staleness, don't refetch
     // (the user adds them manually and may have a slow API).
     for c in custom {
-        let cached = state.repo.get_model_cache(&c.id).await
-            .ok().flatten();
+        let cached = state.repo.get_model_cache(&c.id).await.ok().flatten();
         if cached.is_none() {
             stale += 1;
         }
@@ -2431,7 +2855,7 @@ fn sample_workflow(name: &str) -> Value {
                 "通过一个完整的工作流示例展示 Flowntier 的工作方式: \
                  首席 Agent 拆解任务, 规划 Agent 出方案, 工匠 Agent 写代码, \
                  缺陷猎手 和 质检师审核, 最后汇报.",
-"user_request": concat!(
+        "user_request": concat!(
                 "实现 POST /auth/login 接口. 要求: ",
                 "1. 接收 JSON ", "{ username, password }", " ",
                 "2. 校验非空、长度 >= 3 ",
@@ -2468,27 +2892,32 @@ pub async fn resolve_role_for_orchestrator(
     resolve_role(state, role).await
 }
 
-async fn resolve_role(
-    state: &Arc<ServerState>,
-    role: &str,
-) -> Result<ResolvedRole, String> {
+async fn resolve_role(state: &Arc<ServerState>, role: &str) -> Result<ResolvedRole, String> {
     // 1. Read the override row (DB). May be absent — caller uses
     //    in-memory defaults (which are all empty as of v0.4.16).
-    let ov = state.repo.get_role_override(role).await
+    let ov = state
+        .repo
+        .get_role_override(role)
+        .await
         .map_err(|e| format!("get_role_override: {e}"))?;
     let (default_model, fallback_chain) = match ov {
         Some(r) => (r.default_model, r.fallback_chain),
         None => (String::new(), Vec::new()),
     };
     if default_model.is_empty() {
-        return Err("role not configured: open Settings → 角色 → 模型 分配 and pick a default_model".into());
+        return Err(
+            "role not configured: open Settings → 角色 → 模型 分配 and pick a default_model".into(),
+        );
     }
     // 2. Split "<provider_short>:<model_id>".
     let (provider_short, model_id) = match default_model.split_once(':') {
         Some((p, m)) => (p.to_string(), m.to_string()),
-        None => return Err(format!(
-            "default_model '{}' must be in '<provider>:<model>' form", default_model
-        )),
+        None => {
+            return Err(format!(
+                "default_model '{}' must be in '<provider>:<model>' form",
+                default_model
+            ))
+        }
     };
     // 3. Look up the preset FIRST, then fall back to
     //    custom_provider. The custom_provider table lets the
@@ -2511,88 +2940,106 @@ async fn resolve_role(
             // name collided visually with shell env var naming; we
             // now use the `flowntier/custom/<id>` internal namespace.
             // Migration 0008 also renames legacy custom rows.
-            let cp = state.repo.get_custom_provider(&provider_short).await
+            let cp = state
+                .repo
+                .get_custom_provider(&provider_short)
+                .await
                 .map_err(|e| format!("get_custom: {e}"))?
-                .ok_or_else(|| format!(
-                    "unknown provider preset or custom '{}' from default_model '{}' \
+                .ok_or_else(|| {
+                    format!(
+                        "unknown provider preset or custom '{}' from default_model '{}' \
                      (Settings → 中转站 → 添加 custom relay, or change default_model)",
-                    provider_short, default_model
-                ))?;
+                        provider_short, default_model
+                    )
+                })?;
             let secret = format!("flowntier/custom/{}", provider_short.to_lowercase());
             (cp.base_url, cp.kind, secret)
         };
     // 4. Reveal the API key from the keychain. Empty defaults give
     //    503 so the chairman knows the cause.
+    let legacy_secret = format!("CUSTOM_PROVIDER_KEY_{provider_short}");
     let api_key: Zeroizing<String> = match state.secrets.reveal(&secret_name).await {
         Ok(z) if !z.is_empty() => z,
-        _ => {
-            // ── v0.4.34 (audit 000132, root fix) ─────────────
-            // The user removed this provider's API key from
-            // Settings (or it was never set after they switched
-            // models in the UI). The orchestrator still drives
-            // this role through `<this provider>:<model>` because
-            // `role_overrides.default_model` / `fallback_chain`
-            // are independent of the secret table.
-            //
-            // Old behaviour: surface a 503 telling the user to
-            // re-save the key. The next workflow run hits the
-            // exact same 503. Patching the UI button to be more
-            // prominent (v0.4.30) didn't help — the user already
-            // *intentionally* removed the key.
-            //
-            // Root fix: cascade. For built-in presets, clear any
-            // role_overrides rows that reference this provider
-            // AND flip the provider row to `enabled=false` so the
-            // Settings UI reflects "not configured" without the
-            // user having to dig. The next workflow run lands on
-            // the existing `default_model.is_empty()` branch
-            // above (line ~2463) which surfaces the *actionable*
-            // error: "open Settings → 角色 → 模型 分配 and pick a
-            // default_model".
-            //
-            // Only built-in presets: custom-provider resolutions
-            // below stay untouched — the user may be mid-typing
-            // into a relay they just added and we shouldn't blow
-            // away their role assignments while they configure.
-            if crate::providers::get(&provider_short).is_some() {
-                tracing::warn!(
-                    target: "flowntier_pipe",
-                    provider = %provider_short,
-                    role = %role,
-                    secret_name = %secret_name,
-                    "audit 000132: cascading cleanup — clearing role_overrides referencing provider with no API key"
-                );
-                match state.repo.clear_role_overrides_for_provider(&provider_short).await {
-                    Ok(n) => tracing::info!(
-                        target: "flowntier_pipe",
-                        provider = %provider_short, rows_cleared = n,
-                        "audit 000132: role_overrides cleanup complete"
-                    ),
-                    Err(e) => tracing::warn!(
-                        target: "flowntier_pipe",
-                        provider = %provider_short, error = %e,
-                        "audit 000132: clear_role_overrides_for_provider failed (continuing)"
-                    ),
-                }
-                // Best-effort disable; the provider row may not
-                // exist yet (lazy-created on first GET).
-                if let Err(e) = state.repo.set_provider_enabled(&provider_short, false).await {
+        _ => match state.secrets.reveal(&legacy_secret).await {
+            Ok(z) if !z.is_empty() => z,
+            _ => {
+                // ── v0.4.34 (audit 000132, root fix) ─────────────
+                // The user removed this provider's API key from
+                // Settings (or it was never set after they switched
+                // models in the UI). The orchestrator still drives
+                // this role through `<this provider>:<model>` because
+                // `role_overrides.default_model` / `fallback_chain`
+                // are independent of the secret table.
+                //
+                // Old behaviour: surface a 503 telling the user to
+                // re-save the key. The next workflow run hits the
+                // exact same 503. Patching the UI button to be more
+                // prominent (v0.4.30) didn't help — the user already
+                // *intentionally* removed the key.
+                //
+                // Root fix: cascade. For built-in presets, clear any
+                // role_overrides rows that reference this provider
+                // AND flip the provider row to `enabled=false` so the
+                // Settings UI reflects "not configured" without the
+                // user having to dig. The next workflow run lands on
+                // the existing `default_model.is_empty()` branch
+                // above (line ~2463) which surfaces the *actionable*
+                // error: "open Settings → 角色 → 模型 分配 and pick a
+                // default_model".
+                //
+                // Only built-in presets: custom-provider resolutions
+                // below stay untouched — the user may be mid-typing
+                // into a relay they just added and we shouldn't blow
+                // away their role assignments while they configure.
+                if crate::providers::get(&provider_short).is_some() {
                     tracing::warn!(
                         target: "flowntier_pipe",
-                        provider = %provider_short, error = %e,
-                        "audit 000132: set_provider_enabled(false) failed (continuing)"
+                        provider = %provider_short,
+                        role = %role,
+                        secret_name = %secret_name,
+                        "audit 000132: cascading cleanup — clearing role_overrides referencing provider with no API key"
                     );
+                    match state
+                        .repo
+                        .clear_role_overrides_for_provider(&provider_short)
+                        .await
+                    {
+                        Ok(n) => tracing::info!(
+                            target: "flowntier_pipe",
+                            provider = %provider_short, rows_cleared = n,
+                            "audit 000132: role_overrides cleanup complete"
+                        ),
+                        Err(e) => tracing::warn!(
+                            target: "flowntier_pipe",
+                            provider = %provider_short, error = %e,
+                            "audit 000132: clear_role_overrides_for_provider failed (continuing)"
+                        ),
+                    }
+                    // Best-effort disable; the provider row may not
+                    // exist yet (lazy-created on first GET).
+                    if let Err(e) = state
+                        .repo
+                        .set_provider_enabled(&provider_short, false)
+                        .await
+                    {
+                        tracing::warn!(
+                            target: "flowntier_pipe",
+                            provider = %provider_short, error = %e,
+                            "audit 000132: set_provider_enabled(false) failed (continuing)"
+                        );
+                    }
+                    return Err(format!(
+                        "no API key configured for {} — role_overrides referencing this provider \
+                     have been cleared; open Settings → 角色 → 模型 分配 to pick a new default",
+                        secret_name
+                    ));
                 }
                 return Err(format!(
-                    "no API key configured for {} — role_overrides referencing this provider \
-                     have been cleared; open Settings → 角色 → 模型 分配 to pick a new default",
+                    "no API key configured for {} (set it in Settings → 供应商)",
                     secret_name
                 ));
             }
-            return Err(format!(
-                "no API key configured for {} (set it in Settings → 供应商)", secret_name
-            ));
-        }
+        },
     };
     Ok(ResolvedRole {
         role: role.to_string(),
@@ -2706,20 +3153,28 @@ async fn run_task(body: Value, state: Arc<ServerState>) -> Result<(u16, Value), 
             Err(e) => {
                 // Friendlier 200/503 envelope than the legacy raw
                 // 500/Err so the frontend can render it nicely.
-                return Ok((503, json!({
-                    "ok": false,
-                    "role": role,
-                    "error": e,
-                    "hint": "open Settings → 角色 → 模型 分配",
-                })));
+                return Ok((
+                    503,
+                    json!({
+                        "ok": false,
+                        "role": role,
+                        "error": e,
+                        "hint": "open Settings → 角色 → 模型 分配",
+                    }),
+                ));
             }
         };
         let provider_kind = match resolved.api_kind.as_str() {
             "openai-compatible" => "openai_compat".to_string(),
-            "anthropic-compatible" => "openai_compat".to_string(), // best-effort
+            "anthropic-compatible" | "anthropic" => "anthropic".to_string(),
             other => other.to_string(),
         };
-        (provider_kind, resolved.base_url, resolved.model_id, resolved.api_key)
+        (
+            provider_kind,
+            resolved.base_url,
+            resolved.model_id,
+            resolved.api_key,
+        )
     };
 
     // ── Build provider ────────────────────────────────────────
@@ -2729,6 +3184,14 @@ async fn run_task(body: Value, state: Arc<ServerState>) -> Result<(u16, Value), 
     let model_for_quota = model.clone();
     let provider: Arc<dyn agent_core::Provider> = match provider_kind.as_str() {
         "openai" => Arc::new(OpenAiProvider::openai(model, api_key.to_string())),
+        "anthropic" => {
+            let mut p =
+                agent_core::provider::anthropic::AnthropicProvider::new(model, api_key.to_string());
+            if !base_url.is_empty() && base_url != "https://api.anthropic.com" {
+                p.base_url = Some(base_url);
+            }
+            Arc::new(p)
+        }
         "openai_compat" => Arc::new(OpenAiProvider::compat(base_url, model, api_key.to_string())),
         other => return Err(format!("unsupported provider_kind: {other}")),
     };
@@ -2772,30 +3235,38 @@ async fn run_task(body: Value, state: Arc<ServerState>) -> Result<(u16, Value), 
     let mut rx = agent.run_with_history_and_task_id(task_text, chat_history, None);
     let mut last_status = "UNKNOWN".to_string();
     let mut summary: Option<String> = None;
-    let timed_out = tokio::time::timeout(
-        std::time::Duration::from_secs(timeout_secs),
-        async {
-            while let Some(ev) = rx.recv().await {
-                // Best-effort fan-out; if no subscribers, that's fine.
-                let _ = state.events.send(ev.clone());
-                if let AgentEvent::Done { status, summary: s, .. } = ev {
-                    last_status = status;
-                    summary = s;
-                }
-                if matches!(last_status.as_str(), "DONE" | "FAILED" | "ABORTED" | "ABORTED_REPEAT") {
-                    // If the wf_id was provided, replace the empty one.
-                    if !wf_id.is_empty() {
-                        last_status = format!("{last_status} (wf={wf_id})");
-                    }
-                    return false; // not a timeout
-                }
+    let timed_out = tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), async {
+        while let Some(ev) = rx.recv().await {
+            // Best-effort fan-out; if no subscribers, that's fine.
+            let _ = state.events.send(ev.clone());
+            if let AgentEvent::Done {
+                status, summary: s, ..
+            } = ev
+            {
+                last_status = status;
+                summary = s;
             }
-            true // channel closed without Done — treat as timeout-shaped
-        },
-    )
+            if matches!(
+                last_status.as_str(),
+                "DONE" | "FAILED" | "ABORTED" | "ABORTED_REPEAT"
+            ) {
+                // If the wf_id was provided, replace the empty one.
+                if !wf_id.is_empty() {
+                    last_status = format!("{last_status} (wf={wf_id})");
+                }
+                return false; // not a timeout
+            }
+        }
+        true // channel closed without Done — treat as timeout-shaped
+    })
     .await
     .unwrap_or(true);
-    if timed_out && !matches!(last_status.as_str(), "DONE" | "FAILED" | "ABORTED" | "ABORTED_REPEAT") {
+    if timed_out
+        && !matches!(
+            last_status.as_str(),
+            "DONE" | "FAILED" | "ABORTED" | "ABORTED_REPEAT"
+        )
+    {
         // Synthesize a Done event so subscribers see the
         // terminal state, and stamp the status the frontend
         // can grep on (event 000066 introduces "TIMEOUT" as a
@@ -2825,40 +3296,55 @@ async fn run_task(body: Value, state: Arc<ServerState>) -> Result<(u16, Value), 
     }
 
     // ── v0.4.20: quota-failure recording ──────────────────
-    // Any non-DONE status counts as a quota-class failure
-    // (deliberately conservative — false positives just promote
-    // the row, never auto-block; per-provider error-code parsing
-    // is Phase-2/v0.4.21). On success: clear any prior row.
+    // Any non-DONE status counts as a runtime failure.
+    // However, ONLY genuine quota / rate-limit failures (HTTP 429, "quota", "rate limit")
+    // should record a quota failure and trigger the 5h pending wait.
+    // Tool failures or ABORTED_REPEAT should NEVER lock models out for 5 hours!
     let status_clean = last_status
-        .split_whitespace().next().unwrap_or("UNKNOWN").to_string();
+        .split_whitespace()
+        .next()
+        .unwrap_or("UNKNOWN")
+        .to_string();
     if status_clean != "DONE" {
         let err_msg = summary.clone().unwrap_or_else(|| last_status.clone());
         let err_msg: String = err_msg.chars().take(240).collect();
-        // v0.4.21 (event 000066): surface quota-class failures
-        // to the TopBar badge so the chairman sees them without
-        // having to dig through Settings.
+        let is_aborted_or_tool_failure = status_clean == "ABORTED"
+            || status_clean == "ABORTED_REPEAT"
+            || status_clean == "CANCELLED";
+        let is_true_quota_failure = err_msg.to_ascii_lowercase().contains("quota")
+            || err_msg.contains("429")
+            || err_msg.to_ascii_lowercase().contains("rate limit")
+            || err_msg.to_ascii_lowercase().contains("insufficient");
+
+        // Surface failure to the TopBar badge
         state.push_error(ErrorRecord {
             at: chrono::Utc::now().timestamp(),
             severity: "error".into(),
-            source: "quota".into(),
+            source: if is_true_quota_failure {
+                "quota".into()
+            } else {
+                "runtime".into()
+            },
             summary: format!("{role} run failed: {status_clean}"),
             detail: Some(err_msg.clone()),
         });
-        if let Err(e) = state.repo.record_quota_failure(
-            &role, &model_for_quota, &err_msg,
-        ).await {
-            warn!(error = %e, "v0.4.20: failed to record_quota_failure");
-        }
-        // Chief escalation: chief's own failure flips to
-        // pending_5h_wait so the scheduler retries at the next
-        // 5h boundary. Other (role, model) failures just record —
-        // chief's loop picks them up via the events bus on its
-        // next iteration.
-        if role == "agent:chief" {
-            if let Err(e) = state.repo.set_quota_pending_5h_wait(
-                &role, &model_for_quota,
-            ).await {
-                warn!(error = %e, "v0.4.20: failed to set_quota_pending_5h_wait for chief");
+
+        if is_true_quota_failure && !is_aborted_or_tool_failure {
+            if let Err(e) = state
+                .repo
+                .record_quota_failure(&role, &model_for_quota, &err_msg)
+                .await
+            {
+                warn!(error = %e, "v0.4.20: failed to record_quota_failure");
+            }
+            if role == "agent:chief" {
+                if let Err(e) = state
+                    .repo
+                    .set_quota_pending_5h_wait(&role, &model_for_quota)
+                    .await
+                {
+                    warn!(error = %e, "v0.4.20: failed to set_quota_pending_5h_wait for chief");
+                }
             }
         }
     } else {
@@ -2866,9 +3352,11 @@ async fn run_task(body: Value, state: Arc<ServerState>) -> Result<(u16, Value), 
         // the StatusLine flips back to "正常" automatically. We
         // also drop all chief rows when chief itself succeeds
         // (cheap; lets the chairman see a clean slate).
-        if let Err(e) = state.repo.clear_quota_failure(
-            &role, Some(&model_for_quota),
-        ).await {
+        if let Err(e) = state
+            .repo
+            .clear_quota_failure(&role, Some(&model_for_quota))
+            .await
+        {
             warn!(error = %e, "v0.4.20: failed to clear_quota_failure on success");
         }
         if role == "agent:chief" {
@@ -2914,11 +3402,10 @@ async fn run_task(body: Value, state: Arc<ServerState>) -> Result<(u16, Value), 
     // row, the rest no-op. Real (non-synthetic) wf_ids already
     // have a workflows row from the dispatcher, but we still
     // call this — the OR IGNORE makes it safe and idempotent.
-    let wf_insert = state.repo.ensure_workflow_row(
-        &wf_id_for_task,
-        &task_text_for_record,
-        &status_clean,
-    ).await;
+    let wf_insert = state
+        .repo
+        .ensure_workflow_row(&wf_id_for_task, &task_text_for_record, &status_clean)
+        .await;
     if let Err(e) = wf_insert {
         warn!("v0.4.21 (event 000064 follow-up): ensure_workflow_row failed for {wf_id_for_task}: {e}");
     }
@@ -2930,23 +3417,26 @@ async fn run_task(body: Value, state: Arc<ServerState>) -> Result<(u16, Value), 
     } else {
         task_text_for_record.clone()
     };
-    let task_result = state.repo.create_task(&storage::Task {
-        id: task_id.clone(),
-        wf_id: wf_id_for_task.clone(),
-        parent_id: None,
-        title,
-        status: status_for_task.to_lowercase(),
-        assigned_to: Some(role.clone()),
-        model: Some(model_for_quota.clone()),
-        repair_count: 0,
-        input_tokens: 0,
-        output_tokens: 0,
-        cost_usd: None,
-        files_modified: None,
-        started_at: Some(now),
-        finished_at: Some(now),
-        result: summary.clone(),
-    }).await;
+    let task_result = state
+        .repo
+        .create_task(&storage::Task {
+            id: task_id.clone(),
+            wf_id: wf_id_for_task.clone(),
+            parent_id: None,
+            title,
+            status: status_for_task.to_lowercase(),
+            assigned_to: Some(role.clone()),
+            model: Some(model_for_quota.clone()),
+            repair_count: 0,
+            input_tokens: 0,
+            output_tokens: 0,
+            cost_usd: None,
+            files_modified: None,
+            started_at: Some(now),
+            finished_at: Some(now),
+            result: summary.clone(),
+        })
+        .await;
     if let Err(e) = task_result {
         // Log but do not fail the run_task response — the agent
         // work already succeeded, the dashboard just won't see
@@ -2982,7 +3472,9 @@ fn walk_tree(
     truncated: &mut bool,
 ) {
     if depth == 0 || out.len() >= max_entries {
-        if out.len() >= max_entries { *truncated = true; }
+        if out.len() >= max_entries {
+            *truncated = true;
+        }
         return;
     }
     let read = match std::fs::read_dir(dir) {
@@ -2994,10 +3486,7 @@ fn walk_tree(
         .filter(|e| {
             let name = e.file_name().to_string_lossy().to_string();
             // Skip hidden + known-noisy dirs.
-            !(name.starts_with('.')
-                || name == "node_modules"
-                || name == "target"
-                || name == "dist")
+            !(name.starts_with('.') || name == "node_modules" || name == "target" || name == "dist")
         })
         .collect();
     entries.sort_by_key(|e| {
@@ -3025,13 +3514,23 @@ fn walk_tree(
             "is_dir": is_dir,
             "is_file": is_file,
         });
-        if let Some(s) = size { node["size"] = json!(s); }
+        if let Some(s) = size {
+            node["size"] = json!(s);
+        }
         if is_dir && depth > 1 {
             let mut children = Vec::new();
             let mut sub_truncated = false;
-            walk_tree(&entry.path(), depth - 1, max_entries - out.len() - 1, &mut children, &mut sub_truncated);
+            walk_tree(
+                &entry.path(),
+                depth - 1,
+                max_entries - out.len() - 1,
+                &mut children,
+                &mut sub_truncated,
+            );
             node["children"] = json!(children);
-            if sub_truncated { *truncated = true; }
+            if sub_truncated {
+                *truncated = true;
+            }
         }
         out.push(node);
     }

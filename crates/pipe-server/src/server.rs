@@ -16,8 +16,8 @@
 //! On Unix, `bind` + `listen` are already concurrency-safe; we
 //! accept in a loop and dispatch each connection to a tokio task.
 
-use crate::protocol::{RpcRequest, RpcResponse, MAX_LINE};
 use crate::dispatcher::Dispatcher;
+use crate::protocol::{RpcRequest, RpcResponse, MAX_LINE};
 use agent_core::event::AgentEvent;
 use std::sync::Arc;
 use tokio::sync::broadcast;
@@ -32,10 +32,15 @@ fn socket_paths() -> (std::path::PathBuf, std::path::PathBuf) {
     let base = std::env::var_os("XDG_RUNTIME_DIR")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| {
-            dirs_cache_dir().unwrap_or_else(|| std::env::temp_dir()).join("flowntier")
+            dirs_cache_dir()
+                .unwrap_or_else(|| std::env::temp_dir())
+                .join("flowntier")
         });
     let _ = std::fs::create_dir_all(&base);
-    (base.join("flowntier_runtime.sock"), base.join("flowntier_runtime_events.sock"))
+    (
+        base.join("flowntier_runtime.sock"),
+        base.join("flowntier_runtime_events.sock"),
+    )
 }
 
 #[cfg(not(windows))]
@@ -81,7 +86,11 @@ pub struct Server {
 }
 
 impl Server {
-    pub fn new(cfg: ServerConfig, dispatcher: Dispatcher, events_tx: broadcast::Sender<AgentEvent>) -> Self {
+    pub fn new(
+        cfg: ServerConfig,
+        dispatcher: Dispatcher,
+        events_tx: broadcast::Sender<AgentEvent>,
+    ) -> Self {
         Self {
             cfg,
             dispatcher: Arc::new(dispatcher),
@@ -174,17 +183,26 @@ async fn rpc_listener(path: String, dispatcher: Arc<Dispatcher>) -> std::io::Res
                         continue;
                     }
                 };
-                tracing::debug!(worker = i, "[TRACE] rpc pipe instance created, waiting for client connect");
+                tracing::debug!(
+                    worker = i,
+                    "[TRACE] rpc pipe instance created, waiting for client connect"
+                );
                 if let Err(e) = server.connect().await {
                     tracing::error!(error = %e, worker = i, "[TRACE] rpc pipe connect failed; retrying");
                     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
                     continue;
                 }
-                tracing::info!(worker = i, "[TRACE] rpc pipe client connected — entering serve_rpc_connection");
+                tracing::info!(
+                    worker = i,
+                    "[TRACE] rpc pipe client connected — entering serve_rpc_connection"
+                );
                 if let Err(e) = serve_rpc_connection(server, d.clone()).await {
                     tracing::warn!(error = %e, worker = i, "[TRACE] rpc serve error");
                 }
-                tracing::debug!(worker = i, "[TRACE] rpc pipe client disconnected, looping to accept next");
+                tracing::debug!(
+                    worker = i,
+                    "[TRACE] rpc pipe client disconnected, looping to accept next"
+                );
             }
         });
         handles.push(h);
@@ -203,7 +221,7 @@ async fn events_listener(path: String, tx: broadcast::Sender<AgentEvent>) -> std
     use tokio::net::windows::named_pipe::ServerOptions;
 
     let mut handles = Vec::with_capacity(EVENTS_WORKERS);
-    for i in 0..EVENTS_WORKERS {
+    for _ in 0..EVENTS_WORKERS {
         let txc = tx.clone();
         let p = path.clone();
         let h = tokio::spawn(async move {
@@ -213,10 +231,7 @@ async fn events_listener(path: String, tx: broadcast::Sender<AgentEvent>) -> std
             // os-error-5 refused access from a stale first
             // instance after a previous session.
             loop {
-                let mut server = match ServerOptions::new()
-                    .first_pipe_instance(false)
-                    .create(&p)
-                {
+                let mut server = match ServerOptions::new().first_pipe_instance(false).create(&p) {
                     Ok(s) => s,
                     Err(e) => {
                         tracing::error!(error = %e, "events pipe create failed; backing off");
@@ -301,10 +316,9 @@ async fn rpc_listener(path: String, dispatcher: Arc<Dispatcher>) -> std::io::Res
     let _cleanup = scopeguard::guard((), |_| {
         let _ = std::fs::remove_file(&path_for_cleanup);
     });
-    let mut incoming = listener.incoming();
-    while let Some(stream) = incoming.next().await {
-        match stream {
-            Ok(s) => {
+    loop {
+        match listener.accept().await {
+            Ok((s, _)) => {
                 let d = dispatcher.clone();
                 tokio::spawn(async move {
                     if let Err(e) = serve_rpc_connection(s, d).await {
@@ -317,7 +331,6 @@ async fn rpc_listener(path: String, dispatcher: Arc<Dispatcher>) -> std::io::Res
             }
         }
     }
-    Ok(())
 }
 
 #[cfg(not(windows))]
@@ -331,10 +344,10 @@ async fn events_listener(path: String, tx: broadcast::Sender<AgentEvent>) -> std
     let _cleanup = scopeguard::guard((), |_| {
         let _ = std::fs::remove_file(&path_for_cleanup);
     });
-    let mut incoming = listener.incoming();
-    while let Some(stream) = incoming.next().await {
-        match stream {
-            Ok(mut s) => {
+    loop {
+        match listener.accept().await {
+            Ok((mut s, _)) => {
+                use tokio::io::AsyncWriteExt;
                 let mut rx = tx.subscribe();
                 tokio::spawn(async move {
                     loop {
@@ -355,7 +368,6 @@ async fn events_listener(path: String, tx: broadcast::Sender<AgentEvent>) -> std
             }
         }
     }
-    Ok(())
 }
 
 #[cfg(not(windows))]
@@ -363,7 +375,7 @@ async fn serve_rpc_connection(
     conn: tokio::net::UnixStream,
     dispatcher: Arc<Dispatcher>,
 ) -> std::io::Result<()> {
-    use tokio::io::AsyncWriteExt;
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     let (read_half, mut write_half) = conn.into_split();
     let mut reader = BufReader::new(read_half);
     let mut line = String::new();
@@ -397,7 +409,11 @@ async fn handle_one(line: &str, dispatcher: Arc<Dispatcher>) -> RpcResponse {
     };
     if req.jsonrpc != "2.0" {
         tracing::warn!(target: "pipe_server", "[TRACE] handle_one: invalid jsonrpc version = {}", req.jsonrpc);
-        return RpcResponse::err(req.id, crate::protocol::codes::INVALID, "jsonrpc must be 2.0");
+        return RpcResponse::err(
+            req.id,
+            crate::protocol::codes::INVALID,
+            "jsonrpc must be 2.0",
+        );
     }
     tracing::info!(
         target: "pipe_server",

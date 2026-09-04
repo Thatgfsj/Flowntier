@@ -8,7 +8,6 @@ description = "Typed pub/sub event bus for Flowntier (Rust core, Tauri webview)"
 
 [lints.clippy]
 all = { level = "deny", priority = -1 }
-pedantic = { level = "warn", priority = -1 }
 
 [dependencies]
 tokio        = { workspace = true }

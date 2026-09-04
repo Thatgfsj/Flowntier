@@ -12,12 +12,13 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::OnceLock;
 use std::time::Duration;
 
-use tauri::Manager;
 use tauri::Emitter;
-use tauri_plugin_shell::ShellExt;
+use tauri::Manager;
 use tauri_core::logging::{self, LoggingGuard};
 use tauri_core::{AppState, NewWorkflowResponse};
+use tauri_plugin_shell::ShellExt;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+#[cfg(windows)]
 use tokio::net::windows::named_pipe::ClientOptions;
 
 const RPC_PIPE: &str = r"\\.\pipe\flowntier_runtime";
@@ -40,6 +41,7 @@ const MAX_LINE: usize = 1_048_576; // 1 MiB hard cap per pipe message
 ///   request  = `{"jsonrpc":"2.0","id":N,"method":VERB,"params":{"path":...,"body":...}}\n`
 ///   response = `{"jsonrpc":"2.0","id":N,"result":{"status":S,"body":B}}`  or
 ///              `{"jsonrpc":"2.0","id":N,"error":{"code":-32603,"message":"..."}}\n`
+#[cfg(windows)]
 async fn pipe_request(
     method: &str,
     path: &str,
@@ -56,7 +58,9 @@ async fn pipe_request(
     let path_for_open = RPC_PIPE;
     let mut conn = match tokio::task::spawn_blocking(move || {
         ClientOptions::new().open(path_for_open)
-    }).await {
+    })
+    .await
+    {
         Ok(Ok(c)) => c,
         Ok(Err(e)) => {
             tracing::error!(target: "tauri_ipc", error = %e, "[TRACE] pipe_request: pipe open FAILED");
@@ -79,53 +83,55 @@ async fn pipe_request(
     let mut line = serde_json::to_vec(&req).map_err(|e| e.to_string())?;
     line.push(b'\n');
     tracing::info!(target: "tauri_ipc", id = id, method = %method, path = %path, "[TRACE] pipe_request: writing request to pipe");
-    conn.write_all(&line)
-        .await
-        .map_err(|e| {
-            tracing::error!(target: "tauri_ipc", error = %e, "[TRACE] pipe_request: pipe write FAILED");
-            format!("pipe write: {e}")
-        })?;
+    conn.write_all(&line).await.map_err(|e| {
+        tracing::error!(target: "tauri_ipc", error = %e, "[TRACE] pipe_request: pipe write FAILED");
+        format!("pipe write: {e}")
+    })?;
     tracing::debug!(target: "tauri_ipc", id = id, "[TRACE] pipe_request: request written, reading response");
 
     // v0.4.22 (event 000091 fix #25): read with a hard 60s
-    // timeout. Without this, a stuck runtime (or a dead but
-    // half-connected sidecar) would cause pipe_request to
-    // block the Tauri command forever, leaving the UI stuck
-    // on "发送中…". 60s is generous — even a 78-card tarot
-    // dispatch returns in <30s, so 60s is well above the
-    // natural latency floor and catches any hang cleanly.
-    let read_fut = read_response_bytes(&mut conn, MAX_LINE);
-    let buf = match tokio::time::timeout(
-        std::time::Duration::from_secs(60),
-        read_fut,
-    ).await {
-        Ok(Ok(buf)) => buf,
+    // timeout. LLM calls can take 10-30s; if the sidecar hangs
+    // indefinitely (e.g. infinite loop in a buggy router), we
+    // MUST NOT leave the webview's invoke promise pending forever.
+    // 60s is long enough for any legitimate single agent call.
+    let read_timeout = Duration::from_secs(60);
+    let raw = match tokio::time::timeout(read_timeout, read_response_bytes(&mut conn, MAX_LINE))
+        .await
+    {
+        Ok(Ok(b)) => b,
         Ok(Err(e)) => {
-            tracing::error!(target: "tauri_ipc", error = %e, id = id, "[TRACE] pipe_request: pipe read FAILED");
+            tracing::error!(target: "tauri_ipc", id = id, error = %e, "[TRACE] pipe_request: read_response_bytes FAILED");
             return Err(format!("pipe read: {e}"));
         }
         Err(_) => {
-            tracing::error!(target: "tauri_ipc", id = id, "[TRACE] pipe_request: pipe read TIMED OUT after 60s");
-            return Err(format!("pipe read timed out after 60s (id={id})"));
+            tracing::error!(target: "tauri_ipc", id = id, "[TRACE] pipe_request: read TIMED OUT after 60s");
+            return Err("pipe read timed out after 60s — sidecar may be stuck".into());
         }
     };
-    tracing::debug!(target: "tauri_ipc", id = id, resp_len = buf.len(), "[TRACE] pipe_request: response received, parsing JSON");
 
-    let resp: serde_json::Value =
-        serde_json::from_slice(&buf).map_err(|e| format!("pipe bad json: {e}"))?;
+    let resp: serde_json::Value = serde_json::from_slice(&raw).map_err(|e| {
+        let preview = String::from_utf8_lossy(&raw);
+        let preview: String = preview.chars().take(200).collect();
+        tracing::error!(target: "tauri_ipc", id = id, error = %e, preview = %preview, "[TRACE] pipe_request: JSON parse FAILED");
+        format!("pipe parse {e}: {preview}")
+    })?;
+
+    tracing::debug!(target: "tauri_ipc", id = id, "[TRACE] pipe_request: response received and parsed");
 
     if let Some(err) = resp.get("error") {
-        let msg = err.get("message").and_then(|m| m.as_str()).unwrap_or("pipe error").to_string();
-        tracing::warn!(target: "tauri_ipc", id = id, error = %msg, "[TRACE] pipe_request: server returned error");
-        return Err(msg);
+        let msg = err
+            .get("message")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown error");
+        tracing::warn!(target: "tauri_ipc", id = id, error = %msg, "[TRACE] pipe_request: RPC returned error");
+        return Err(msg.to_string());
     }
+
     let status = resp
         .pointer("/result/status")
-        .and_then(|s| s.as_u64())
-        .unwrap_or(0);
-    if !(200..300).contains(&status) {
-        // Non-2xx body is wrapped into a string so the caller can show it
-        // (e.g. "HTTP 422: {detail: '...'}").
+        .and_then(|v| v.as_u64())
+        .unwrap_or(200);
+    if !(200..=299).contains(&status) {
         let body = resp
             .pointer("/result/body")
             .cloned()
@@ -138,6 +144,15 @@ async fn pipe_request(
         .unwrap_or(serde_json::Value::Null))
 }
 
+#[cfg(not(windows))]
+async fn pipe_request(
+    _method: &str,
+    _path: &str,
+    _body: Option<serde_json::Value>,
+) -> Result<serde_json::Value, String> {
+    Err("Named pipes are only supported on Windows".into())
+}
+
 /// v0.4.22 (event 000091 fix #25 + #26): extracted from
 /// `pipe_request` so the read can be wrapped in a timeout
 /// (`fix #25`) and switched to `BufReader::read_until` for
@@ -146,6 +161,7 @@ async fn pipe_request(
 /// Reads from `conn` byte-by-byte until newline, returning
 /// the bytes without the trailing `\n`. Errors if the
 /// response exceeds `max_bytes`.
+#[cfg(windows)]
 async fn read_response_bytes(
     conn: &mut tokio::net::windows::named_pipe::NamedPipeClient,
     max_bytes: usize,
@@ -235,7 +251,7 @@ pub fn graceful_kill_sidecar() {
 fn spawn_runtime_sidecar(app: &tauri::AppHandle) {
     use tauri_plugin_shell::process::CommandEvent;
 
-// Kill any stale sidecar from a previous session. Pipes
+    // Kill any stale sidecar from a previous session. Pipes
     // are exclusive, so a dead binary that left the pipe handle open
     // would block the new instance.
     //
@@ -351,6 +367,7 @@ fn spawn_runtime_sidecar(app: &tauri::AppHandle) {
     });
 }
 
+#[cfg(windows)]
 fn try_ping_pipe() -> Result<(), String> {
     // A blocking probe — we don't care about the response, just whether
     // the kernel will hand us a handle.
@@ -358,6 +375,15 @@ fn try_ping_pipe() -> Result<(), String> {
     opts.open(RPC_PIPE).map(|_| ()).map_err(|e| e.to_string())
 }
 
+#[cfg(not(windows))]
+fn try_ping_pipe() -> Result<(), String> {
+    Ok(())
+}
+
+#[cfg(not(windows))]
+async fn events_bridge(_app: tauri::AppHandle) {}
+
+#[cfg(windows)]
 async fn events_bridge(app: tauri::AppHandle) {
     tracing::info!(target: "tauri_events", "[TRACE] events_bridge: starting — connecting to events pipe");
     let mut backoff_ms = 200u64;
@@ -375,9 +401,7 @@ async fn events_bridge(app: tauri::AppHandle) {
                                 if buf.is_empty() {
                                     continue;
                                 }
-                                if let Ok(v) =
-                                    serde_json::from_slice::<serde_json::Value>(&buf)
-                                {
+                                if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&buf) {
                                     // The events pipe is newline-delimited JSON;
                                     // each line is a serialised value of one of
                                     // two shapes:
@@ -474,7 +498,9 @@ async fn run_workflow(body: serde_json::Value) -> Result<serde_json::Value, Stri
     tracing::info!(target: "tauri_ipc", "[TRACE] run_workflow Tauri command invoked from frontend");
     let result = pipe_request("POST", "/api/run_workflow", Some(body)).await;
     match &result {
-        Ok(v) => tracing::info!(target: "tauri_ipc", response = %v, "[TRACE] run_workflow: success"),
+        Ok(v) => {
+            tracing::info!(target: "tauri_ipc", response = %v, "[TRACE] run_workflow: success")
+        }
         Err(e) => tracing::error!(target: "tauri_ipc", error = %e, "[TRACE] run_workflow: FAILED"),
     }
     result
@@ -543,9 +569,13 @@ async fn kv_get(key: String) -> Result<serde_json::Value, String> {
 /// Body: { value: <json> }. Returns { k, v }.
 #[tauri::command]
 async fn kv_set(key: String, value: serde_json::Value) -> Result<serde_json::Value, String> {
-    pipe_request("POST", &format!("/api/kv/{key}"), Some(serde_json::json!({
-        "value": value,
-    })))
+    pipe_request(
+        "POST",
+        &format!("/api/kv/{key}"),
+        Some(serde_json::json!({
+            "value": value,
+        })),
+    )
     .await
 }
 
@@ -605,13 +635,7 @@ async fn save_secret(name: String, value: String) -> Result<serde_json::Value, S
 async fn delete_secret(name: String) -> Result<(), String> {
     // The runtime returns 204 on success and 404 when the key was never
     // set; both are treated as success from the UI's perspective.
-    match pipe_request(
-        "DELETE",
-        &format!("/api/settings/secrets/{}", name),
-        None,
-    )
-    .await
-    {
+    match pipe_request("DELETE", &format!("/api/settings/secrets/{}", name), None).await {
         Ok(_) => Ok(()),
         Err(e) if e.contains("HTTP 404") => Ok(()),
         Err(e) => Err(e),
@@ -873,10 +897,7 @@ async fn list_disabled_models() -> Result<serde_json::Value, String> {
 }
 
 #[tauri::command]
-async fn invoke_plugin(
-    name: String,
-    args: serde_json::Value,
-) -> Result<serde_json::Value, String> {
+async fn invoke_plugin(name: String, args: serde_json::Value) -> Result<serde_json::Value, String> {
     pipe_request(
         "POST",
         &format!("/api/plugins/{}/invoke", name),
@@ -904,10 +925,9 @@ async fn start_workflow_cmd(
     // its own.
     let _ = project_id; // currently unused — orchestrator derives id
     let body = serde_json::json!({ "task": text });
-    let resp = pipe_request("POST", "/api/run_workflow", Some(body))
-        .await
-        .map_err(|e| e)?;
-    let wf_id = resp.get("wf_id")
+    let resp = pipe_request("POST", "/api/run_workflow", Some(body)).await?;
+    let wf_id = resp
+        .get("wf_id")
         .and_then(|v| v.as_str())
         .ok_or_else(|| "runtime returned no wf_id".to_string())?
         .to_string();
@@ -919,12 +939,26 @@ async fn get_workflow(
     state: tauri::State<'_, AppState>,
     id: String,
 ) -> Result<Option<serde_json::Value>, String> {
-    state
+    let wf_opt = state
         .repo
         .get_workflow(&id)
         .await
-        .map(|opt| opt.map(workflow_to_json))
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    let Some(wf) = wf_opt else {
+        return Ok(None);
+    };
+    let mut json = workflow_to_json(wf);
+    if let Ok(tasks) = state.repo.list_tasks_for(&id).await {
+        let total = tasks.len();
+        let done = tasks.iter().filter(|t| t.status == "done").count();
+        if let Some(obj) = json.as_object_mut() {
+            obj.insert("tasks_done".into(), serde_json::json!(done));
+            obj.insert("tasksDone".into(), serde_json::json!(done));
+            obj.insert("tasks_total".into(), serde_json::json!(total));
+            obj.insert("tasksTotal".into(), serde_json::json!(total));
+        }
+    }
+    Ok(Some(json))
 }
 
 #[tauri::command]
@@ -960,12 +994,7 @@ fn redact_secrets(line: &str) -> String {
     // Helper: replace all occurrences of `prefix` followed by
     // alphanumeric/_/- chars with `replacement` (no recursion —
     // each match is replaced independently).
-    fn replace_token(
-        s: &str,
-        prefix: &str,
-        replacement: &str,
-        include_prefix: bool,
-    ) -> String {
+    fn replace_token(s: &str, prefix: &str, replacement: &str, include_prefix: bool) -> String {
         let mut out = String::with_capacity(s.len());
         let bytes = s.as_bytes();
         let prefix_bytes = prefix.as_bytes();
@@ -1035,9 +1064,7 @@ fn redact_secrets(line: &str) -> String {
             if &bytes[i..i + plen] == prefix_bytes {
                 let mut j = i + plen;
                 while j < bytes.len()
-                    && (bytes[j].is_ascii_alphanumeric()
-                        || bytes[j] == b'_'
-                        || bytes[j] == b'-')
+                    && (bytes[j].is_ascii_alphanumeric() || bytes[j] == b'_' || bytes[j] == b'-')
                 {
                     j += 1;
                 }
@@ -1107,14 +1134,10 @@ fn redact_secrets(line: &str) -> String {
             new_out.push_str(&out[i..key_end]);
             // Skip whitespace, expect `=` or `:`.
             let mut sep = key_end;
-            while sep < bytes.len()
-                && (bytes[sep] == b' ' || bytes[sep] == b'\t')
-            {
+            while sep < bytes.len() && (bytes[sep] == b' ' || bytes[sep] == b'\t') {
                 sep += 1;
             }
-            if sep >= bytes.len()
-                || (bytes[sep] != b'=' && bytes[sep] != b':')
-            {
+            if sep >= bytes.len() || (bytes[sep] != b'=' && bytes[sep] != b':') {
                 // No separator; skip past this keyword.
                 i = key_end;
                 continue;
@@ -1130,8 +1153,11 @@ fn redact_secrets(line: &str) -> String {
             while v < bytes.len() {
                 let b = bytes[v];
                 if b.is_ascii_whitespace()
-                    || b == b',' || b == b'}' || b == b']'
-                    || b == b'"' || b == b'\''
+                    || b == b','
+                    || b == b'}'
+                    || b == b']'
+                    || b == b'"'
+                    || b == b'\''
                 {
                     break;
                 }
@@ -1289,7 +1315,7 @@ fn search_log(
             }
             // Strip the trailing newline (or \r\n) so the trimmed
             // line we display doesn't have whitespace artifacts.
-            let trimmed = line.trim_end_matches(|c| c == '\n' || c == '\r');
+            let trimmed = line.trim_end_matches(['\n', '\r']);
             // Per-line cap (BUG-004 fix).
             let truncated_line = if trimmed.len() > MAX_LINE_BYTES {
                 let mut s = String::with_capacity(MAX_LINE_BYTES + 16);
@@ -1374,16 +1400,13 @@ async fn wipe_all_data() -> Result<(), String> {
     }
     // Recursively remove the data dir. Errors are surfaced to the
     // user (Settings modal shows a "Clear failed: <err>" message).
-    std::fs::remove_dir_all(&data_dir)
-        .map_err(|e| format!("rm {}: {e}", data_dir.display()))?;
+    std::fs::remove_dir_all(&data_dir).map_err(|e| format!("rm {}: {e}", data_dir.display()))?;
     // Re-create the dir so the next launch's logging::init_logging
     // has somewhere to write. Empty dir + empty SQLite is the
     // "fresh install" state.
-    std::fs::create_dir_all(&data_dir)
-        .map_err(|e| format!("mkdir {}: {e}", data_dir.display()))?;
+    std::fs::create_dir_all(&data_dir).map_err(|e| format!("mkdir {}: {e}", data_dir.display()))?;
     Ok(())
 }
-
 
 /// Persist the workspace workdir path. Called from the
 /// WorkdirSetup dialog on first launch (and from Settings >
@@ -1438,18 +1461,32 @@ async fn get_diagnostics() -> Result<serde_json::Value, String> {
 
     // Paths
     let data_dir = storage::Repository::default_data_dir();
-    out.insert("data_dir".into(), json!(data_dir.as_ref().map(|p| p.display().to_string()).unwrap_or_else(|| "<unknown>".to_string())));
+    out.insert(
+        "data_dir".into(),
+        json!(data_dir
+            .as_ref()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| "<unknown>".to_string())),
+    );
     if let Some(ref dd) = data_dir {
-        out.insert("log_dir".into(), json!(tauri_core::logging::log_dir(dd).display().to_string()));
+        out.insert(
+            "log_dir".into(),
+            json!(tauri_core::logging::log_dir(dd).display().to_string()),
+        );
     } else {
         out.insert("log_dir".into(), json!(null));
     }
 
     // Env vars
     let env_keys = [
-        "MINIMAX_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY",
-        "GOOGLE_API_KEY", "DEEPSEEK_API_KEY", "MOONSHOT_API_KEY",
-        "OPEN_BIGMODEL_API_KEY", "ZHIPUAI_API_KEY",
+        "MINIMAX_API_KEY",
+        "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "GOOGLE_API_KEY",
+        "DEEPSEEK_API_KEY",
+        "MOONSHOT_API_KEY",
+        "OPEN_BIGMODEL_API_KEY",
+        "ZHIPUAI_API_KEY",
     ];
     let env_state: serde_json::Map<String, serde_json::Value> = env_keys
         .iter()
@@ -1503,7 +1540,9 @@ async fn get_diagnostics() -> Result<serde_json::Value, String> {
     if let Some(ref dd) = data_dir {
         let candidates = [
             dd.join("flowntier_runtime.exe"),
-            dd.parent().map(|p| p.join("flowntier_runtime.exe")).unwrap_or_default(),
+            dd.parent()
+                .map(|p| p.join("flowntier_runtime.exe"))
+                .unwrap_or_default(),
         ];
         let mut found_path: Option<String> = None;
         for c in &candidates {
@@ -1540,7 +1579,10 @@ async fn get_diagnostics() -> Result<serde_json::Value, String> {
         let _ = log_path; // suppress unused
     }
 
-    out.insert("timestamp".into(), json!(unix_secs_to_iso8601(std::time::SystemTime::now())));
+    out.insert(
+        "timestamp".into(),
+        json!(unix_secs_to_iso8601(std::time::SystemTime::now())),
+    );
 
     Ok(serde_json::Value::Object(out))
 }
@@ -1577,10 +1619,7 @@ async fn set_workdir_with_nwt(path: String) -> Result<String, String> {
         return Err(format!("workdir does not exist: {}", path));
     }
     if !root.is_dir() {
-        return Err(format!(
-            "workdir is not a directory: {}",
-            root.display()
-        ));
+        return Err(format!("workdir is not a directory: {}", root.display()));
     }
     // BUG-012 fix (event 000023): reject filesystem root paths
     // (`/` on Unix, `C:\` / drive roots on Windows). Without this
@@ -1600,8 +1639,7 @@ async fn set_workdir_with_nwt(path: String) -> Result<String, String> {
     let nwt_dir = root.join(".nwt");
     std::fs::create_dir_all(nwt_dir.join("timeline"))
         .map_err(|e| format!("mkdir timeline: {e}"))?;
-    std::fs::create_dir_all(nwt_dir.join("indices"))
-        .map_err(|e| format!("mkdir indices: {e}"))?;
+    std::fs::create_dir_all(nwt_dir.join("indices")).map_err(|e| format!("mkdir indices: {e}"))?;
     let meta = nwt_dir.join("metadata.json");
     if !meta.exists() {
         let project_name = root
@@ -1614,33 +1652,28 @@ async fn set_workdir_with_nwt(path: String) -> Result<String, String> {
             "schema_version": 1,
             "format": "nwt/0.1",
         });
-        let bytes = serde_json::to_vec_pretty(&payload)
-            .map_err(|e| format!("serialize metadata: {e}"))?;
-        std::fs::write(&meta, bytes)
-            .map_err(|e| format!("write metadata: {e}"))?;
+        let bytes =
+            serde_json::to_vec_pretty(&payload).map_err(|e| format!("serialize metadata: {e}"))?;
+        std::fs::write(&meta, bytes).map_err(|e| format!("write metadata: {e}"))?;
     }
     let tags_idx = nwt_dir.join("indices").join("tags.json");
     if !tags_idx.exists() {
-        std::fs::write(&tags_idx, b"{}\n")
-            .map_err(|e| format!("write tags: {e}"))?;
+        std::fs::write(&tags_idx, b"{}\n").map_err(|e| format!("write tags: {e}"))?;
     }
     let files_idx = nwt_dir.join("indices").join("files.json");
     if !files_idx.exists() {
-        std::fs::write(&files_idx, b"{}\n")
-            .map_err(|e| format!("write files: {e}"))?;
+        std::fs::write(&files_idx, b"{}\n").map_err(|e| format!("write files: {e}"))?;
     }
 
     // Step 3: only NOW persist the workdir, atomically (tmp + rename
     // to avoid a torn write that would brick get_workdir).
     let wd_file = data_dir.join("workdir.json");
     let payload = serde_json::json!({ "workdir": path });
-    let bytes = serde_json::to_vec_pretty(&payload)
-        .map_err(|e| format!("serialize workdir: {e}"))?;
+    let bytes =
+        serde_json::to_vec_pretty(&payload).map_err(|e| format!("serialize workdir: {e}"))?;
     let tmp = wd_file.with_extension("json.tmp");
-    std::fs::write(&tmp, &bytes)
-        .map_err(|e| format!("write tmp {}: {e}", tmp.display()))?;
-    std::fs::rename(&tmp, &wd_file)
-        .map_err(|e| format!("rename to {}: {e}", wd_file.display()))?;
+    std::fs::write(&tmp, &bytes).map_err(|e| format!("write tmp {}: {e}", tmp.display()))?;
+    std::fs::rename(&tmp, &wd_file).map_err(|e| format!("rename to {}: {e}", wd_file.display()))?;
 
     tracing::info!(path = %path, nwt = %nwt_dir.display(), "Workdir + .nwt initialised atomically");
 
@@ -1659,11 +1692,11 @@ async fn set_workdir_with_nwt(path: String) -> Result<String, String> {
     if let Ok(bytes) = serde_json::to_vec_pretty(&nwt_root_payload) {
         let nrt_file = data_dir.join("nwt_root.json");
         let nrt_tmp = nrt_file.with_extension("json.tmp");
-        match std::fs::write(&nrt_tmp, &bytes)
-            .and_then(|_| std::fs::rename(&nrt_tmp, &nrt_file))
-        {
+        match std::fs::write(&nrt_tmp, &bytes).and_then(|_| std::fs::rename(&nrt_tmp, &nrt_file)) {
             Ok(()) => tracing::info!(path = %nrt_file.display(), "nwt_root.json written"),
-            Err(e) => tracing::warn!(error = %e, "failed to write nwt_root.json; agent-core nwt tool will see no root"),
+            Err(e) => {
+                tracing::warn!(error = %e, "failed to write nwt_root.json; agent-core nwt tool will see no root")
+            }
         }
     }
 
@@ -1687,7 +1720,9 @@ async fn set_workdir_with_nwt(path: String) -> Result<String, String> {
     )
     .await
     {
-        Ok(v) => tracing::info!(target: "tauri_runtime", response = %v, "v0.4.21 (event 000066): pipe-server workspace updated"),
+        Ok(v) => {
+            tracing::info!(target: "tauri_runtime", response = %v, "v0.4.21 (event 000066): pipe-server workspace updated")
+        }
         Err(e) => tracing::warn!(
             target: "tauri_runtime",
             error = %e,
@@ -1709,11 +1744,12 @@ async fn get_workdir() -> Result<Option<String>, String> {
     if !p.exists() {
         return Ok(None);
     }
-    let raw = std::fs::read_to_string(&p)
-        .map_err(|e| format!("read {}: {e}", p.display()))?;
-    let v: serde_json::Value = serde_json::from_str(&raw)
-        .map_err(|e| format!("parse {}: {e}", p.display()))?;
-    Ok(v.get("workdir").and_then(|v| v.as_str()).map(|s| s.to_string()))
+    let raw = std::fs::read_to_string(&p).map_err(|e| format!("read {}: {e}", p.display()))?;
+    let v: serde_json::Value =
+        serde_json::from_str(&raw).map_err(|e| format!("parse {}: {e}", p.display()))?;
+    Ok(v.get("workdir")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string()))
 }
 
 /// v0.4.21 (event 000066): read the pipe-server's *actual*
@@ -1740,7 +1776,9 @@ async fn get_workspace_tree(body: serde_json::Value) -> Result<serde_json::Value
     // matching; see event 000064 follow-up).
     let mut q = Vec::<String>::new();
     if let Some(p) = body.get("path").and_then(|v| v.as_str()) {
-        if !p.is_empty() { q.push(format!("path={}", url_encode(p))); }
+        if !p.is_empty() {
+            q.push(format!("path={}", url_encode(p)));
+        }
     }
     if let Some(d) = body.get("depth").and_then(|v| v.as_u64()) {
         q.push(format!("depth={d}"));
@@ -1763,8 +1801,9 @@ fn url_encode(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for b in s.as_bytes() {
         match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9'
-            | b'-' | b'_' | b'.' | b'~' | b'/' | b':' => out.push(*b as char),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' | b'/' | b':' => {
+                out.push(*b as char)
+            }
             _ => out.push_str(&format!("%{:02X}", b)),
         }
     }
@@ -1833,7 +1872,10 @@ async fn get_log_file_path() -> Result<serde_json::Value, String> {
 /// epoch (vanishingly unlikely but Rust's `SystemTime` allows it).
 pub fn unix_secs_to_iso8601(t: std::time::SystemTime) -> String {
     use std::time::UNIX_EPOCH;
-    let secs = t.duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let secs = t
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
     let (year, month, day) = civil_from_days((secs / 86_400) as i64);
     let time_of_day = (secs % 86_400) as u32;
     let hour = time_of_day / 3600;
@@ -1862,18 +1904,21 @@ pub fn civil_from_days(z: i64) -> (i32, u32, u32) {
     (y, m, d)
 }
 
-/// (Removed: standalone `nwt_init_workspace` command — folded
-/// into `set_workdir_with_nwt` for BUG-016 atomicity. See event
-/// 000022. App.tsx no longer calls it.)
+// (Removed: standalone `nwt_init_workspace` command — folded
+// into `set_workdir_with_nwt` for BUG-016 atomicity. See event
+// 000022. App.tsx no longer calls it.)
 
 fn workflow_to_json(wf: storage::Workflow) -> serde_json::Value {
     serde_json::json!({
         "id": wf.id,
+        "wf_id": wf.id,
         "createdAt": wf.created_at,
         "updatedAt": wf.updated_at,
         "state": wf.state,
+        "status": wf.state,
         "phase": wf.phase,
         "userRequest": wf.user_request,
+        "user_request": wf.user_request,
         "planDoc": wf.plan_doc,
         "summary": wf.summary,
         "finalStatus": wf.final_status.map(|s| match s {

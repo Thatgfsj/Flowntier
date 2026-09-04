@@ -18,13 +18,9 @@
  * If the i18n key is missing, the user sees the raw key. Add the
  * key to both zh-CN.ts and en-US.ts.
  */
-import type { TFunction } from 'i18next';
+import type { TFunction } from "i18next";
 
-export function tErr(
-  t: TFunction,
-  error: unknown,
-  fallbackKey: string,
-): string {
+export function tErr(t: TFunction, error: unknown, fallbackKey: string): string {
   const raw = error instanceof Error ? error.message : String(error);
   return t(fallbackKey, { error: raw });
 }

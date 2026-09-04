@@ -47,7 +47,7 @@ pub struct NwtEvent {
 /// plumbing through the agent loop + pipe server). When the
 /// chairman's "AI 主动记录到 NWT" instruction fires, the
 /// tool reads from this Mutex<PathBuf>.
-
+///
 /// BUG-041 + BUG-042 fix (event 000023): wraps both the index
 /// read-modify-write (tags.json / files.json) and the next_id
 /// allocation so concurrent tool calls from parallel workers
@@ -138,6 +138,7 @@ fn next_id(root: &Path) -> String {
     format!("{:06}", read_highest_id(root) + 1)
 }
 
+#[allow(clippy::many_single_char_names)]
 fn now_iso() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
     let secs = SystemTime::now()
@@ -172,8 +173,7 @@ fn now_iso() -> String {
     let month_days = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
     let leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
     let md = if leap {
-        let mut m2 = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-        m2
+        [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
     } else {
         month_days
     };
@@ -242,7 +242,10 @@ pub fn init_workspace(root: &Path) -> std::io::Result<()> {
             "schema_version": 1,
             "nwt_cli_compat": "1.0",
         });
-        fs::write(meta, serde_json::to_vec_pretty(&payload).unwrap_or_default())?;
+        fs::write(
+            meta,
+            serde_json::to_vec_pretty(&payload).unwrap_or_default(),
+        )?;
     }
     Ok(())
 }
@@ -337,7 +340,7 @@ impl Tool for NwtLogTool {
     async fn execute(
         &self,
         args: serde_json::Value,
-        ctx: &ToolContext,
+        _ctx: &ToolContext,
     ) -> Result<ToolOutput, ToolError> {
         let task = args
             .get("task")
@@ -349,14 +352,24 @@ impl Tool for NwtLogTool {
             .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError::InvalidArgs("missing 'summary' (string)".into()))?
             .to_string();
-        let reason = args.get("reason").and_then(|v| v.as_str()).map(String::from);
+        let reason = args
+            .get("reason")
+            .and_then(|v| v.as_str())
+            .map(String::from);
         let files = args.get("files").and_then(|v| v.as_array()).map(|a| {
-            a.iter().filter_map(|x| x.as_str().map(String::from)).collect()
+            a.iter()
+                .filter_map(|x| x.as_str().map(String::from))
+                .collect()
         });
         let tags = args.get("tags").and_then(|v| v.as_array()).map(|a| {
-            a.iter().filter_map(|x| x.as_str().map(String::from)).collect()
+            a.iter()
+                .filter_map(|x| x.as_str().map(String::from))
+                .collect()
         });
-        let parent = args.get("parent").and_then(|v| v.as_str()).map(String::from);
+        let parent = args
+            .get("parent")
+            .and_then(|v| v.as_str())
+            .map(String::from);
 
         // We use the global NWT root (set by the desktop shell
         // when the workdir is configured), not the ToolContext's
@@ -379,7 +392,7 @@ impl Tool for NwtLogTool {
         };
 
         let event = NwtEvent {
-            id: String::new(), // assigned by log_event
+            id: String::new(),        // assigned by log_event
             timestamp: String::new(), // ditto
             task,
             summary,

@@ -133,7 +133,9 @@ async fn collect_until_done(mut rx: mpsc::UnboundedReceiver<AgentEvent>) -> Vec<
             Ok(Some(ev)) => {
                 let done = matches!(ev, AgentEvent::Done { .. });
                 out.push(ev);
-                if done { break; }
+                if done {
+                    break;
+                }
             }
             Ok(None) => break,
             Err(_) => panic!("agent loop did not emit Done within 5 s; got: {out:#?}"),
@@ -214,15 +216,23 @@ async fn loop_executes_bash_tool_and_finishes() {
     let saw_finished = events.iter().any(
         |e| matches!(e, AgentEvent::ToolFinished { tool_call_id, is_error, .. } if tool_call_id == "call_1" && !*is_error),
     );
-    assert!(saw_started, "expected ToolStarted for bash; events: {events:#?}");
-    assert!(saw_finished, "expected ToolFinished for call_1; events: {events:#?}");
+    assert!(
+        saw_started,
+        "expected ToolStarted for bash; events: {events:#?}"
+    );
+    assert!(
+        saw_finished,
+        "expected ToolFinished for call_1; events: {events:#?}"
+    );
 
     eprintln!("DEBUG events for bash test: {events:#?}");
 
     let (preview, is_err) = events
         .iter()
         .find_map(|e| match e {
-            AgentEvent::ToolFinished { preview, is_error, .. } => Some((preview.clone(), *is_error)),
+            AgentEvent::ToolFinished {
+                preview, is_error, ..
+            } => Some((preview.clone(), *is_error)),
             _ => None,
         })
         .unwrap();
@@ -261,7 +271,11 @@ async fn tool_error_is_surfaced_and_does_not_crash_loop() {
     let (is_err, id) = events
         .iter()
         .find_map(|e| match e {
-            AgentEvent::ToolFinished { is_error, tool_call_id, .. } => Some((*is_error, tool_call_id.clone())),
+            AgentEvent::ToolFinished {
+                is_error,
+                tool_call_id,
+                ..
+            } => Some((*is_error, tool_call_id.clone())),
             _ => None,
         })
         .expect("expected a ToolFinished");
@@ -306,14 +320,19 @@ async fn read_and_write_tools_round_trip() {
     let read_preview = events
         .iter()
         .filter_map(|e| match e {
-            AgentEvent::ToolFinished { tool_call_id, preview, .. } if tool_call_id == "r" => {
-                Some(preview.clone())
-            }
+            AgentEvent::ToolFinished {
+                tool_call_id,
+                preview,
+                ..
+            } if tool_call_id == "r" => Some(preview.clone()),
             _ => None,
         })
         .next()
         .expect("read tool should have finished");
-    assert!(read_preview.contains("hi rust"), "read preview was: {read_preview}");
+    assert!(
+        read_preview.contains("hi rust"),
+        "read preview was: {read_preview}"
+    );
 
     let on_disk = std::fs::read_to_string(tmp.path().join("hello.txt")).unwrap();
     assert_eq!(on_disk, "hi rust");
@@ -387,7 +406,10 @@ async fn repeat_failure_aborts_before_max_iterations() {
         .iter()
         .filter(|e| matches!(e, AgentEvent::ToolFinished { is_error: true, .. }))
         .count();
-    assert_eq!(failures, 3, "expected exactly 3 failures, events: {events:#?}");
+    assert_eq!(
+        failures, 3,
+        "expected exactly 3 failures, events: {events:#?}"
+    );
 }
 
 /// Capability `read_only` makes the `write` tool refuse at the

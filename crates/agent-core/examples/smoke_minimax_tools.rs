@@ -26,8 +26,8 @@ async fn main() -> anyhow::Result<()> {
 
     let api_key = std::env::var("MINIMAX_API_KEY")
         .map_err(|_| anyhow::anyhow!("MINIMAX_API_KEY env var required"))?;
-    let base_url = std::env::var("MINIMAX_BASE_URL")
-        .unwrap_or_else(|_| "https://api.minimaxi.com/v1".into());
+    let base_url =
+        std::env::var("MINIMAX_BASE_URL").unwrap_or_else(|_| "https://api.minimaxi.com/v1".into());
     let model = std::env::var("MINIMAX_MODEL").unwrap_or_else(|_| "MiniMax-Text-01".into());
 
     let workspace_dir = std::env::temp_dir().join("aco-minimax-smoke");
@@ -83,15 +83,21 @@ async fn main() -> anyhow::Result<()> {
                     serde_json::to_string(&call.args).unwrap_or_default()
                 );
             }
-            AgentEvent::ToolFinished { tool_call_id, preview, is_error, elapsed_ms, .. } => {
+            AgentEvent::ToolFinished {
+                tool_call_id,
+                preview,
+                is_error,
+                elapsed_ms,
+                ..
+            } => {
                 let mark = if *is_error { "✗" } else { "✓" };
-                eprintln!(
-                    "  {mark} tool END  id={tool_call_id} in {elapsed_ms}ms: {preview}"
-                );
+                eprintln!("  {mark} tool END  id={tool_call_id} in {elapsed_ms}ms: {preview}");
                 // Best-effort pair with the started event name.
                 tools_used.push((tool_call_id.clone(), *is_error, *elapsed_ms));
             }
-            AgentEvent::Done { status, summary, .. } => {
+            AgentEvent::Done {
+                status, summary, ..
+            } => {
                 eprintln!("\n→ status: {status}");
                 if let Some(s) = summary {
                     eprintln!("→ summary: {s}");
@@ -122,4 +128,6 @@ async fn main() -> anyhow::Result<()> {
 }
 
 #[allow(dead_code)]
-fn _suppress_unused_warning_for_path(p: PathBuf) -> PathBuf { p }
+fn _suppress_unused_warning_for_path(p: PathBuf) -> PathBuf {
+    p
+}

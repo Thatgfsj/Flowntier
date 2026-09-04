@@ -23,7 +23,7 @@
  *   also fall back to `localStorage` if the kv call fails —
  *   that fallback is exercised in the test suite.
  */
-import type { ChatTurnMessage } from '../lib/api.js';
+import type { ChatTurnMessage } from "../lib/api.js";
 
 // ── Types ───────────────────────────────────────────────────────
 
@@ -39,13 +39,13 @@ export interface ChatSession {
   /** All turns in the session (user + assistant + tool). */
   messages: ChatTurnMessage[];
   /** Mode the session was created in: workflow or chat. */
-  mode: 'workflow' | 'chat';
+  mode: "workflow" | "chat";
 }
 
 // ── Storage keys ────────────────────────────────────────────────
 
-export const STORAGE_KEY_SESSIONS = 'chat_sessions_v1';
-export const STORAGE_KEY_ACTIVE = 'chat_active_session_v1';
+export const STORAGE_KEY_SESSIONS = "chat_sessions_v1";
+export const STORAGE_KEY_ACTIVE = "chat_active_session_v1";
 
 // ── Pure helpers (no I/O) ───────────────────────────────────────
 
@@ -53,7 +53,7 @@ export const STORAGE_KEY_ACTIVE = 'chat_active_session_v1';
  *  available (Tauri 2 webview always has it), falls back to a
  *  timestamp + random hex for the rare case it doesn't. */
 export function newSessionId(): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return crypto.randomUUID();
   }
   return `s_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
@@ -62,16 +62,13 @@ export function newSessionId(): string {
 /** Derive a title from the first user turn. Empty string → '新对话'. */
 export function deriveTitle(firstUserContent: string): string {
   const trimmed = firstUserContent.trim();
-  if (trimmed.length === 0) return '新对话';
+  if (trimmed.length === 0) return "新对话";
   if (trimmed.length <= 40) return trimmed;
-  return trimmed.slice(0, 40) + '…';
+  return trimmed.slice(0, 40) + "…";
 }
 
 /** Build a fresh session from the first user turn. */
-export function newSession(
-  firstUserContent: string,
-  mode: 'workflow' | 'chat',
-): ChatSession {
+export function newSession(firstUserContent: string, mode: "workflow" | "chat"): ChatSession {
   const now = new Date().toISOString();
   return {
     id: newSessionId(),
@@ -89,10 +86,7 @@ export function sortByUpdatedAt(sessions: ChatSession[]): ChatSession[] {
 }
 
 /** Cap a session's message array at `maxMessages`. Drops oldest. */
-export function capMessages(
-  session: ChatSession,
-  maxMessages: number,
-): ChatSession {
+export function capMessages(session: ChatSession, maxMessages: number): ChatSession {
   if (session.messages.length <= maxMessages) return session;
   return {
     ...session,
@@ -103,10 +97,7 @@ export function capMessages(
 // ── Index ops (immutable; the caller persists the result) ───────
 
 /** Append or insert a session by id. New = prepended (top of list). */
-export function upsertSession(
-  sessions: ChatSession[],
-  next: ChatSession,
-): ChatSession[] {
+export function upsertSession(sessions: ChatSession[], next: ChatSession): ChatSession[] {
   const idx = sessions.findIndex((s) => s.id === next.id);
   if (idx === -1) {
     return [next, ...sessions];
@@ -122,10 +113,7 @@ export function removeSession(sessions: ChatSession[], id: string): ChatSession[
 }
 
 /** Find a session by id. */
-export function findSession(
-  sessions: ChatSession[],
-  id: string,
-): ChatSession | undefined {
+export function findSession(sessions: ChatSession[], id: string): ChatSession | undefined {
   return sessions.find((s) => s.id === id);
 }
 
@@ -152,15 +140,15 @@ export function loadSessions(raw: unknown): ChatSession[] {
   if (!Array.isArray(raw)) return [];
   const out: ChatSession[] = [];
   for (const entry of raw) {
-    if (entry == null || typeof entry !== 'object') continue;
+    if (entry == null || typeof entry !== "object") continue;
     const s = entry as Record<string, unknown>;
     if (
-      typeof s.id !== 'string'
-      || typeof s.title !== 'string'
-      || typeof s.createdAt !== 'string'
-      || typeof s.updatedAt !== 'string'
-      || !Array.isArray(s.messages)
-      || (s.mode !== 'workflow' && s.mode !== 'chat')
+      typeof s.id !== "string" ||
+      typeof s.title !== "string" ||
+      typeof s.createdAt !== "string" ||
+      typeof s.updatedAt !== "string" ||
+      !Array.isArray(s.messages) ||
+      (s.mode !== "workflow" && s.mode !== "chat")
     ) {
       // Skip malformed entry but keep the rest.
       continue;
@@ -174,9 +162,9 @@ export function loadSessions(raw: unknown): ChatSession[] {
       // Coerce messages through a tolerant filter; drop
       // individual bad messages but keep the session.
       messages: (s.messages as unknown[]).filter((m) => {
-        if (m == null || typeof m !== 'object') return false;
+        if (m == null || typeof m !== "object") return false;
         const mm = m as Record<string, unknown>;
-        return typeof mm.role === 'string' && typeof mm.content === 'string';
+        return typeof mm.role === "string" && typeof mm.content === "string";
       }) as ChatTurnMessage[],
     });
   }
@@ -188,7 +176,7 @@ export function loadSessions(raw: unknown): ChatSession[] {
  * if absent, not a string, or empty.
  */
 export function loadActiveId(raw: unknown): string | null {
-  if (typeof raw !== 'string') return null;
+  if (typeof raw !== "string") return null;
   if (raw.length === 0) return null;
   return raw;
 }

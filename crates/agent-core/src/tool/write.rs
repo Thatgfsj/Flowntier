@@ -53,7 +53,9 @@ impl Tool for WriteTool {
 
         let abs = ctx.workspace.resolve(path);
         if !ctx.workspace.contains(&abs) {
-            return Ok(ToolOutput::err(format!("refused: {path} is outside the workspace")));
+            return Ok(ToolOutput::err(format!(
+                "refused: {path} is outside the workspace"
+            )));
         }
 
         write_atomic(&abs, content).await?;
@@ -68,7 +70,9 @@ impl Tool for WriteTool {
 
 async fn write_atomic(abs: &PathBuf, content: &str) -> Result<(), ToolError> {
     if let Some(parent) = abs.parent() {
-        tokio::fs::create_dir_all(parent).await.map_err(ToolError::Io)?;
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(ToolError::Io)?;
     }
 
     // Back up the existing file (if any) before overwriting.
@@ -92,7 +96,9 @@ async fn write_atomic(abs: &PathBuf, content: &str) -> Result<(), ToolError> {
     ));
     {
         let mut f = tokio::fs::File::create(&tmp).await.map_err(ToolError::Io)?;
-        f.write_all(content.as_bytes()).await.map_err(ToolError::Io)?;
+        f.write_all(content.as_bytes())
+            .await
+            .map_err(ToolError::Io)?;
         f.sync_all().await.map_err(ToolError::Io)?;
     }
     tokio::fs::rename(&tmp, abs).await.map_err(ToolError::Io)?;
@@ -117,7 +123,10 @@ mod tests {
             .await
             .unwrap();
         assert!(!out.is_error);
-        assert_eq!(std::fs::read_to_string(dir.path().join("a.txt")).unwrap(), "hi");
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("a.txt")).unwrap(),
+            "hi"
+        );
     }
 
     #[tokio::test]
@@ -133,7 +142,10 @@ mod tests {
             .execute(serde_json::json!({"path": "a.txt", "content": "new"}), &ctx)
             .await
             .unwrap();
-        assert_eq!(std::fs::read_to_string(dir.path().join("a.txt")).unwrap(), "new");
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("a.txt")).unwrap(),
+            "new"
+        );
         let bak = dir.path().join("a.txt.bak");
         assert_eq!(std::fs::read_to_string(&bak).unwrap(), "old");
     }

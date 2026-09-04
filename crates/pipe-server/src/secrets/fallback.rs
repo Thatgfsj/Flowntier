@@ -64,9 +64,7 @@ impl FallbackKeychain {
             return Ok(dek);
         }
         let raw = std::fs::read_to_string(&self.path).context("read master.key")?;
-        let bytes = B64
-            .decode(raw.trim())
-            .context("base64 decode master.key")?;
+        let bytes = B64.decode(raw.trim()).context("base64 decode master.key")?;
         if bytes.len() != DEK_LEN {
             anyhow::bail!(
                 "master.key has wrong length: {} (expected {})",
@@ -120,10 +118,8 @@ mod tests {
 
     #[test]
     fn open_or_create_idempotent() {
-        let dir = std::env::temp_dir().join(format!(
-            "flowntier-fallback-test-{}",
-            rand::random::<u64>()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("flowntier-fallback-test-{}", rand::random::<u64>()));
         std::fs::create_dir_all(&dir).unwrap();
 
         let mut a = FallbackKeychain::open_or_create(&dir).unwrap();

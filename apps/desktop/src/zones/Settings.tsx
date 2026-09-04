@@ -1,24 +1,32 @@
-import { Fragment, useEffect, useState } from 'react';
-import { useTranslation } from 'react-i18next';
-import { invoke } from '@tauri-apps/api/core';
-import { Card } from '@flowntier/ui';
+import { Fragment, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { invoke } from "@tauri-apps/api/core";
+import { Card } from "@flowntier/ui";
 import {
-  saveSecret, deleteSecret,
-  listProviders, toggleProvider,
-  listRouterRoles, listRouterModels, updateRouterRoles,
+  saveSecret,
+  deleteSecret,
+  listProviders,
+  toggleProvider,
+  listRouterRoles,
+  listRouterModels,
+  updateRouterRoles,
   fetchProviderModels,
-  addCustomProvider, removeCustomProvider,
-  setModelOverride, clearModelOverride,
-  getQuotaStatus, resetQuota,
-  type ProviderInfo, type RoleInfo,
+  addCustomProvider,
+  removeCustomProvider,
+  setModelOverride,
+  clearModelOverride,
+  getQuotaStatus,
+  resetQuota,
+  type ProviderInfo,
+  type RoleInfo,
   type ProviderModel,
   type QuotaStatusEntry,
-} from '../lib/api.js';
-import { useCustomModels } from '../hooks/useCustomModels.js';
-import { useDisabledModels } from '../hooks/useDisabledModels.js';
-import { appVersion, buildSha } from '../lib/version.js';
-import { SearchBugPanel } from '../components/SearchBugPanel.js';
-import { tErr } from '../lib/errs.js';
+} from "../lib/api.js";
+import { useCustomModels } from "../hooks/useCustomModels.js";
+import { useDisabledModels } from "../hooks/useDisabledModels.js";
+import { appVersion, buildSha } from "../lib/version.js";
+import { SearchBugPanel } from "../components/SearchBugPanel.js";
+import { tErr } from "../lib/errs.js";
 
 // ── Quick Add AI ─────────────────────────────────────────────────
 
@@ -29,22 +37,85 @@ import { tErr } from '../lib/errs.js';
 // that an old env var was being read. Migration 0008 renames any
 // pre-existing keychain rows.
 const QUICK_PROVIDERS = [
-  { id: 'openai',      name: 'OpenAI',             secretName: 'flowntier/openai',       placeholder: 'sk-...',      description: 'GPT-5, GPT-5 Mini',          color: '#10a37f' },
-  { id: 'anthropic',   name: 'Anthropic',          secretName: 'flowntier/anthropic',    placeholder: 'sk-ant-...',  description: 'Claude Opus, Sonnet, Haiku', color: '#d97706' },
-  { id: 'google',      name: 'Google Gemini',      secretName: 'flowntier/google',       placeholder: 'AIza...',     description: 'Gemini 2.5 Pro, Flash',      color: '#4285f4' },
-  { id: 'deepseek',    name: 'DeepSeek',           secretName: 'flowntier/deepseek',     placeholder: 'sk-...',      description: 'DeepSeek Chat, Reasoner',    color: '#6366f1' },
-  { id: 'minimax',     name: 'MiniMax',            secretName: 'flowntier/minimax',      placeholder: 'eyJ...',      description: 'MiniMax M3',                 color: '#f97316' },
-  { id: 'kimi',        name: 'Kimi (月之暗面)',     secretName: 'flowntier/kimi',         placeholder: 'sk-...',      description: 'Kimi K2',                    color: '#8b5cf6' },
-  { id: 'zhipu',       name: 'GLM (智谱)',         secretName: 'flowntier/glm',          placeholder: '',             description: 'GLM-4',                      color: '#059669' },
-  { id: 'mimo',        name: 'MIMO (小米)',        secretName: 'flowntier/mimo',         placeholder: 'sk-...',      description: '小米 MIMO',                   color: '#ff6900' },
-  { id: 'siliconflow', name: 'SiliconFlow',        secretName: 'flowntier/siliconflow',  placeholder: 'sk-...',      description: 'SiliconFlow (硅基流动)',     color: '#0ea5e9' },
+  {
+    id: "openai",
+    name: "OpenAI",
+    secretName: "flowntier/openai",
+    placeholder: "sk-...",
+    description: "GPT-5, GPT-5 Mini",
+    color: "#10a37f",
+  },
+  {
+    id: "anthropic",
+    name: "Anthropic",
+    secretName: "flowntier/anthropic",
+    placeholder: "sk-ant-...",
+    description: "Claude Opus, Sonnet, Haiku",
+    color: "#d97706",
+  },
+  {
+    id: "google",
+    name: "Google Gemini",
+    secretName: "flowntier/google",
+    placeholder: "AIza...",
+    description: "Gemini 2.5 Pro, Flash",
+    color: "#4285f4",
+  },
+  {
+    id: "deepseek",
+    name: "DeepSeek",
+    secretName: "flowntier/deepseek",
+    placeholder: "sk-...",
+    description: "DeepSeek Chat, Reasoner",
+    color: "#6366f1",
+  },
+  {
+    id: "minimax",
+    name: "MiniMax",
+    secretName: "flowntier/minimax",
+    placeholder: "eyJ...",
+    description: "MiniMax M3",
+    color: "#f97316",
+  },
+  {
+    id: "kimi",
+    name: "Kimi (月之暗面)",
+    secretName: "flowntier/kimi",
+    placeholder: "sk-...",
+    description: "Kimi K2",
+    color: "#8b5cf6",
+  },
+  {
+    id: "zhipu",
+    name: "GLM (智谱)",
+    secretName: "flowntier/glm",
+    placeholder: "",
+    description: "GLM-4",
+    color: "#059669",
+  },
+  {
+    id: "mimo",
+    name: "MIMO (小米)",
+    secretName: "flowntier/mimo",
+    placeholder: "sk-...",
+    description: "小米 MIMO",
+    color: "#ff6900",
+  },
+  {
+    id: "siliconflow",
+    name: "SiliconFlow",
+    secretName: "flowntier/siliconflow",
+    placeholder: "sk-...",
+    description: "SiliconFlow (硅基流动)",
+    color: "#0ea5e9",
+  },
 ];
 
 function QuickAddAI({ onSaved }: { onSaved: () => void }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
-  const [apiKey, setApiKey] = useState('');
+  const [apiKey, setApiKey] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
@@ -56,19 +127,19 @@ function QuickAddAI({ onSaved }: { onSaved: () => void }) {
     setBusy(true);
     setError(null);
     try {
-      console.log('[QuickAddAI] saving:', provider.secretName);
+      console.log("[QuickAddAI] saving:", provider.secretName);
       const result = await saveSecret(provider.secretName, apiKey.trim());
-      console.log('[QuickAddAI] save result:', result);
+      console.log("[QuickAddAI] save result:", result);
       if (!result || !result.saved) {
-        setError(t('settings.quickAdd.errorInvalidKey'));
+        setError(t("settings.quickAdd.errorInvalidKey"));
         return;
       }
       if (result.warning) {
         // Key persisted, but seed to os.environ failed — non-fatal.
-        console.warn('[QuickAddAI] seed warning:', result.warning);
+        console.warn("[QuickAddAI] seed warning:", result.warning);
       }
       setSuccess(true);
-      setApiKey('');
+      setApiKey("");
       onSaved();
       setTimeout(() => {
         setOpen(false);
@@ -76,8 +147,8 @@ function QuickAddAI({ onSaved }: { onSaved: () => void }) {
         setSelected(null);
       }, 1500);
     } catch (e) {
-      console.error('[QuickAddAI] save failed:', e);
-      setError(tErr(t, e, 'settings.error.saveFailed'));
+      console.error("[QuickAddAI] save failed:", e);
+      setError(tErr(t, e, "settings.error.saveFailed"));
     } finally {
       setBusy(false);
     }
@@ -91,7 +162,7 @@ function QuickAddAI({ onSaved }: { onSaved: () => void }) {
         className="flex w-full items-center justify-center gap-2 rounded-lg border border-chief/30 bg-chief/10 px-4 py-2.5 text-sm font-medium text-chief transition-colors hover:bg-chief/20"
       >
         <span className="text-lg">+</span>
-        {t('settings.providers.addAI')}
+        {t("settings.providers.addAI")}
       </button>
     );
   }
@@ -99,8 +170,20 @@ function QuickAddAI({ onSaved }: { onSaved: () => void }) {
   return (
     <div className="rounded-lg border border-border bg-surface-1 p-4">
       <div className="mb-3 flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-primary">{t('settings.quickAdd.title')}</h3>
-        <button type="button" onClick={() => { setOpen(false); setSelected(null); setApiKey(''); setError(null); setSuccess(false); }} className="text-xs text-text-secondary hover:text-primary">{t('settings.action.cancel')}</button>
+        <h3 className="text-sm font-semibold text-primary">{t("settings.quickAdd.title")}</h3>
+        <button
+          type="button"
+          onClick={() => {
+            setOpen(false);
+            setSelected(null);
+            setApiKey("");
+            setError(null);
+            setSuccess(false);
+          }}
+          className="text-xs text-text-secondary hover:text-primary"
+        >
+          {t("settings.action.cancel")}
+        </button>
       </div>
 
       <div className="mb-3 max-h-[300px] overflow-y-auto">
@@ -109,8 +192,12 @@ function QuickAddAI({ onSaved }: { onSaved: () => void }) {
             <button
               key={p.id}
               type="button"
-              onClick={() => { setSelected(p.id); setApiKey(''); setError(null); }}
-              className={`flex items-center gap-2 rounded-md border p-2.5 text-left transition-colors ${selected === p.id ? 'border-chief bg-surface-2' : 'border-border bg-surface-1 hover:border-text-secondary'}`}
+              onClick={() => {
+                setSelected(p.id);
+                setApiKey("");
+                setError(null);
+              }}
+              className={`flex items-center gap-2 rounded-md border p-2.5 text-left transition-colors ${selected === p.id ? "border-chief bg-surface-2" : "border-border bg-surface-1 hover:border-text-secondary"}`}
             >
               <div className="h-3 w-3 shrink-0 rounded-full" style={{ backgroundColor: p.color }} />
               <div className="min-w-0">
@@ -125,7 +212,7 @@ function QuickAddAI({ onSaved }: { onSaved: () => void }) {
       {provider && (
         <div className="space-y-2">
           <label className="block text-xs text-text-secondary">
-            {provider.name} {t('settings.custom.apiKeyLabel')}
+            {provider.name} {t("settings.custom.apiKeyLabel")}
           </label>
           <input
             type="password"
@@ -133,7 +220,9 @@ function QuickAddAI({ onSaved }: { onSaved: () => void }) {
             onChange={(e) => setApiKey(e.target.value)}
             placeholder={provider.placeholder}
             className="w-full rounded border border-border bg-surface-2 px-3 py-2 font-mono text-sm placeholder:text-text-secondary focus:border-chief focus:outline-none focus:ring-2 focus:ring-chief/50"
-            onKeyDown={(e) => { if (e.key === 'Enter' && apiKey.trim()) void handleSave(); }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && apiKey.trim()) void handleSave();
+            }}
           />
           {/* v0.4.30 (audit 000130): explicit note that the
               value lands in the encrypted keychain SQLite and
@@ -141,16 +230,26 @@ function QuickAddAI({ onSaved }: { onSaved: () => void }) {
               same name. Reuses the same string as the tooltip
               next to the secret_name field in the detail
               panel. */}
-          <p className="text-[10px] text-text-secondary">{t('settings.custom.keyNotEnv')}</p>
-          {error && <p role="alert" aria-live="polite" className="text-xs text-status-failed">{error}</p>}
-          {success && <p role="status" aria-live="polite" className="text-xs text-status-done">{t('settings.quickAdd.saved')}</p>}
+          <p className="text-[10px] text-text-secondary">{t("settings.custom.keyNotEnv")}</p>
+          {error && (
+            <p role="alert" aria-live="polite" className="text-xs text-status-failed">
+              {error}
+            </p>
+          )}
+          {success && (
+            <p role="status" aria-live="polite" className="text-xs text-status-done">
+              {t("settings.quickAdd.saved")}
+            </p>
+          )}
           <button
             type="button"
             onClick={handleSave}
             disabled={busy || !apiKey.trim()}
             className="w-full rounded bg-chief px-3 py-2 text-sm font-medium text-black hover:brightness-110 disabled:opacity-50"
           >
-            {busy ? t('settings.action.save') : t('settings.secrets.saveKeyFor', { provider: provider.name })}
+            {busy
+              ? t("settings.action.save")
+              : t("settings.secrets.saveKeyFor", { provider: provider.name })}
           </button>
         </div>
       )}
@@ -163,7 +262,12 @@ function QuickAddAI({ onSaved }: { onSaved: () => void }) {
 interface RuntimeSnapshot {
   providers: ProviderInfo[];
   roles: RoleInfo[];
-  available_models: { provider: string; provider_display: string; model: string; display_name: string }[];
+  available_models: {
+    provider: string;
+    provider_display: string;
+    model: string;
+    display_name: string;
+  }[];
 }
 
 const EMPTY: RuntimeSnapshot = { providers: [], roles: [], available_models: [] };
@@ -187,10 +291,10 @@ const EMPTY: RuntimeSnapshot = { providers: [], roles: [], available_models: [] 
 // placeholder so the user always sees SOMETHING in the dropdown
 // rather than an empty option or a literal "undefined".
 function safeStr(v: unknown): string {
-  if (v === null || v === undefined) return '';
-  if (typeof v === 'string') return v;
-  if (typeof v === 'number' || typeof v === 'boolean') return String(v);
-  return '';
+  if (v === null || v === undefined) return "";
+  if (typeof v === "string") return v;
+  if (typeof v === "number" || typeof v === "boolean") return String(v);
+  return "";
 }
 function normalizeModel(m: AvailableModel): AvailableModel {
   const id = safeStr(m.model);
@@ -202,18 +306,18 @@ function normalizeModel(m: AvailableModel): AvailableModel {
   // upstream just omitted `display_name` / `provider_display`.
   // Prefer the raw id + provider as the human-readable fallback
   // so the user always sees SOMETHING meaningful.
-  const displayName = safeStr(m.display_name) || id || '(unnamed model)';
+  const displayName = safeStr(m.display_name) || id || "(unnamed model)";
   const provider = safeStr(m.provider);
-  const providerDisplay = safeStr(m.provider_display) || provider || id || '(unnamed provider)';
+  const providerDisplay = safeStr(m.provider_display) || provider || id || "(unnamed provider)";
   // thinking_strength comes back as either a free string or an
   // enum ('low'|'medium'|'high'). Anything else is meaningless
   // to the badge, so collapse to ''.
-  const ts = typeof m.thinking_strength === 'string' && m.thinking_strength.length > 0
-    ? m.thinking_strength
-    : undefined;
-  const ctx = typeof m.context_length === 'number' && m.context_length > 0
-    ? m.context_length
-    : null;
+  const ts =
+    typeof m.thinking_strength === "string" && m.thinking_strength.length > 0
+      ? m.thinking_strength
+      : undefined;
+  const ctx =
+    typeof m.context_length === "number" && m.context_length > 0 ? m.context_length : null;
   // v0.4.22 (follow-up): exactOptionalPropertyTypes is on,
   // so we cannot pass `undefined` into a `?: string` slot —
   // build the result via spread, omitting optional keys when
@@ -239,31 +343,31 @@ function normalizeSnapshotModels(s: RuntimeSnapshot): RuntimeSnapshot {
 // `modelShortLabel` share the same canonical mapping and we
 // don't allocate a new object on every render.
 const MODEL_FRIENDLY: Record<string, string> = {
-  'MiniMax-M3': 'MiniMax M3 (reasoning)',
-  'MiniMax-Text-01': 'MiniMax Text-01 (text, recommended)',
-  'MiniMax-VL-01': 'MiniMax VL-01 (vision+text)',
-  'abab-6.5s-chat': 'abab-6.5s (fast)',
-  'abab-7-chat': 'abab-7 (general)',
+  "MiniMax-M3": "MiniMax M3 (reasoning)",
+  "MiniMax-Text-01": "MiniMax Text-01 (text, recommended)",
+  "MiniMax-VL-01": "MiniMax VL-01 (vision+text)",
+  "abab-6.5s-chat": "abab-6.5s (fast)",
+  "abab-7-chat": "abab-7 (general)",
 };
 
 // ROLE_LABELS is module-scope (no React hook access). Use
 // getRoleLabel(t, role) below to look up the localized string.
 const ROLE_KEYS: Record<string, string> = {
-  chief: 'settings.roles.chief',
-  critic_a: 'settings.roles.criticA',
-  critic_b: 'settings.roles.criticB',
-  worker: 'settings.roles.worker',
-  planner: 'settings.roles.planner',
-  reporter: 'settings.roles.reporter',
+  chief: "settings.roles.chief",
+  critic_a: "settings.roles.criticA",
+  critic_b: "settings.roles.criticB",
+  worker: "settings.roles.worker",
+  planner: "settings.roles.planner",
+  reporter: "settings.roles.reporter",
 };
 function getRoleLabel(t: (k: string) => string, role: string): string {
   // v0.4.16: Rust emits "agent:chief" / "agent:critic:a" etc.
   // Strip the "agent:" prefix and normalize the critic separators
   // so ROLE_KEYS (which uses short names) matches.
-  const short = role.startsWith('agent:') ? role.slice('agent:'.length) : role;
-  const normalized = short.replace(/:/g, '_'); // critic:a -> critic_a
+  const short = role.startsWith("agent:") ? role.slice("agent:".length) : role;
+  const normalized = short.replace(/:/g, "_"); // critic:a -> critic_a
   const key = ROLE_KEYS[normalized];
-  return key ? t(key) : (normalized || role);
+  return key ? t(key) : normalized || role;
 }
 
 export interface SettingsProps {
@@ -289,7 +393,7 @@ export function Settings({ open, onClose, workdir }: SettingsProps) {
   // for destructive "Clear local data" — the user must type a
   // specific phrase before the destructive button activates.
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [deletePhrase, setDeletePhrase] = useState('');
+  const [deletePhrase, setDeletePhrase] = useState("");
   const [deleteBusy, setDeleteBusy] = useState(false);
   const customModels = useCustomModels();
   // v0.4.22 (event 000110): per-provider model deletion. Renders
@@ -300,7 +404,9 @@ export function Settings({ open, onClose, workdir }: SettingsProps) {
   // v0.4.30 (audit 000130): which (providerId, modelId) row is
   // currently in inline-edit mode. Only one at a time. Set to
   // null when the editor collapses.
-  const [editingModel, setEditingModel] = useState<{ providerId: string; modelId: string } | null>(null);
+  const [editingModel, setEditingModel] = useState<{ providerId: string; modelId: string } | null>(
+    null,
+  );
 
   // BUG-FRONTEND-RT-6 (event 000038): the destructive "Clear
   // local data" action. The dialog has its own phrase check;
@@ -309,21 +415,21 @@ export function Settings({ open, onClose, workdir }: SettingsProps) {
   // in case the function is ever called from a different code
   // path (e.g. a refactor) that bypasses the dialog.
   const confirmWipe = async () => {
-    if (deletePhrase !== t('settings.about.deletePhrase')) {
-      console.warn('[Settings] wipe blocked: phrase mismatch');
+    if (deletePhrase !== t("settings.about.deletePhrase")) {
+      console.warn("[Settings] wipe blocked: phrase mismatch");
       return;
     }
     setDeleteBusy(true);
     try {
-      await invoke('wipe_all_data');
+      await invoke("wipe_all_data");
       setDeleteDialogOpen(false);
-      setDeletePhrase('');
+      setDeletePhrase("");
       // Reload the page so the React state re-initializes from
       // an empty data dir. The Welcome screen will appear next
       // launch (kv.first_run is null => first run path).
       setTimeout(() => window.location.reload(), 100);
     } catch (e) {
-      alert(t('settings.about.clearDataError', { error: String(e) }));
+      alert(t("settings.about.clearDataError", { error: String(e) }));
     } finally {
       setDeleteBusy(false);
     }
@@ -331,8 +437,8 @@ export function Settings({ open, onClose, workdir }: SettingsProps) {
   // Best-effort: ask the Rust side for the resolved data dir
   // (so the About card can show "Logs are at..."). Falls back to
   // a friendly placeholder if the runtime is offline.
-  const [dataDir, setDataDir] = useState<string>('');
-  const [logDir, setLogDir] = useState<string>('');
+  const [dataDir, setDataDir] = useState<string>("");
+  const [logDir, setLogDir] = useState<string>("");
 
   const refresh = async () => {
     try {
@@ -341,17 +447,13 @@ export function Settings({ open, onClose, workdir }: SettingsProps) {
         listRouterRoles(),
         listRouterModels(),
       ]);
-      console.log('[Settings] refresh:', { prov, roles, models });
+      console.log("[Settings] refresh:", { prov, roles, models });
       if (prov && roles && models) {
         // Merge the user-curated custom models per provider into the
         // model picker so newly-released models (e.g. DeepSeek r2)
         // are selectable without us shipping a preset update.
-        const enabledIds = new Set(
-          prov.providers.filter((p) => p.enabled).map((p) => p.id),
-        );
-        const displayNameById = new Map(
-          prov.providers.map((p) => [p.id, p.display_name]),
-        );
+        const enabledIds = new Set(prov.providers.filter((p) => p.enabled).map((p) => p.id));
+        const displayNameById = new Map(prov.providers.map((p) => [p.id, p.display_name]));
         const userModels: typeof models.models = [];
         for (const pid of enabledIds) {
           for (const m of customModels.getForProvider(pid)) {
@@ -368,19 +470,23 @@ export function Settings({ open, onClose, workdir }: SettingsProps) {
         // fallback catalog for that provider entirely. The user
         // wants their curated list, not a union.
         const userAddedProviders = new Set(userModels.map((m) => m.provider));
-        const merged = models.models.filter(
-          (m) => !userAddedProviders.has(m.provider),
-        );
+        const merged = models.models.filter((m) => !userAddedProviders.has(m.provider));
         for (const um of userModels) {
           if (!merged.some((m) => m.provider === um.provider && m.model === um.model)) {
             merged.push(um);
           }
         }
-        setSnapshot(normalizeSnapshotModels({ providers: prov.providers, roles: roles.roles, available_models: merged }));
+        setSnapshot(
+          normalizeSnapshotModels({
+            providers: prov.providers,
+            roles: roles.roles,
+            available_models: merged,
+          }),
+        );
         setSavedAt(new Date().toLocaleTimeString());
       }
     } catch (e) {
-      console.error('[Settings] refresh failed:', e);
+      console.error("[Settings] refresh failed:", e);
     }
   };
 
@@ -393,7 +499,7 @@ export function Settings({ open, onClose, workdir }: SettingsProps) {
       const r = await getQuotaStatus();
       if (r.ok && r.rows) setQuotaRows(r.rows);
     } catch (e) {
-      console.error('[Settings] refreshQuota failed:', e);
+      console.error("[Settings] refreshQuota failed:", e);
     }
   };
   useEffect(() => {
@@ -422,19 +528,19 @@ export function Settings({ open, onClose, workdir }: SettingsProps) {
     let cancelled = false;
     void (async () => {
       try {
-        const diag = (await invoke('get_diagnostics')) as {
+        const diag = (await invoke("get_diagnostics")) as {
           data_dir?: string | null;
           log_dir?: string | null;
         };
         if (cancelled) return;
-        if (diag.data_dir && diag.data_dir !== '<unknown>') {
+        if (diag.data_dir && diag.data_dir !== "<unknown>") {
           setDataDir(diag.data_dir);
         }
         if (diag.log_dir) {
           setLogDir(diag.log_dir);
         }
       } catch (e) {
-        console.warn('[Settings] get_diagnostics failed:', e);
+        console.warn("[Settings] get_diagnostics failed:", e);
       }
     })();
     return () => {
@@ -452,7 +558,7 @@ export function Settings({ open, onClose, workdir }: SettingsProps) {
       }));
       setSavedAt(new Date().toLocaleTimeString());
     } catch (e) {
-      console.error('[Settings] toggle failed:', e);
+      console.error("[Settings] toggle failed:", e);
       setSnapshot((prev) => ({
         ...prev,
         // Revert the optimistic UI update on failure.
@@ -466,7 +572,9 @@ export function Settings({ open, onClose, workdir }: SettingsProps) {
   const setRoleDefault = async (role: string, model: string) => {
     setSaving(true);
     try {
-      const newRoles = snapshot.roles.map((r) => (r.role === role ? { ...r, default_model: model } : r));
+      const newRoles = snapshot.roles.map((r) =>
+        r.role === role ? { ...r, default_model: model } : r,
+      );
       await updateRouterRoles(newRoles);
       setSnapshot((prev) => ({ ...prev, roles: newRoles }));
       setSavedAt(new Date().toLocaleTimeString());
@@ -481,7 +589,9 @@ export function Settings({ open, onClose, workdir }: SettingsProps) {
   const setRoleFallback = async (role: string, chain: string[]) => {
     setSaving(true);
     try {
-      const newRoles = snapshot.roles.map((r) => (r.role === role ? { ...r, fallback_chain: chain } : r));
+      const newRoles = snapshot.roles.map((r) =>
+        r.role === role ? { ...r, fallback_chain: chain } : r,
+      );
       await updateRouterRoles(newRoles);
       setSnapshot((prev) => ({ ...prev, roles: newRoles }));
       setSavedAt(new Date().toLocaleTimeString());
@@ -495,12 +605,21 @@ export function Settings({ open, onClose, workdir }: SettingsProps) {
   const sel = snapshot.providers.find((p) => p.id === selected);
 
   return (
-    <div className="fixed inset-0 z-50 flex bg-black/60 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label={t('topbar.settings')} onClick={onClose}>
-      <div className="ml-auto flex h-full w-[1100px] max-w-[95vw] flex-col border-l border-border bg-surface-1 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+    <div
+      className="fixed inset-0 z-50 flex bg-black/60 backdrop-blur-sm"
+      role="dialog"
+      aria-modal="true"
+      aria-label={t("topbar.settings")}
+      onClick={onClose}
+    >
+      <div
+        className="ml-auto flex h-full w-[1100px] max-w-[95vw] flex-col border-l border-border bg-surface-1 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
         <header className="flex h-14 shrink-0 items-center justify-between border-b border-border bg-surface-2 px-5">
           <div>
-            <h2 className="text-base font-semibold text-primary">{t('topbar.settings')}</h2>
-            <p className="text-xs text-text-secondary">{t('settings.headerSubtitle')}</p>
+            <h2 className="text-base font-semibold text-primary">{t("topbar.settings")}</h2>
+            <p className="text-xs text-text-secondary">{t("settings.headerSubtitle")}</p>
           </div>
           <div className="flex items-center gap-3">
             {/* BUG-FRONTEND-4 (audit 000026 #54): the previous
@@ -509,398 +628,479 @@ export function Settings({ open, onClose, workdir }: SettingsProps) {
                 a confusing visual. Now they are mutually exclusive
                 via an if/else. */}
             {saving ? (
-              <span className="text-xs text-text-secondary">{t('settings.action.save')}</span>
+              <span className="text-xs text-text-secondary">{t("settings.action.save")}</span>
             ) : savedAt !== null ? (
-              <span className="text-xs text-text-secondary">{t('settings.action.savedAt', {time: savedAt})}</span>
+              <span className="text-xs text-text-secondary">
+                {t("settings.action.savedAt", { time: savedAt })}
+              </span>
             ) : null}
-            <button type="button" onClick={onClose} className="rounded-md border border-border bg-surface-1 px-3 py-1.5 text-xs text-text-secondary hover:text-primary">{t('settings.action.close')}</button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-md border border-border bg-surface-1 px-3 py-1.5 text-xs text-text-secondary hover:text-primary"
+            >
+              {t("settings.action.close")}
+            </button>
           </div>
         </header>
 
         <div className="flex flex-1 overflow-hidden">
           <aside className="w-[380px] shrink-0 overflow-y-auto border-r border-border bg-surface-2 p-3">
             <div className="mb-3 flex flex-col gap-2">
-                <QuickAddAI onSaved={() => void refresh()} />
-                <CustomProviderForm onSaved={() => void refresh()} />
-              </div>
-                <h3 className="mb-2 px-1 text-xs font-semibold uppercase tracking-wide text-text-secondary">
-                  {t('settings.providers.titleWithCount', { count: snapshot.providers.filter((p) => p.has_secret || p.is_local).length })}
-                </h3>
-                <div className="flex flex-col gap-2">
-                  {snapshot.providers
-                    .filter((p) => p.has_secret || p.is_local)
-                    .map((p) => {
-                    const isSel = p.id === selected;
-                    // v0.4.15: was `p.notes.includes` — but Rust
-                    // emits `note` (singular). The old key was
-                    // undefined, so custom-provider rows never
-                    // showed the ✕ delete button.
-                    // v0.4.22 (event 000118, post-fix): coalesce
-                    // `p.note` to '' so a missing field can't
-                    // throw `Cannot read properties of undefined
-                    // (reading 'includes')` and crash the whole
-                    // Settings panel.
-                    const isCustom = (p.note ?? '').includes('Custom relay');
-                    const usable = p.has_secret || p.is_local;
-                    const handleDeleteCustom = async (e: React.MouseEvent) => {
-                      e.stopPropagation();
-                      // v0.4.22 (event 000118, follow-up): `p.display_name`
-                      // is typed as `string` but the runtime can hand
-                      // us `undefined` when the server omits the key.
-                      // i18next's interpolation coerces undefined to
-                      // the string "undefined" — better to substitute
-                      // the id as a stable fallback.
-                      if (!confirm(t('settings.confirm.deleteCustom.title', { name: p.display_name ?? p.id }))) return;
-                      try {
-                        await removeCustomProvider(p.id);
-                        if (selected === p.id) setSelected(null);
-                        refresh();
-                      } catch (err) {
-                        alert(err instanceof Error ? err.message : t('settings.error.deleteCustomFailed'));
-                      }
-                    };
-                    // v0.4.30 (audit 000130): clear the keychain
-                    // entry for ANY provider (preset or custom),
-                    // not just custom providers. The chairman
-                    // wanted to wipe an old polluted key without
-                    // removing the whole provider row.
-                    const handleClearKey = async (e: React.MouseEvent) => {
-                      e.stopPropagation();
-                      if (!confirm(t('settings.confirm.deleteKey.title', { name: p.display_name ?? p.id }))) return;
-                      try {
-                        await deleteSecret(p.secret_name);
-                        refresh();
-                      } catch (err) {
-                        alert(err instanceof Error ? err.message : t('settings.error.deleteKeyFailed'));
-                      }
-                    };
-                    return (
-                      <button key={p.id} type="button" onClick={() => setSelected(p.id)}
-                        className={`flex flex-col items-start gap-1 rounded-md border p-2 text-left transition-colors ${isSel ? 'border-chief bg-surface-1' : 'border-border bg-surface-1 hover:border-text-secondary'} ${!usable ? 'opacity-60' : ''}`}>
-                        <div className="flex w-full items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <span className="font-medium text-sm">{p.display_name}</span>
-                            {p.is_local && <span className="rounded bg-surface-3 px-1.5 py-0.5 text-[10px] text-text-secondary">{t('settings.models.local')}</span>}
-                            {isCustom && <span className="rounded bg-chief/20 px-1.5 py-0.5 text-[10px] text-chief">{t('settings.custom.kindLabel')}</span>}
-                          </div>
-                          <div className="flex items-center gap-1.5">
-                            <Toggle on={p.enabled} onChange={(v) => void toggle(p.id, v)} disabled={!usable} />
-                            {p.has_secret && (
-                              // v0.4.30: wipe the keychain entry
-                              // for this provider (any kind). Custom
-                              // providers keep the ✕ button alongside
-                              // it for removing the whole row.
-                              <button type="button" onClick={handleClearKey}
-                                title={String(t('settings.providers.clearKey'))}
-                                aria-label={String(t('settings.providers.clearKey'))}
-                                className="rounded p-0.5 text-[11px] text-text-secondary hover:bg-status-warn/20 hover:text-status-warn">🗑</button>
-                            )}
-                            {isCustom && (
-                              <button type="button" onClick={handleDeleteCustom} title={String(t('settings.action.deleteCustom'))} className="rounded p-0.5 text-[10px] text-status-failed hover:bg-status-failed/15 hover:text-status-failed">✕</button>
-                            )}
-                          </div>
+              <QuickAddAI onSaved={() => void refresh()} />
+              <CustomProviderForm onSaved={() => void refresh()} />
+            </div>
+            <h3 className="mb-2 px-1 text-xs font-semibold uppercase tracking-wide text-text-secondary">
+              {t("settings.providers.titleWithCount", {
+                count: snapshot.providers.filter((p) => p.has_secret || p.is_local).length,
+              })}
+            </h3>
+            <div className="flex flex-col gap-2">
+              {snapshot.providers
+                .filter((p) => p.has_secret || p.is_local)
+                .map((p) => {
+                  const isSel = p.id === selected;
+                  // v0.4.15: was `p.notes.includes` — but Rust
+                  // emits `note` (singular). The old key was
+                  // undefined, so custom-provider rows never
+                  // showed the ✕ delete button.
+                  // v0.4.22 (event 000118, post-fix): coalesce
+                  // `p.note` to '' so a missing field can't
+                  // throw `Cannot read properties of undefined
+                  // (reading 'includes')` and crash the whole
+                  // Settings panel.
+                  const isCustom = (p.note ?? "").includes("Custom relay");
+                  const usable = p.has_secret || p.is_local;
+                  const handleDeleteCustom = async (e: React.MouseEvent) => {
+                    e.stopPropagation();
+                    // v0.4.22 (event 000118, follow-up): `p.display_name`
+                    // is typed as `string` but the runtime can hand
+                    // us `undefined` when the server omits the key.
+                    // i18next's interpolation coerces undefined to
+                    // the string "undefined" — better to substitute
+                    // the id as a stable fallback.
+                    if (
+                      !confirm(
+                        t("settings.confirm.deleteCustom.title", { name: p.display_name ?? p.id }),
+                      )
+                    )
+                      return;
+                    try {
+                      await removeCustomProvider(p.id);
+                      if (selected === p.id) setSelected(null);
+                      refresh();
+                    } catch (err) {
+                      alert(
+                        err instanceof Error ? err.message : t("settings.error.deleteCustomFailed"),
+                      );
+                    }
+                  };
+                  // v0.4.30 (audit 000130): clear the keychain
+                  // entry for ANY provider (preset or custom),
+                  // not just custom providers. The chairman
+                  // wanted to wipe an old polluted key without
+                  // removing the whole provider row.
+                  const handleClearKey = async (e: React.MouseEvent) => {
+                    e.stopPropagation();
+                    if (
+                      !confirm(
+                        t("settings.confirm.deleteKey.title", { name: p.display_name ?? p.id }),
+                      )
+                    )
+                      return;
+                    try {
+                      await deleteSecret(p.secret_name);
+                      refresh();
+                    } catch (err) {
+                      alert(
+                        err instanceof Error ? err.message : t("settings.error.deleteKeyFailed"),
+                      );
+                    }
+                  };
+                  return (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => setSelected(p.id)}
+                      className={`flex flex-col items-start gap-1 rounded-md border p-2 text-left transition-colors ${isSel ? "border-chief bg-surface-1" : "border-border bg-surface-1 hover:border-text-secondary"} ${!usable ? "opacity-60" : ""}`}
+                    >
+                      <div className="flex w-full items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium text-sm">{p.display_name}</span>
+                          {p.is_local && (
+                            <span className="rounded bg-surface-3 px-1.5 py-0.5 text-[10px] text-text-secondary">
+                              {t("settings.models.local")}
+                            </span>
+                          )}
+                          {isCustom && (
+                            <span className="rounded bg-chief/20 px-1.5 py-0.5 text-[10px] text-chief">
+                              {t("settings.custom.kindLabel")}
+                            </span>
+                          )}
                         </div>
-                        {/* v0.4.15: server emits default_model and a
+                        <div className="flex items-center gap-1.5">
+                          <Toggle
+                            on={p.enabled}
+                            onChange={(v) => void toggle(p.id, v)}
+                            disabled={!usable}
+                          />
+                          {p.has_secret && (
+                            // v0.4.30: wipe the keychain entry
+                            // for this provider (any kind). Custom
+                            // providers keep the ✕ button alongside
+                            // it for removing the whole row.
+                            <button
+                              type="button"
+                              onClick={handleClearKey}
+                              title={String(t("settings.providers.clearKey"))}
+                              aria-label={String(t("settings.providers.clearKey"))}
+                              className="rounded p-0.5 text-[11px] text-text-secondary hover:bg-status-warn/20 hover:text-status-warn"
+                            >
+                              🗑
+                            </button>
+                          )}
+                          {isCustom && (
+                            <button
+                              type="button"
+                              onClick={handleDeleteCustom}
+                              title={String(t("settings.action.deleteCustom"))}
+                              className="rounded p-0.5 text-[10px] text-status-failed hover:bg-status-failed/15 hover:text-status-failed"
+                            >
+                              ✕
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      {/* v0.4.15: server emits default_model and a
                             hardcoded empty models array; we surface the
                             default model name (and the env var it reads)
                             so the row isn't empty. The "↻ discover"
                             button lives in the detail panel to keep this
                             row compact. */}
-                        <div className="text-[11px] text-text-secondary">
-                          {t('settings.quickAdd.modelCount', {count: p.models.length})}
+                      <div className="text-[11px] text-text-secondary">
+                        {t("settings.quickAdd.modelCount", { count: p.models.length })}
+                      </div>
+                      <KeyBadge present={p.has_secret} />
+                      {!p.has_secret && (
+                        <div className="text-[10px] text-chief">
+                          {t("settings.quickAdd.addKeyHint")}
                         </div>
-                        <KeyBadge present={p.has_secret} />
-                        {!p.has_secret && (
-                          <div className="text-[10px] text-chief">{t('settings.quickAdd.addKeyHint')}</div>
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
-              </aside>
+                      )}
+                    </button>
+                  );
+                })}
+            </div>
+          </aside>
 
-              <main className="flex-1 overflow-y-auto p-5">
-                {sel && (
-                  <Card className="mb-4">
-                    <h3 className="mb-1 text-sm font-semibold">{sel.display_name}</h3>
-                    <p className="mb-3 text-xs text-text-secondary">{sel.note}</p>
-                    <div className="grid grid-cols-2 gap-3 text-xs">
-                      <Field label={t('settings.custom.kindLabel')}>{sel.api_kind}</Field>
-                      <Field label={t('settings.custom.baseUrlLabel')}><code className="font-mono">{sel.base_url}</code></Field>
-                      {/* v0.4.30 (audit 000130): the secret_name
+          <main className="flex-1 overflow-y-auto p-5">
+            {sel && (
+              <Card className="mb-4">
+                <h3 className="mb-1 text-sm font-semibold">{sel.display_name}</h3>
+                <p className="mb-3 text-xs text-text-secondary">{sel.note}</p>
+                <div className="grid grid-cols-2 gap-3 text-xs">
+                  <Field label={t("settings.custom.kindLabel")}>{sel.api_kind}</Field>
+                  <Field label={t("settings.custom.baseUrlLabel")}>
+                    <code className="font-mono">{sel.base_url}</code>
+                  </Field>
+                  {/* v0.4.30 (audit 000130): the secret_name
                           shown here lives in the internal
                           `flowntier/<id>` namespace — it cannot
                           collide with a shell env var. The
                           tooltip reinforces that explicitly. */}
-                      <Field
-                        label={
-                          <span className="inline-flex items-center gap-1">
-                            {t('settings.custom.apiKeyLabel')}
-                            <span title={String(t('settings.custom.keyNotEnv'))} className="cursor-help text-[10px] text-text-secondary">ⓘ</span>
-                          </span>
-                        }
-                      ><code className="font-mono">{sel.secret_name}</code></Field>
-                      <Field label={t('settings.field.keyConfigured')}>
-                        {sel.has_secret ? (
-                          <span className="text-status-done">{t('settings.field.keyYes')}</span>
-                        ) : (
-                          <span className="text-status-warn">
-                            {t('settings.field.keyNo', { env: sel.secret_name })}
-                          </span>
-                        )}
-                      </Field>
-                    </div>
-                    {sel.models.length > 0 && (
-                      <div className="mt-3">
-                        <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-text-secondary">{t('settings.models.available')}</h4>
-                        <ul className="grid grid-cols-2 gap-1 text-xs">
-                          {sel.models
-                            .filter((m) => !disabledModels.isDisabled(sel.id, m.id))
-                            .map((m) => {
-                              const isEditing =
-                                editingModel?.providerId === sel.id && editingModel?.modelId === m.id;
-                              return (
-                                <Fragment key={m.id}>
-                                  <li className="flex items-center justify-between rounded bg-surface-2 px-2 py-1 font-mono">
-                                    <span className="truncate">
-                                      {m.display_name} <span className="ml-1 text-text-secondary">({m.id})</span>
-                                    </span>
-                                    <div className="flex items-center gap-0.5">
-                                      {/* v0.4.30: ✎ edits the per-model
+                  <Field
+                    label={
+                      <span className="inline-flex items-center gap-1">
+                        {t("settings.custom.apiKeyLabel")}
+                        <span
+                          title={String(t("settings.custom.keyNotEnv"))}
+                          className="cursor-help text-[10px] text-text-secondary"
+                        >
+                          ⓘ
+                        </span>
+                      </span>
+                    }
+                  >
+                    <code className="font-mono">{sel.secret_name}</code>
+                  </Field>
+                  <Field label={t("settings.field.keyConfigured")}>
+                    {sel.has_secret ? (
+                      <span className="text-status-done">{t("settings.field.keyYes")}</span>
+                    ) : (
+                      <span className="text-status-warn">
+                        {t("settings.field.keyNo", { env: sel.secret_name })}
+                      </span>
+                    )}
+                  </Field>
+                </div>
+                {sel.models.length > 0 && (
+                  <div className="mt-3">
+                    <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-text-secondary">
+                      {t("settings.models.available")}
+                    </h4>
+                    <ul className="grid grid-cols-2 gap-1 text-xs">
+                      {sel.models
+                        .filter((m) => !disabledModels.isDisabled(sel.id, m.id))
+                        .map((m) => {
+                          const isEditing =
+                            editingModel?.providerId === sel.id && editingModel?.modelId === m.id;
+                          return (
+                            <Fragment key={m.id}>
+                              <li className="flex items-center justify-between rounded bg-surface-2 px-2 py-1 font-mono">
+                                <span className="truncate">
+                                  {m.display_name}{" "}
+                                  <span className="ml-1 text-text-secondary">({m.id})</span>
+                                </span>
+                                <div className="flex items-center gap-0.5">
+                                  {/* v0.4.30: ✎ edits the per-model
                                           metadata (context_length +
                                           thinking_strength). Sends a
                                           PUT to the runtime override
                                           table. */}
-                                      <button
-                                        type="button"
-                                        aria-label={t('settings.models.editRow', { name: m.display_name ?? m.id })}
-                                        title={String(t('settings.models.editRow', { name: m.display_name ?? m.id }))}
-                                        onClick={() => setEditingModel(
-                                          isEditing ? null : { providerId: sel.id, modelId: m.id },
-                                        )}
-                                        className="ml-1 rounded px-1 text-text-secondary hover:bg-primary/15 hover:text-primary"
-                                      >
-                                        ✎
-                                      </button>
-                                      <button
-                                        type="button"
-                                        aria-label={t('settings.models.deleteAria', { name: m.display_name ?? m.id })}
-                                        title={t('settings.models.deleteTitle', { defaultValue: '从列表中隐藏（可恢复）' })}
-                                        disabled={disabledModels.busy}
-                                        onClick={() => disabledModels.disable(sel.id, m.id)}
-                                        className="rounded px-1 text-text-secondary hover:bg-status-fail/20 hover:text-status-fail"
-                                      >
-                                        ×
-                                      </button>
-                                    </div>
-                                  </li>
-                                  {isEditing && (
-                                    <ModelOverrideEditor
-                                      providerId={sel.id}
-                                      model={m}
-                                      onClose={() => setEditingModel(null)}
-                                      onSaved={() => { setEditingModel(null); refresh(); }}
-                                    />
-                                  )}
-                                </Fragment>
-                              );
-                            })}
-                        </ul>
-                      </div>
-                    )}
-
-                    <ProviderModelManager
-                      providerId={sel.id}
-                      providerDisplay={sel.display_name}
-                      customModels={customModels.getForProvider(sel.id)}
-                      onAdd={(models) => customModels.addMany(sel.id, models)}
-                      onRemove={(modelId) => customModels.remove(sel.id, modelId)}
-                      onClear={() => customModels.clear(sel.id)}
-                    />
-                  </Card>
+                                  <button
+                                    type="button"
+                                    aria-label={t("settings.models.editRow", {
+                                      name: m.display_name ?? m.id,
+                                    })}
+                                    title={String(
+                                      t("settings.models.editRow", {
+                                        name: m.display_name ?? m.id,
+                                      }),
+                                    )}
+                                    onClick={() =>
+                                      setEditingModel(
+                                        isEditing ? null : { providerId: sel.id, modelId: m.id },
+                                      )
+                                    }
+                                    className="ml-1 rounded px-1 text-text-secondary hover:bg-primary/15 hover:text-primary"
+                                  >
+                                    ✎
+                                  </button>
+                                  <button
+                                    type="button"
+                                    aria-label={t("settings.models.deleteAria", {
+                                      name: m.display_name ?? m.id,
+                                    })}
+                                    title={t("settings.models.deleteTitle", {
+                                      defaultValue: "从列表中隐藏（可恢复）",
+                                    })}
+                                    disabled={disabledModels.busy}
+                                    onClick={() => disabledModels.disable(sel.id, m.id)}
+                                    className="rounded px-1 text-text-secondary hover:bg-status-fail/20 hover:text-status-fail"
+                                  >
+                                    ×
+                                  </button>
+                                </div>
+                              </li>
+                              {isEditing && (
+                                <ModelOverrideEditor
+                                  providerId={sel.id}
+                                  model={m}
+                                  onClose={() => setEditingModel(null)}
+                                  onSaved={() => {
+                                    setEditingModel(null);
+                                    refresh();
+                                  }}
+                                />
+                              )}
+                            </Fragment>
+                          );
+                        })}
+                    </ul>
+                  </div>
                 )}
 
-                <Card className="mt-4">
-                  <h3 className="mb-1 text-sm font-semibold">{t('settings.about.title')}</h3>
-                  <p className="mb-3 text-xs text-text-secondary">
-                    {t('settings.about.version', {
-                      version: appVersion,
-                      build: buildSha ? ' (' + buildSha + ')' : ''
-                    })}
+                <ProviderModelManager
+                  providerId={sel.id}
+                  providerDisplay={sel.display_name}
+                  customModels={customModels.getForProvider(sel.id)}
+                  onAdd={(models) => customModels.addMany(sel.id, models)}
+                  onRemove={(modelId) => customModels.remove(sel.id, modelId)}
+                  onClear={() => customModels.clear(sel.id)}
+                />
+              </Card>
+            )}
+
+            <Card className="mt-4">
+              <h3 className="mb-1 text-sm font-semibold">{t("settings.about.title")}</h3>
+              <p className="mb-3 text-xs text-text-secondary">
+                {t("settings.about.version", {
+                  version: appVersion,
+                  build: buildSha ? " (" + buildSha + ")" : "",
+                })}
+              </p>
+              <p className="mb-2 text-xs text-text-secondary">{dataDir}</p>
+              {logDir && (
+                <>
+                  <p className="mb-1 break-all text-[10px] text-text-secondary">
+                    {t("settings.about.logDir")}: {logDir}
                   </p>
-                  <p className="mb-2 text-xs text-text-secondary">
-                    {dataDir}
+                  <p className="mb-3 text-[10px] text-text-tertiary">
+                    {t("settings.about.logDirHint")}
                   </p>
-                  {logDir && (
-                    <>
-                      <p className="mb-1 break-all text-[10px] text-text-secondary">
-                        {t('settings.about.logDir')}: {logDir}
-                      </p>
-                      <p className="mb-3 text-[10px] text-text-tertiary">
-                        {t('settings.about.logDirHint')}
-                      </p>
-                    </>
-                  )}
-                  {/* BUG-018 fix (event 000024): Settings → About
+                </>
+              )}
+              {/* BUG-018 fix (event 000024): Settings → About
                       now exposes a "Change workdir" button that
                       calls `set_workdir_with_nwt` (atomic) with a
                       new path. Previously this code path didn't
                       exist; users who picked a workdir on first
                       launch were stuck with it. */}
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      // Use the Tauri dialog plugin to pick a
-                      // directory. Falls back to a manual text
-                      // prompt if the plugin is unavailable.
-                      let newPath: string | null = null;
-                      try {
-                        const { open } = await import('@tauri-apps/plugin-dialog');
-                        newPath = await open({ directory: true, multiple: false });
-                      } catch (e) {
-                        console.warn('[Settings] dialog plugin unavailable:', e);
-                      }
-                      if (!newPath) {
-                        const input = window.prompt(t('settings.about.changeWorkdirPrompt'));
-                        if (!input) return;
-                        newPath = input.trim();
-                      }
-                      if (!newPath) return;
-                      try {
-                        await invoke('set_workdir_with_nwt', { path: newPath });
-                        // Reload to re-fetch workdir state in App.tsx.
-                        setTimeout(() => window.location.reload(), 100);
-                      } catch (e) {
-                        alert(t('settings.about.changeWorkdirError', { error: String(e) }));
-                      }
-                    }}
-                    className="mb-2 rounded-md border border-border bg-surface-2 px-3 py-2 text-xs text-text-primary hover:bg-surface-3"
-                  >
-                    {t('settings.about.changeWorkdir')}
-                  </button>
-                  {workdir && (
-                    <p className="mb-3 break-all text-[10px] text-text-secondary">
-                      {t('settings.about.currentWorkdir')}: {workdir}
-                    </p>
-                  )}
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      // BUG-FRONTEND-RT-6 (event 000038): a
-                      // second confirmation is now required —
-                      // the user has to type a specific phrase
-                      // ("DELETE" in en-US / "删除" in zh-CN)
-                      // to prevent accidental data loss. The
-                      // destructive button stays disabled until
-                      // the input matches.
-                      setDeletePhrase('');
-                      setDeleteDialogOpen(true);
-                    }}
-                    className="rounded-md border border-status-failed/40 bg-status-failed/10 px-3 py-2 text-xs text-status-failed hover:bg-status-failed/20"
-                  >
-                    {t('settings.about.clearData')}
-                  </button>
-                </Card>
-                <SearchBugPanel />
-                <QuotaStatusBlock rows={quotaRows} onReset={refreshQuota} />
+              <button
+                type="button"
+                onClick={async () => {
+                  // Use the Tauri dialog plugin to pick a
+                  // directory. Falls back to a manual text
+                  // prompt if the plugin is unavailable.
+                  let newPath: string | null = null;
+                  try {
+                    const { open } = await import("@tauri-apps/plugin-dialog");
+                    newPath = await open({ directory: true, multiple: false });
+                  } catch (e) {
+                    console.warn("[Settings] dialog plugin unavailable:", e);
+                  }
+                  if (!newPath) {
+                    const input = window.prompt(t("settings.about.changeWorkdirPrompt"));
+                    if (!input) return;
+                    newPath = input.trim();
+                  }
+                  if (!newPath) return;
+                  try {
+                    await invoke("set_workdir_with_nwt", { path: newPath });
+                    // Reload to re-fetch workdir state in App.tsx.
+                    setTimeout(() => window.location.reload(), 100);
+                  } catch (e) {
+                    alert(t("settings.about.changeWorkdirError", { error: String(e) }));
+                  }
+                }}
+                className="mb-2 rounded-md border border-border bg-surface-2 px-3 py-2 text-xs text-text-primary hover:bg-surface-3"
+              >
+                {t("settings.about.changeWorkdir")}
+              </button>
+              {workdir && (
+                <p className="mb-3 break-all text-[10px] text-text-secondary">
+                  {t("settings.about.currentWorkdir")}: {workdir}
+                </p>
+              )}
+              <button
+                type="button"
+                onClick={async () => {
+                  // BUG-FRONTEND-RT-6 (event 000038): a
+                  // second confirmation is now required —
+                  // the user has to type a specific phrase
+                  // ("DELETE" in en-US / "删除" in zh-CN)
+                  // to prevent accidental data loss. The
+                  // destructive button stays disabled until
+                  // the input matches.
+                  setDeletePhrase("");
+                  setDeleteDialogOpen(true);
+                }}
+                className="rounded-md border border-status-failed/40 bg-status-failed/10 px-3 py-2 text-xs text-status-failed hover:bg-status-failed/20"
+              >
+                {t("settings.about.clearData")}
+              </button>
+            </Card>
+            <SearchBugPanel />
+            <QuotaStatusBlock rows={quotaRows} onReset={refreshQuota} />
 
-                {/* v0.4.12 (event 000048): RoleAssignmentCard moved
+            {/* v0.4.12 (event 000048): RoleAssignmentCard moved
                     here (was above the About card). Keeps the
                     "Search bug" UI immediately above the role
                     assignments, since both are read-mostly
                     diagnostic / configuration views. */}
-                <h3 className="mb-2 mt-4 px-1 text-xs font-semibold uppercase tracking-wide text-text-secondary">{t('settings.roles.title')}</h3>
-                <p className="mb-2 px-1 text-[10px] text-text-secondary">
+            <h3 className="mb-2 mt-4 px-1 text-xs font-semibold uppercase tracking-wide text-text-secondary">
+              {t("settings.roles.title")}
+            </h3>
+            <p className="mb-2 px-1 text-[10px] text-text-secondary"></p>
+            <div className="flex flex-col gap-2">
+              {snapshot.roles.map((r) => (
+                <RoleAssignmentCard
+                  key={r.role}
+                  role={r}
+                  // v0.4.24 (event 000119): the backend
+                  // /v1/models endpoint sometimes returns rows
+                  // with empty `model` / `provider` / both
+                  // `display_name` AND `provider_display`. Those
+                  // rendered as "(unnamed provider) · (unnamed
+                  // model)" in the dropdown — visually noise that
+                  // the user can't act on. Filter them out so the
+                  // selector only shows entries the user can
+                  // actually pick.
+                  availableModels={snapshot.available_models.filter((m) => {
+                    const id = safeStr(m.model);
+                    const prov = safeStr(m.provider) || safeStr(m.provider_display);
+                    return id.length > 0 && prov.length > 0;
+                  })}
+                  saving={saving}
+                  onDefaultChange={(model) => void setRoleDefault(r.role, model)}
+                  onFallbackChange={(chain) => void setRoleFallback(r.role, chain)}
+                />
+              ))}
+            </div>
+          </main>
 
-                </p>
-                <div className="flex flex-col gap-2">
-                  {snapshot.roles.map((r) => (
-                    <RoleAssignmentCard
-                      key={r.role}
-                      role={r}
-                      // v0.4.24 (event 000119): the backend
-                      // /v1/models endpoint sometimes returns rows
-                      // with empty `model` / `provider` / both
-                      // `display_name` AND `provider_display`. Those
-                      // rendered as "(unnamed provider) · (unnamed
-                      // model)" in the dropdown — visually noise that
-                      // the user can't act on. Filter them out so the
-                      // selector only shows entries the user can
-                      // actually pick.
-                      availableModels={snapshot.available_models.filter((m) => {
-                        const id = safeStr(m.model);
-                        const prov = safeStr(m.provider) || safeStr(m.provider_display);
-                        return id.length > 0 && prov.length > 0;
-                      })}
-                      saving={saving}
-                      onDefaultChange={(model) => void setRoleDefault(r.role, model)}
-                      onFallbackChange={(chain) => void setRoleFallback(r.role, chain)}
-                    />
-                  ))}
-                </div>
-              </main>
-
-      {/* BUG-FRONTEND-RT-6 (event 000038): double-confirmation
+          {/* BUG-FRONTEND-RT-6 (event 000038): double-confirmation
           modal for destructive "Clear local data". The user must
           type the specific phrase (`DELETE` in en-US, `删除` in
           zh-CN) to activate the destructive button. Prevents
           accidental data loss from a stray click. The phrase is
           localized via `settings.about.deletePhrase`. */}
-      {deleteDialogOpen && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="delete-dialog-title"
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setDeleteDialogOpen(false);
-          }}
-        >
-          <div className="w-[420px] max-w-[90vw] rounded-lg border border-status-failed/40 bg-surface-1 p-5 shadow-xl">
-            <h2 id="delete-dialog-title" className="text-base font-semibold text-status-failed">
-              {t('settings.about.clearData')}
-            </h2>
-            <p className="mt-2 text-xs text-text-secondary">
-              {t('settings.about.clearDataConfirmBody')}
-            </p>
-            <p className="mt-3 text-xs text-text-secondary">
-              {t('settings.about.deletePhraseHint', { phrase: t('settings.about.deletePhrase') })}
-            </p>
-            <input
-              type="text"
-              value={deletePhrase}
-              onChange={(e) => setDeletePhrase(e.target.value)}
-              placeholder={t('settings.about.deletePhrase')}
-              autoFocus
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && deletePhrase === t('settings.about.deletePhrase')) {
-                  confirmWipe();
-                } else if (e.key === 'Escape') {
-                  setDeleteDialogOpen(false);
-                }
+          {deleteDialogOpen && (
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="delete-dialog-title"
+              className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm"
+              onClick={(e) => {
+                if (e.target === e.currentTarget) setDeleteDialogOpen(false);
               }}
-              className="mt-2 w-full rounded border border-border bg-surface-2 px-2 py-1.5 font-mono text-sm focus:border-status-failed focus:outline-none"
-            />
-            <div className="mt-4 flex items-center justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setDeleteDialogOpen(false)}
-                className="rounded-md border border-border bg-surface-2 px-3 py-1.5 text-xs text-text-secondary hover:text-primary"
-              >
-                {t('settings.action.close')}
-              </button>
-              <button
-                type="button"
-                disabled={deleteBusy || deletePhrase !== t('settings.about.deletePhrase')}
-                onClick={confirmWipe}
-                className="rounded-md border border-status-failed/40 bg-status-failed px-3 py-1.5 text-xs font-medium text-white hover:bg-status-failed/90 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                {deleteBusy ? t('settings.action.save') : t('settings.about.clearData')}
-              </button>
+            >
+              <div className="w-[420px] max-w-[90vw] rounded-lg border border-status-failed/40 bg-surface-1 p-5 shadow-xl">
+                <h2 id="delete-dialog-title" className="text-base font-semibold text-status-failed">
+                  {t("settings.about.clearData")}
+                </h2>
+                <p className="mt-2 text-xs text-text-secondary">
+                  {t("settings.about.clearDataConfirmBody")}
+                </p>
+                <p className="mt-3 text-xs text-text-secondary">
+                  {t("settings.about.deletePhraseHint", {
+                    phrase: t("settings.about.deletePhrase"),
+                  })}
+                </p>
+                <input
+                  type="text"
+                  value={deletePhrase}
+                  onChange={(e) => setDeletePhrase(e.target.value)}
+                  placeholder={t("settings.about.deletePhrase")}
+                  autoFocus
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && deletePhrase === t("settings.about.deletePhrase")) {
+                      confirmWipe();
+                    } else if (e.key === "Escape") {
+                      setDeleteDialogOpen(false);
+                    }
+                  }}
+                  className="mt-2 w-full rounded border border-border bg-surface-2 px-2 py-1.5 font-mono text-sm focus:border-status-failed focus:outline-none"
+                />
+                <div className="mt-4 flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setDeleteDialogOpen(false)}
+                    className="rounded-md border border-border bg-surface-2 px-3 py-1.5 text-xs text-text-secondary hover:text-primary"
+                  >
+                    {t("settings.action.close")}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={deleteBusy || deletePhrase !== t("settings.about.deletePhrase")}
+                    onClick={confirmWipe}
+                    className="rounded-md border border-status-failed/40 bg-status-failed px-3 py-1.5 text-xs font-medium text-white hover:bg-status-failed/90 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    {deleteBusy ? t("settings.action.save") : t("settings.about.clearData")}
+                  </button>
+                </div>
+              </div>
             </div>
-          </div>
-        </div>
-      )}
+          )}
         </div>
       </div>
     </div>
@@ -916,22 +1116,44 @@ function Field({ label, children }: { label: React.ReactNode; children: React.Re
   );
 }
 
-function Toggle({ on, onChange, disabled }: { on: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
+function Toggle({
+  on,
+  onChange,
+  disabled,
+}: {
+  on: boolean;
+  onChange: (v: boolean) => void;
+  disabled?: boolean;
+}) {
   const { t } = useTranslation();
   return (
-    <button type="button" onClick={(e) => { e.stopPropagation(); onChange(!on); }} disabled={disabled}
-      className={`relative h-5 w-9 rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-chief/50 ${on ? 'bg-chief' : 'bg-surface-3'} ${disabled ? 'opacity-40 cursor-not-allowed' : ''}`}
-      aria-pressed={on} aria-label={t('settings.providers.enabled')}>
-      <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all ${on ? 'left-4' : 'left-0.5'}`} />
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        onChange(!on);
+      }}
+      disabled={disabled}
+      className={`relative h-5 w-9 rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-chief/50 ${on ? "bg-chief" : "bg-surface-3"} ${disabled ? "opacity-40 cursor-not-allowed" : ""}`}
+      aria-pressed={on}
+      aria-label={t("settings.providers.enabled")}
+    >
+      <span
+        className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all ${on ? "left-4" : "left-0.5"}`}
+      />
     </button>
   );
 }
 
 function KeyBadge({ present }: { present: boolean }) {
   return present ? (
-    <span className="rounded bg-status-done/20 px-1.5 py-0.5 text-[10px] text-status-done">Key ✓</span>
+    <span className="rounded bg-status-done/20 px-1.5 py-0.5 text-[10px] text-status-done">
+      Key ✓
+    </span>
   ) : (
-    <span className="rounded bg-status-warn/20 px-1.5 py-0.5 text-[10px] text-status-warn">Key ✗</span>
+    <span className="rounded bg-status-warn/20 px-1.5 py-0.5 text-[10px] text-status-warn">
+      Key ✗
+    </span>
   );
 }
 
@@ -959,13 +1181,13 @@ interface AvailableModel {
 // never reach `${…}` and render as `null`.
 function modelBadge(m: AvailableModel): string {
   const parts: string[] = [];
-  if (typeof m.thinking_strength === 'string' && m.thinking_strength.length > 0) {
+  if (typeof m.thinking_strength === "string" && m.thinking_strength.length > 0) {
     parts.push(`[think: ${m.thinking_strength}]`);
   }
-  if (typeof m.context_length === 'number' && m.context_length > 0) {
+  if (typeof m.context_length === "number" && m.context_length > 0) {
     parts.push(`[${Math.round(m.context_length / 1000)}k]`);
   }
-  return parts.length > 0 ? '· ' + parts.join(' ') : '';
+  return parts.length > 0 ? "· " + parts.join(" ") : "";
 }
 
 // v0.4.22 (event 000118): the live /v1/models path stores
@@ -992,31 +1214,33 @@ function modelOptionLabel(m: AvailableModel): string {
   // missing value to '' so the helper can never throw on a
   // malformed row.
   const id = safeStr(m.model);
-  const displayName = safeStr(m.display_name) || id || '(unnamed model)';
-  const provider = safeStr(m.provider_display) || safeStr(m.provider) || id || '(unnamed provider)';
+  const displayName = safeStr(m.display_name) || id || "(unnamed model)";
+  const provider = safeStr(m.provider_display) || safeStr(m.provider) || id || "(unnamed provider)";
   // If display_name was just the id (live path), swap in the
   // friendly label. Otherwise keep the curated display_name.
   const isUnannotated = !m.display_name || displayName === id;
-  const name = (isUnannotated && id && MODEL_FRIENDLY[id]) || displayName || id || '(unnamed model)';
+  const name =
+    (isUnannotated && id && MODEL_FRIENDLY[id]) || displayName || id || "(unnamed model)";
   // Hide the model id tail if display_name already contains it.
-  const idTail = id && name.includes(id) ? '' : (id ? `  ┄ ${id}` : '');
+  const idTail = id && name.includes(id) ? "" : id ? `  ┄ ${id}` : "";
   const badge = modelBadge(m);
-  return `${provider} · ${name}${idTail}${badge ? '  ' + badge : ''}`;
+  return `${provider} · ${name}${idTail}${badge ? "  " + badge : ""}`;
 }
 
 // Companion to `modelOptionLabel` for compact surfaces (selected
 // chain entries, tooltips). Strips the id tail and metadata badge.
 function modelShortLabel(m: AvailableModel): string {
   const id = safeStr(m.model);
-  const displayName = safeStr(m.display_name) || id || '(unnamed model)';
-  const provider = safeStr(m.provider_display) || safeStr(m.provider) || id || '(unnamed provider)';
+  const displayName = safeStr(m.display_name) || id || "(unnamed model)";
+  const provider = safeStr(m.provider_display) || safeStr(m.provider) || id || "(unnamed provider)";
   const isUnannotated = !m.display_name || displayName === id;
-  const name = (isUnannotated && id && MODEL_FRIENDLY[id]) || displayName || id || '(unnamed model)';
+  const name =
+    (isUnannotated && id && MODEL_FRIENDLY[id]) || displayName || id || "(unnamed model)";
   return `${provider} · ${name}`;
 }
 
 interface RoleAssignmentCardProps {
-  role: import('../lib/api.js').RoleInfo;
+  role: import("../lib/api.js").RoleInfo;
   availableModels: AvailableModel[];
   saving: boolean;
   onDefaultChange: (model: string) => void;
@@ -1077,7 +1301,9 @@ function RoleAssignmentCard({
           <div className="font-mono text-[10px] text-text-secondary">{role.role}</div>
         </div>
         <div className="flex-1">
-          <div className="mb-1 text-[10px] uppercase tracking-wide text-text-secondary">{t('settings.models.default')}</div>
+          <div className="mb-1 text-[10px] uppercase tracking-wide text-text-secondary">
+            {t("settings.models.default")}
+          </div>
           <select
             value={role.default_model}
             onChange={(e) => onDefaultChange(e.target.value)}
@@ -1085,7 +1311,7 @@ function RoleAssignmentCard({
             className="w-full rounded-md border border-border bg-surface-1 px-2 py-1.5 text-xs focus:border-chief focus:outline-none disabled:opacity-50"
           >
             {availableModels.length === 0 ? (
-              <option value={role.default_model}>{t('settings.models.emptyOption')}</option>
+              <option value={role.default_model}>{t("settings.models.emptyOption")}</option>
             ) : (
               availableModels.map((m) => {
                 const ref = `${m.provider}:${m.model}`;
@@ -1103,7 +1329,7 @@ function RoleAssignmentCard({
       <div className="mt-3 border-t border-border pt-3">
         <div className="mb-1 flex items-center justify-between">
           <div className="text-[10px] uppercase tracking-wide text-text-secondary">
-            {t('settings.models.fallbackChain', {count: role.fallback_chain.length})}
+            {t("settings.models.fallbackChain", { count: role.fallback_chain.length })}
           </div>
           {addable.length > 0 && (
             <select
@@ -1131,7 +1357,9 @@ function RoleAssignmentCard({
         </div>
 
         {role.fallback_chain.length === 0 ? (
-          <div className="text-[11px] text-text-secondary">{t('settings.models.emptyFallback')}</div>
+          <div className="text-[11px] text-text-secondary">
+            {t("settings.models.emptyFallback")}
+          </div>
         ) : (
           <ol className="space-y-1">
             {role.fallback_chain.map((ref, idx) => {
@@ -1153,7 +1381,7 @@ function RoleAssignmentCard({
                     onClick={() => move(idx, -1)}
                     disabled={idx === 0 || saving}
                     className="rounded px-1.5 py-0.5 text-[10px] text-text-secondary hover:bg-surface-2 hover:text-primary disabled:opacity-30"
-                    aria-label={t('settings.action.moveUp')}
+                    aria-label={t("settings.action.moveUp")}
                   >
                     ↑
                   </button>
@@ -1162,7 +1390,7 @@ function RoleAssignmentCard({
                     onClick={() => move(idx, 1)}
                     disabled={idx === role.fallback_chain.length - 1 || saving}
                     className="rounded px-1.5 py-0.5 text-[10px] text-text-secondary hover:bg-surface-2 hover:text-primary disabled:opacity-30"
-                    aria-label={t('settings.action.moveDown')}
+                    aria-label={t("settings.action.moveDown")}
                   >
                     ↓
                   </button>
@@ -1171,7 +1399,7 @@ function RoleAssignmentCard({
                     onClick={() => removeAt(idx)}
                     disabled={saving}
                     className="rounded px-1.5 py-0.5 text-[10px] text-text-secondary hover:bg-status-failed/20 hover:text-status-failed disabled:opacity-30"
-                    aria-label={t('settings.action.delete')}
+                    aria-label={t("settings.action.delete")}
                   >
                     ×
                   </button>
@@ -1226,12 +1454,12 @@ function ProviderModelManager({
   // register models they actually use without depending on the
   // provider's /v1/models endpoint (which keeps changing).
   const [manualOpen, setManualOpen] = useState(false);
-  const [manualId, setManualId] = useState('');
-  const [manualDisplay, setManualDisplay] = useState('');
+  const [manualId, setManualId] = useState("");
+  const [manualDisplay, setManualDisplay] = useState("");
   // v0.4.22 (fix 4): '' = 未设置. Defaulted to '' so the
   // chairman isn't forced to pick a thinking strength on every
   // model entry.
-  const [manualThinking, setManualThinking] = useState<'' | 'low' | 'medium' | 'high'>('');
+  const [manualThinking, setManualThinking] = useState<"" | "low" | "medium" | "high">("");
   // context_length is nullable; '' = not specified.
   const [manualContext, setManualContext] = useState<number | null>(null);
   const [manualErr, setManualErr] = useState<string | null>(null);
@@ -1239,14 +1467,17 @@ function ProviderModelManager({
   const submitManual = () => {
     setManualErr(null);
     const idTrim = manualId.trim();
-    if (!idTrim) { setManualErr(t('settings.error.invalidId')); return; }
+    if (!idTrim) {
+      setManualErr(t("settings.error.invalidId"));
+      return;
+    }
     if (!/^[a-zA-Z0-9._:-]+$/.test(idTrim)) {
-      setManualErr(t('settings.error.invalidId'));
+      setManualErr(t("settings.error.invalidId"));
       return;
     }
     const display = manualDisplay.trim() || idTrim;
     if (customModels.some((m) => m.id === idTrim)) {
-      setManualErr(t('settings.models.modelExists', { id: idTrim }));
+      setManualErr(t("settings.models.modelExists", { id: idTrim }));
       return;
     }
     // v0.4.22 (fix 4): context_length is now optional. null
@@ -1255,7 +1486,7 @@ function ProviderModelManager({
     let ctx: number | null = null;
     if (manualContext !== null) {
       if (!Number.isFinite(manualContext) || manualContext < 1 || manualContext > 2_000_000) {
-        setManualErr(t('settings.models.invalidContextLength'));
+        setManualErr(t("settings.models.invalidContextLength"));
         return;
       }
       ctx = manualContext;
@@ -1270,9 +1501,9 @@ function ProviderModelManager({
     if (manualThinking) row.thinking_strength = manualThinking;
     onAdd([row]);
     // Reset form for next entry.
-    setManualId('');
-    setManualDisplay('');
-    setManualThinking('');
+    setManualId("");
+    setManualDisplay("");
+    setManualThinking("");
     setManualContext(null);
     setManualOpen(false);
   };
@@ -1289,10 +1520,10 @@ function ProviderModelManager({
         // v0.4.17: backend now ALWAYS returns ok:true/false with
         // an explicit error message. Show the real message; fall
         // back to the i18n string only as a defensive last resort.
-        const backendErr = res.error ?? t('settings.models.pullError');
-        const detail = res.url ? ` (${res.url})` : '';
+        const backendErr = res.error ?? t("settings.models.pullError");
+        const detail = res.url ? ` (${res.url})` : "";
         setError(`${backendErr}${detail}`);
-        console.warn('[Flowntier] pull models failed', res);
+        console.warn("[Flowntier] pull models failed", res);
       } else {
         setFetched(res.models);
       }
@@ -1326,7 +1557,7 @@ function ProviderModelManager({
     <div className="mt-3 rounded-md border border-border bg-surface-2 p-3">
       <div className="mb-2 flex items-center justify-between">
         <h4 className="text-xs font-semibold uppercase tracking-wide text-text-secondary">
-          {t('settings.models.customModels', {count: customModels.length})}
+          {t("settings.models.customModels", { count: customModels.length })}
         </h4>
         <div className="flex items-center gap-1">
           <button
@@ -1334,7 +1565,7 @@ function ProviderModelManager({
             onClick={() => setManualOpen((v) => !v)}
             className="rounded-md border border-border bg-surface-1 px-2 py-0.5 text-[11px] text-text-secondary hover:border-chief hover:text-chief"
           >
-            ➕ {t('settings.models.manualAdd.title')}
+            ➕ {t("settings.models.manualAdd.title")}
           </button>
           <button
             type="button"
@@ -1342,17 +1573,17 @@ function ProviderModelManager({
             disabled={busy}
             className="rounded-md border border-chief/40 bg-chief/10 px-2 py-0.5 text-[11px] text-chief hover:bg-chief/20 disabled:opacity-50"
           >
-            {busy ? t('settings.action.save') : '🔄 ' + t('settings.providers.discoverModels')}
+            {busy ? t("settings.action.save") : "🔄 " + t("settings.providers.discoverModels")}
           </button>
         </div>
       </div>
 
       {manualOpen && (
         <div className="mb-2 rounded border border-border bg-surface-1 p-2 text-xs">
-          <div className="mb-1 font-medium">{t('settings.models.manualAdd.title')}</div>
+          <div className="mb-1 font-medium">{t("settings.models.manualAdd.title")}</div>
           <div className="grid grid-cols-2 gap-2">
             <label className="flex flex-col gap-0.5">
-              <span className="text-text-secondary">{t('settings.models.manualAdd.id')}</span>
+              <span className="text-text-secondary">{t("settings.models.manualAdd.id")}</span>
               <input
                 type="text"
                 value={manualId}
@@ -1362,33 +1593,39 @@ function ProviderModelManager({
               />
             </label>
             <label className="flex flex-col gap-0.5">
-              <span className="text-text-secondary">{t('settings.models.manualAdd.displayName')}</span>
+              <span className="text-text-secondary">
+                {t("settings.models.manualAdd.displayName")}
+              </span>
               <input
                 type="text"
                 value={manualDisplay}
                 onChange={(e) => setManualDisplay(e.target.value)}
-                placeholder={manualId || 'MiniMax M3'}
+                placeholder={manualId || "MiniMax M3"}
                 className="rounded border border-border bg-surface-0 px-1.5 py-0.5 text-[11px]"
               />
             </label>
             <label className="flex flex-col gap-0.5">
-              <span className="text-text-secondary">{t('settings.models.manualAdd.thinking')}</span>
+              <span className="text-text-secondary">{t("settings.models.manualAdd.thinking")}</span>
               <select
                 value={manualThinking}
-                onChange={(e) => setManualThinking(e.target.value as '' | 'low' | 'medium' | 'high')}
+                onChange={(e) =>
+                  setManualThinking(e.target.value as "" | "low" | "medium" | "high")
+                }
                 className="rounded border border-border bg-surface-0 px-1.5 py-0.5 text-[11px]"
               >
                 {/* v0.4.22 (fix 4): empty value = "未设置".
                     The chairman asked us to stop forcing a
                     thinking strength on every model entry. */}
-                <option value="">{t('settings.models.thinking.default', { defaultValue: '未设置' })}</option>
+                <option value="">
+                  {t("settings.models.thinking.default", { defaultValue: "未设置" })}
+                </option>
                 <option value="low">low</option>
                 <option value="medium">medium</option>
                 <option value="high">high</option>
               </select>
             </label>
             <label className="flex flex-col gap-0.5">
-              <span className="text-text-secondary">{t('settings.models.manualAdd.context')}</span>
+              <span className="text-text-secondary">{t("settings.models.manualAdd.context")}</span>
               <input
                 type="number"
                 min={1}
@@ -1396,35 +1633,43 @@ function ProviderModelManager({
                 // v0.4.22 (fix 4): empty string when unset so
                 // the input doesn't show "0" by default and
                 // the user can leave the field blank.
-                value={manualContext ?? ''}
+                value={manualContext ?? ""}
                 onChange={(e) => {
                   const v = e.target.value;
-                  if (v === '') { setManualContext(null); return; }
+                  if (v === "") {
+                    setManualContext(null);
+                    return;
+                  }
                   const n = Number(v);
                   setManualContext(Number.isFinite(n) ? n : null);
                 }}
-                placeholder={t('settings.models.contextPlaceholder')}
+                placeholder={t("settings.models.contextPlaceholder")}
                 className="rounded border border-border bg-surface-0 px-1.5 py-0.5 text-[11px]"
               />
             </label>
           </div>
           {manualErr && (
-            <p role="alert" className="mt-1 text-[11px] text-status-failed">{manualErr}</p>
+            <p role="alert" className="mt-1 text-[11px] text-status-failed">
+              {manualErr}
+            </p>
           )}
           <div className="mt-2 flex items-center justify-end gap-2">
             <button
               type="button"
-              onClick={() => { setManualOpen(false); setManualErr(null); }}
+              onClick={() => {
+                setManualOpen(false);
+                setManualErr(null);
+              }}
               className="rounded px-2 py-0.5 text-[11px] text-text-secondary hover:text-primary"
             >
-              {t('settings.action.cancel')}
+              {t("settings.action.cancel")}
             </button>
             <button
               type="button"
               onClick={submitManual}
               className="rounded bg-chief px-2 py-0.5 text-[11px] text-white hover:bg-chief/90"
             >
-              {t('settings.models.manualAdd.submit')}
+              {t("settings.models.manualAdd.submit")}
             </button>
           </div>
         </div>
@@ -1432,7 +1677,7 @@ function ProviderModelManager({
 
       {customModels.length === 0 ? (
         <div className="text-[11px] text-text-secondary">
-          {t('settings.models.emptyCustomModels', {provider: providerDisplay})}
+          {t("settings.models.emptyCustomModels", { provider: providerDisplay })}
         </div>
       ) : (
         <ul className="grid grid-cols-2 gap-1 text-xs">
@@ -1441,12 +1686,14 @@ function ProviderModelManager({
               key={m.id}
               className="flex items-center gap-1 rounded bg-surface-1 px-2 py-1 font-mono"
             >
-              <span className="flex-1 truncate" title={m.id}>{m.display_name}</span>
+              <span className="flex-1 truncate" title={m.id}>
+                {m.display_name}
+              </span>
               <button
                 type="button"
                 onClick={() => onRemove(m.id)}
                 className="text-[10px] text-text-secondary hover:text-status-failed"
-                aria-label={t('settings.action.remove')}
+                aria-label={t("settings.action.remove")}
               >
                 ×
               </button>
@@ -1461,7 +1708,7 @@ function ProviderModelManager({
           onClick={onClear}
           className="mt-2 text-[10px] text-text-secondary hover:text-status-failed"
         >
-          {t('settings.models.clearAll')}
+          {t("settings.models.clearAll")}
         </button>
       )}
 
@@ -1476,14 +1723,14 @@ function ProviderModelManager({
           >
             <header className="flex items-center justify-between border-b border-border px-4 py-3">
               <h3 className="text-sm font-semibold">
-                {t('settings.models.pullTitle', {provider: providerDisplay})}
+                {t("settings.models.pullTitle", { provider: providerDisplay })}
               </h3>
               <button
                 type="button"
                 onClick={() => setOpen(false)}
                 disabled={busy}
                 className="text-text-secondary hover:text-primary disabled:opacity-30"
-                aria-label={t('settings.action.close')}
+                aria-label={t("settings.action.close")}
               >
                 ×
               </button>
@@ -1492,18 +1739,24 @@ function ProviderModelManager({
             <div className="flex-1 overflow-y-auto p-4">
               {busy ? (
                 <div className="flex items-center justify-center py-8 text-sm text-text-secondary">
-                  {t('settings.models.callingApi', {provider: providerDisplay})}
+                  {t("settings.models.callingApi", { provider: providerDisplay })}
                 </div>
               ) : error ? (
-                <div role="alert" aria-live="polite" className="rounded border border-status-failed/40 bg-status-failed/10 p-3 text-xs text-status-failed">
+                <div
+                  role="alert"
+                  aria-live="polite"
+                  className="rounded border border-status-failed/40 bg-status-failed/10 p-3 text-xs text-status-failed"
+                >
                   {error}
                 </div>
               ) : fetched.length === 0 ? (
-                <div className="py-4 text-sm text-text-secondary">{t('settings.models.noModels')}</div>
+                <div className="py-4 text-sm text-text-secondary">
+                  {t("settings.models.noModels")}
+                </div>
               ) : (
                 <>
                   <div className="mb-2 text-[11px] text-text-secondary">
-                    {t('settings.models.foundCount', {count: fetched.length})}
+                    {t("settings.models.foundCount", { count: fetched.length })}
                   </div>
                   <div className="mb-3 flex items-center gap-2">
                     <button
@@ -1511,7 +1764,7 @@ function ProviderModelManager({
                       onClick={() => setPicked(new Set(fetched.map((m) => m.id)))}
                       className="text-[11px] text-chief hover:underline"
                     >
-                      {t('settings.models.all')}
+                      {t("settings.models.all")}
                     </button>
                     <span className="text-text-secondary">·</span>
                     <button
@@ -1519,10 +1772,10 @@ function ProviderModelManager({
                       onClick={() => setPicked(new Set())}
                       className="text-[11px] text-text-secondary hover:underline"
                     >
-                      {t('settings.models.none')}
+                      {t("settings.models.none")}
                     </button>
                     <span className="ml-auto text-[11px] text-text-secondary">
-                      {t('settings.models.selectedCount', {count: picked.size})}
+                      {t("settings.models.selectedCount", { count: picked.size })}
                     </span>
                   </div>
                   <ul className="grid grid-cols-2 gap-1 text-xs">
@@ -1533,7 +1786,7 @@ function ProviderModelManager({
                         <li
                           key={m.id}
                           className={`flex items-center gap-2 rounded border px-2 py-1 font-mono ${
-                            picked_ ? 'border-chief bg-chief/10' : 'border-border bg-surface-2'
+                            picked_ ? "border-chief bg-chief/10" : "border-border bg-surface-2"
                           }`}
                         >
                           <input
@@ -1545,7 +1798,11 @@ function ProviderModelManager({
                           <div className="min-w-0 flex-1">
                             <div className="truncate text-primary" title={m.id}>
                               {m.display_name}
-                              {have && <span className="ml-1 text-[10px] text-status-done">{t('settings.models.alreadyAdded')}</span>}
+                              {have && (
+                                <span className="ml-1 text-[10px] text-status-done">
+                                  {t("settings.models.alreadyAdded")}
+                                </span>
+                              )}
                             </div>
                             <div className="truncate text-[10px] text-text-secondary" title={m.id}>
                               {m.id}
@@ -1574,7 +1831,7 @@ function ProviderModelManager({
                 disabled={busy || picked.size === 0}
                 className="rounded-md bg-chief px-3 py-1.5 text-xs font-medium text-white hover:bg-chief/90 disabled:opacity-30"
               >
-                {t('settings.models.addSelected', {count: picked.size})}
+                {t("settings.models.addSelected", { count: picked.size })}
               </button>
             </footer>
           </div>
@@ -1585,7 +1842,6 @@ function ProviderModelManager({
 }
 
 // ── Custom Provider (relay station) ─────────────────────────────
-
 
 // BUG-FRONTEND-RT-12 (event 000041): each model registered with
 // a custom provider now carries an optional context_length
@@ -1599,7 +1855,7 @@ function ProviderModelManager({
 // runtime falls back to provider defaults when they're
 // missing. We now accept an empty string and only persist the
 // key when the user picked an actual value.
-type ThinkingStrength = '' | 'low' | 'medium' | 'high';
+type ThinkingStrength = "" | "low" | "medium" | "high";
 interface ModelRow {
   id: string;
   display_name: string;
@@ -1609,18 +1865,18 @@ interface ModelRow {
   thinking_strength: ThinkingStrength;
 }
 const THINKING_OPTIONS: { value: ThinkingStrength; labelKey: string }[] = [
-  { value: '',      labelKey: 'settings.models.thinking.default' },
-  { value: 'low',    labelKey: 'settings.models.thinking.low' },
-  { value: 'medium', labelKey: 'settings.models.thinking.medium' },
-  { value: 'high',   labelKey: 'settings.models.thinking.high' },
+  { value: "", labelKey: "settings.models.thinking.default" },
+  { value: "low", labelKey: "settings.models.thinking.low" },
+  { value: "medium", labelKey: "settings.models.thinking.medium" },
+  { value: "high", labelKey: "settings.models.thinking.high" },
 ];
 
 function CustomProviderForm({ onSaved }: { onSaved: () => void }) {
   const { t } = useTranslation();
   const KIND_OPTIONS = [
-    { value: 'anthropic', label: t('settings.custom.kind.anthropic') },
-    { value: 'openai', label: t('settings.custom.kind.openai') },
-    { value: 'openai_compat', label: 'OpenAI 兼容 (AI SDK)' },
+    { value: "anthropic", label: t("settings.custom.kind.anthropic") },
+    { value: "openai", label: t("settings.custom.kind.openai") },
+    { value: "openai_compat", label: "OpenAI 兼容 (AI SDK)" },
   ] as const;
   // BUG-FRONTEND-RT-12 (event 000041): each model now carries
   // its own `context_length` (free-text int) + `thinking_strength`
@@ -1628,20 +1884,20 @@ function CustomProviderForm({ onSaved }: { onSaved: () => void }) {
   // per-model values (e.g. 200k context + high thinking for the
   // flagship MiniMax-M3, 8k + low for a cheap fast model).
   const [open, setOpen] = useState(false);
-  const [id, setId] = useState('');
-  const [displayName, setDisplayName] = useState('');
-  const [kind, setKind] = useState<'anthropic' | 'openai' | 'openai_compat'>('openai');
-  const [baseUrl, setBaseUrl] = useState('');
-  const [apiKey, setApiKey] = useState('');
+  const [id, setId] = useState("");
+  const [displayName, setDisplayName] = useState("");
+  const [kind, setKind] = useState<"anthropic" | "openai" | "openai_compat">("openai");
+  const [baseUrl, setBaseUrl] = useState("");
+  const [apiKey, setApiKey] = useState("");
   const [models, setModels] = useState<ModelRow[]>([]);
-  const [newModelId, setNewModelId] = useState('');
-  const [newModelName, setNewModelName] = useState('');
-  const [newModelContext, setNewModelContext] = useState('');
+  const [newModelId, setNewModelId] = useState("");
+  const [newModelName, setNewModelName] = useState("");
+  const [newModelContext, setNewModelContext] = useState("");
   // v0.4.22 (fix 4): default to '' ("未设置") so the user can
   // skip both fields entirely and let the runtime pick the
   // provider default. The previous default of 'medium' was
   // indistinguishable from a deliberate choice in the dropdown.
-  const [newModelThinking, setNewModelThinking] = useState<ThinkingStrength>('');
+  const [newModelThinking, setNewModelThinking] = useState<ThinkingStrength>("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
@@ -1652,19 +1908,30 @@ function CustomProviderForm({ onSaved }: { onSaved: () => void }) {
   const [editingModelId, setEditingModelId] = useState<string | null>(null);
 
   const reset = () => {
-    setId(''); setDisplayName(''); setKind('openai'); setBaseUrl('');
-    setApiKey(''); setModels([]); setNewModelId(''); setNewModelName('');
+    setId("");
+    setDisplayName("");
+    setKind("openai");
+    setBaseUrl("");
+    setApiKey("");
+    setModels([]);
+    setNewModelId("");
+    setNewModelName("");
     // v0.4.22 (fix 4): reset back to the empty / unset default
     // so the chairman's next entry is also "未设置", not the
     // previously-defaulted medium.
-    setNewModelContext(''); setNewModelThinking('');
-    setError(null); setSuccess(false);
+    setNewModelContext("");
+    setNewModelThinking("");
+    setError(null);
+    setSuccess(false);
   };
 
   const addModelRow = () => {
     const mid = newModelId.trim();
     if (!mid) return;
-    if (models.some((m) => m.id === mid)) { setError(t('settings.models.modelExists', { id: mid })); return; }
+    if (models.some((m) => m.id === mid)) {
+      setError(t("settings.models.modelExists", { id: mid }));
+      return;
+    }
     // BUG-FRONTEND-RT-12: validate the free-text context length.
     // Accept empty (= use provider default) or a positive int.
     // Cap at 10M to keep the JSON reasonable.
@@ -1673,7 +1940,7 @@ function CustomProviderForm({ onSaved }: { onSaved: () => void }) {
     if (ctxRaw.length > 0) {
       const n = Number(ctxRaw);
       if (!Number.isFinite(n) || n <= 0 || n > 10_000_000) {
-        setError(t('settings.models.invalidContextLength'));
+        setError(t("settings.models.invalidContextLength"));
         return;
       }
       ctx = Math.floor(n);
@@ -1690,8 +1957,10 @@ function CustomProviderForm({ onSaved }: { onSaved: () => void }) {
     // v0.4.22 (fix 4): after adding the row, reset thinking
     // back to '' so consecutive adds don't carry over a stale
     // value. newModelContext is already reset below.
-    setNewModelId(''); setNewModelName(''); setNewModelContext('');
-    setNewModelThinking('');
+    setNewModelId("");
+    setNewModelName("");
+    setNewModelContext("");
+    setNewModelThinking("");
     setError(null);
   };
 
@@ -1700,15 +1969,34 @@ function CustomProviderForm({ onSaved }: { onSaved: () => void }) {
   const handleSubmit = async () => {
     // Validate
     const idTrim = id.trim().toLowerCase();
-    if (!/^[a-z0-9_]+$/.test(idTrim)) { setError(t('settings.error.invalidId')); return; }
-    if (!displayName.trim()) { setError(t('settings.quickAdd.errorMissingName')); return; }
-    if (!baseUrl.trim() || !(baseUrl.startsWith('http://') || baseUrl.startsWith('https://'))) {
-      setError(t('settings.error.invalidBaseUrl')); return;
+    if (!/^[a-z0-9_]+$/.test(idTrim)) {
+      setError(t("settings.error.invalidId"));
+      return;
     }
-    if (!apiKey.trim()) { setError(t('settings.error.missingApiKey')); return; }
-    if (models.length === 0) { setError(t('settings.quickAdd.errorMissingKey').replace('Please enter an API key', 'Please add at least one model')); return; }
+    if (!displayName.trim()) {
+      setError(t("settings.quickAdd.errorMissingName"));
+      return;
+    }
+    if (!baseUrl.trim() || !(baseUrl.startsWith("http://") || baseUrl.startsWith("https://"))) {
+      setError(t("settings.error.invalidBaseUrl"));
+      return;
+    }
+    if (!apiKey.trim()) {
+      setError(t("settings.error.missingApiKey"));
+      return;
+    }
+    if (models.length === 0) {
+      setError(
+        t("settings.quickAdd.errorMissingKey").replace(
+          "Please enter an API key",
+          "Please add at least one model",
+        ),
+      );
+      return;
+    }
 
-    setBusy(true); setError(null);
+    setBusy(true);
+    setError(null);
     try {
       // 1. Save API key to keychain. v0.4.30 (audit 000130): use
       // the `flowntier/custom/<id>` internal namespace so the
@@ -1718,7 +2006,7 @@ function CustomProviderForm({ onSaved }: { onSaved: () => void }) {
       const envVarName = `flowntier/custom/${idTrim.toLowerCase()}`;
       const saveResult = await saveSecret(envVarName, apiKey.trim());
       if (!saveResult || !saveResult.saved) {
-        setError(t('settings.error.saveFailed'));
+        setError(t("settings.error.saveFailed"));
         setBusy(false);
         return;
       }
@@ -1729,7 +2017,12 @@ function CustomProviderForm({ onSaved }: { onSaved: () => void }) {
       // default. context_length is already nullable, so we
       // just pass through.
       const modelsPayload = models.map((m) => {
-        const base: { id: string; display_name: string; context_length: number | null; thinking_strength?: 'low' | 'medium' | 'high' } = {
+        const base: {
+          id: string;
+          display_name: string;
+          context_length: number | null;
+          thinking_strength?: "low" | "medium" | "high";
+        } = {
           id: m.id,
           display_name: m.display_name,
           context_length: m.context_length,
@@ -1741,16 +2034,19 @@ function CustomProviderForm({ onSaved }: { onSaved: () => void }) {
         id: idTrim,
         display_name: displayName.trim(),
         kind,
-        base_url: baseUrl.trim().replace(/\/+$/, ''),
+        base_url: baseUrl.trim().replace(/\/+$/, ""),
         api_key_env: envVarName,
         models: modelsPayload,
       });
 
       setSuccess(true);
       onSaved();
-      setTimeout(() => { setOpen(false); reset(); }, 1200);
+      setTimeout(() => {
+        setOpen(false);
+        reset();
+      }, 1200);
     } catch (e) {
-      setError(e instanceof Error ? e.message : t('settings.error.saveFailed'));
+      setError(e instanceof Error ? e.message : t("settings.error.saveFailed"));
     } finally {
       setBusy(false);
     }
@@ -1764,7 +2060,7 @@ function CustomProviderForm({ onSaved }: { onSaved: () => void }) {
         className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-text-secondary/30 bg-surface-1 px-4 py-2.5 text-sm text-text-secondary transition-colors hover:border-chief/40 hover:text-chief"
       >
         <span className="text-lg">＋</span>
-        {t('settings.error.customAdd')}
+        {t("settings.error.customAdd")}
       </button>
     );
   }
@@ -1772,46 +2068,86 @@ function CustomProviderForm({ onSaved }: { onSaved: () => void }) {
   return (
     <div className="rounded-lg border border-border bg-surface-1 p-4">
       <div className="mb-3 flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-primary">{t('settings.customProvider.title')}</h3>
-        <button type="button" onClick={() => { setOpen(false); reset(); }} className="text-xs text-text-secondary hover:text-primary">{t('settings.action.cancel')}</button>
+        <h3 className="text-sm font-semibold text-primary">{t("settings.customProvider.title")}</h3>
+        <button
+          type="button"
+          onClick={() => {
+            setOpen(false);
+            reset();
+          }}
+          className="text-xs text-text-secondary hover:text-primary"
+        >
+          {t("settings.action.cancel")}
+        </button>
       </div>
 
       <div className="flex flex-col gap-2.5 text-xs">
         {/* ID */}
         <label className="flex flex-col gap-1">
-          <span className="text-text-secondary">ID <span className="text-[10px]">(英文+数字+下划线)</span></span>
-          <input value={id} onChange={(e) => setId(e.target.value)} placeholder={t('settings.custom.idPlaceholder')} className="rounded border border-border bg-surface-2 px-2 py-1.5 text-primary outline-none focus:border-chief" />
+          <span className="text-text-secondary">
+            ID <span className="text-[10px]">(英文+数字+下划线)</span>
+          </span>
+          <input
+            value={id}
+            onChange={(e) => setId(e.target.value)}
+            placeholder={t("settings.custom.idPlaceholder")}
+            className="rounded border border-border bg-surface-2 px-2 py-1.5 text-primary outline-none focus:border-chief"
+          />
         </label>
 
         {/* Display Name */}
         <label className="flex flex-col gap-1">
-          <span className="text-text-secondary">{t('settings.custom.nameLabel')}</span>
-          <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder={t('settings.custom.namePlaceholder')} className="rounded border border-border bg-surface-2 px-2 py-1.5 text-primary outline-none focus:border-chief" />
+          <span className="text-text-secondary">{t("settings.custom.nameLabel")}</span>
+          <input
+            value={displayName}
+            onChange={(e) => setDisplayName(e.target.value)}
+            placeholder={t("settings.custom.namePlaceholder")}
+            className="rounded border border-border bg-surface-2 px-2 py-1.5 text-primary outline-none focus:border-chief"
+          />
         </label>
 
         {/* Protocol */}
         <label className="flex flex-col gap-1">
-          <span className="text-text-secondary">{t('settings.custom.kindLabel')}</span>
-          <select value={kind} onChange={(e) => setKind(e.target.value as typeof kind)} className="rounded border border-border bg-surface-2 px-2 py-1.5 text-primary outline-none focus:border-chief">
-            {KIND_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          <span className="text-text-secondary">{t("settings.custom.kindLabel")}</span>
+          <select
+            value={kind}
+            onChange={(e) => setKind(e.target.value as typeof kind)}
+            className="rounded border border-border bg-surface-2 px-2 py-1.5 text-primary outline-none focus:border-chief"
+          >
+            {KIND_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
           </select>
         </label>
 
         {/* Base URL */}
         <label className="flex flex-col gap-1">
           <span className="text-text-secondary">Base URL</span>
-          <input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder={t('settings.custom.baseUrlPlaceholder')} className="rounded border border-border bg-surface-2 px-2 py-1.5 text-primary outline-none focus:border-chief" />
+          <input
+            value={baseUrl}
+            onChange={(e) => setBaseUrl(e.target.value)}
+            placeholder={t("settings.custom.baseUrlPlaceholder")}
+            className="rounded border border-border bg-surface-2 px-2 py-1.5 text-primary outline-none focus:border-chief"
+          />
         </label>
 
         {/* API Key label (i18n) */}
         <label className="flex flex-col gap-1">
-          <span className="text-text-secondary">{t('settings.custom.apiKeyLabel')}</span>
-          <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder={t('settings.custom.apiKeyPlaceholder')} className="rounded border border-border bg-surface-2 px-2 py-1.5 text-primary outline-none focus:border-chief" />
+          <span className="text-text-secondary">{t("settings.custom.apiKeyLabel")}</span>
+          <input
+            type="password"
+            value={apiKey}
+            onChange={(e) => setApiKey(e.target.value)}
+            placeholder={t("settings.custom.apiKeyPlaceholder")}
+            className="rounded border border-border bg-surface-2 px-2 py-1.5 text-primary outline-none focus:border-chief"
+          />
         </label>
 
         {/* Models */}
         <div className="flex flex-col gap-1">
-          <span className="text-text-secondary">{t('settings.models.list')}</span>
+          <span className="text-text-secondary">{t("settings.models.list")}</span>
           {models.length > 0 && (
             <ul className="flex flex-col gap-1">
               {models.map((m) => {
@@ -1820,12 +2156,13 @@ function CustomProviderForm({ onSaved }: { onSaved: () => void }) {
                   <Fragment key={m.id}>
                     <li className="flex items-center gap-2 rounded bg-surface-2 px-2 py-1 text-[11px]">
                       <span className="min-w-0 flex-1 truncate text-primary" title={m.id}>
-                        {m.display_name} <span className="text-[10px] text-text-secondary">({m.id})</span>
+                        {m.display_name}{" "}
+                        <span className="text-[10px] text-text-secondary">({m.id})</span>
                       </span>
                       <span className="shrink-0 text-[10px] text-text-secondary">
                         {m.context_length
-                          ? `${m.context_length.toLocaleString()} ${t('settings.models.tokens')}`
-                          : t('settings.models.defaultContext')}
+                          ? `${m.context_length.toLocaleString()} ${t("settings.models.tokens")}`
+                          : t("settings.models.defaultContext")}
                       </span>
                       <span className="shrink-0 rounded bg-surface-3 px-1.5 py-0.5 text-[10px] text-text-primary">
                         {t(`settings.models.thinking.${m.thinking_strength}`)}
@@ -1835,48 +2172,82 @@ function CustomProviderForm({ onSaved }: { onSaved: () => void }) {
                       <button
                         type="button"
                         onClick={() => setEditingModelId(isEditing ? null : m.id)}
-                        title={String(t('settings.models.editRow', { name: m.display_name }))}
+                        title={String(t("settings.models.editRow", { name: m.display_name }))}
                         className="shrink-0 text-[10px] text-text-secondary hover:text-primary"
-                      >✎</button>
-                      <button type="button" onClick={() => removeModelRow(m.id)} className="shrink-0 text-[10px] text-status-failed hover:text-status-failed">✕</button>
+                      >
+                        ✎
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => removeModelRow(m.id)}
+                        className="shrink-0 text-[10px] text-status-failed hover:text-status-failed"
+                      >
+                        ✕
+                      </button>
                     </li>
                     {isEditing && (
                       <li className="flex flex-wrap items-center gap-1.5 rounded border border-border bg-surface-1 px-2 py-1.5 text-[11px]">
                         <input
                           value={m.display_name}
-                          onChange={(e) => setModels(models.map((row) =>
-                            row.id === m.id ? { ...row, display_name: e.target.value } : row,
-                          ))}
-                          placeholder={String(t('settings.models.displayNamePlaceholder'))}
+                          onChange={(e) =>
+                            setModels(
+                              models.map((row) =>
+                                row.id === m.id ? { ...row, display_name: e.target.value } : row,
+                              ),
+                            )
+                          }
+                          placeholder={String(t("settings.models.displayNamePlaceholder"))}
                           className="min-w-[120px] flex-1 rounded border border-border bg-surface-2 px-2 py-1 text-primary outline-none focus:border-chief"
                         />
                         <input
                           type="number"
                           min={0}
-                          value={m.context_length != null ? String(m.context_length) : ''}
-                          onChange={(e) => setModels(models.map((row) =>
-                            row.id === m.id
-                              ? { ...row, context_length: e.target.value.trim() === '' ? null : Number(e.target.value) }
-                              : row,
-                          ))}
-                          placeholder={String(t('settings.models.contextLengthPlaceholder'))}
+                          value={m.context_length != null ? String(m.context_length) : ""}
+                          onChange={(e) =>
+                            setModels(
+                              models.map((row) =>
+                                row.id === m.id
+                                  ? {
+                                      ...row,
+                                      context_length:
+                                        e.target.value.trim() === ""
+                                          ? null
+                                          : Number(e.target.value),
+                                    }
+                                  : row,
+                              ),
+                            )
+                          }
+                          placeholder={String(t("settings.models.contextLengthPlaceholder"))}
                           className="w-[110px] rounded border border-border bg-surface-2 px-2 py-1 font-mono outline-none focus:border-chief"
                         />
                         <select
                           value={m.thinking_strength}
-                          onChange={(e) => setModels(models.map((row) =>
-                            row.id === m.id ? { ...row, thinking_strength: e.target.value as ThinkingStrength } : row,
-                          ))}
+                          onChange={(e) =>
+                            setModels(
+                              models.map((row) =>
+                                row.id === m.id
+                                  ? {
+                                      ...row,
+                                      thinking_strength: e.target.value as ThinkingStrength,
+                                    }
+                                  : row,
+                              ),
+                            )
+                          }
                           className="rounded border border-border bg-surface-2 px-2 py-1 outline-none focus:border-chief"
                         >
-                          <option value="">{t('settings.models.thinkingUnset')}</option>
-                          <option value="low">{t('settings.models.thinking.low')}</option>
-                          <option value="medium">{t('settings.models.thinking.medium')}</option>
-                          <option value="high">{t('settings.models.thinking.high')}</option>
+                          <option value="">{t("settings.models.thinkingUnset")}</option>
+                          <option value="low">{t("settings.models.thinking.low")}</option>
+                          <option value="medium">{t("settings.models.thinking.medium")}</option>
+                          <option value="high">{t("settings.models.thinking.high")}</option>
                         </select>
-                        <button type="button" onClick={() => setEditingModelId(null)}
-                          className="shrink-0 rounded bg-primary px-2 py-1 text-[10px] text-white hover:bg-primary/90">
-                          {t('settings.models.saveOverride')}
+                        <button
+                          type="button"
+                          onClick={() => setEditingModelId(null)}
+                          className="shrink-0 rounded bg-primary px-2 py-1 text-[10px] text-white hover:bg-primary/90"
+                        >
+                          {t("settings.models.saveOverride")}
                         </button>
                       </li>
                     )}
@@ -1889,12 +2260,22 @@ function CustomProviderForm({ onSaved }: { onSaved: () => void }) {
               name + context length (free text) + thinking strength
               (dropdown). All four on one row to save space. */}
           <div className="flex flex-wrap items-center gap-1.5">
-            <input value={newModelId} onChange={(e) => setNewModelId(e.target.value)} placeholder={t('settings.models.newModelId')} className="flex-1 min-w-[80px] rounded border border-border bg-surface-2 px-2 py-1 text-primary outline-none focus:border-chief" />
-            <input value={newModelName} onChange={(e) => setNewModelName(e.target.value)} placeholder={t('settings.models.newModelName')} className="flex-1 min-w-[80px] rounded border border-border bg-surface-2 px-2 py-1 text-primary outline-none focus:border-chief" />
+            <input
+              value={newModelId}
+              onChange={(e) => setNewModelId(e.target.value)}
+              placeholder={t("settings.models.newModelId")}
+              className="flex-1 min-w-[80px] rounded border border-border bg-surface-2 px-2 py-1 text-primary outline-none focus:border-chief"
+            />
+            <input
+              value={newModelName}
+              onChange={(e) => setNewModelName(e.target.value)}
+              placeholder={t("settings.models.newModelName")}
+              className="flex-1 min-w-[80px] rounded border border-border bg-surface-2 px-2 py-1 text-primary outline-none focus:border-chief"
+            />
             <input
               value={newModelContext}
               onChange={(e) => setNewModelContext(e.target.value)}
-              placeholder={t('settings.models.contextPlaceholder')}
+              placeholder={t("settings.models.contextPlaceholder")}
               type="number"
               min={0}
               max={10_000_000}
@@ -1906,19 +2287,33 @@ function CustomProviderForm({ onSaved }: { onSaved: () => void }) {
               className="rounded border border-border bg-surface-2 px-2 py-1 text-primary outline-none focus:border-chief"
             >
               {THINKING_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>{t(o.labelKey)}</option>
+                <option key={o.value} value={o.value}>
+                  {t(o.labelKey)}
+                </option>
               ))}
             </select>
-            <button type="button" onClick={addModelRow} className="shrink-0 rounded bg-surface-3 px-2 py-1 text-text-secondary hover:text-primary">+</button>
+            <button
+              type="button"
+              onClick={addModelRow}
+              className="shrink-0 rounded bg-surface-3 px-2 py-1 text-text-secondary hover:text-primary"
+            >
+              +
+            </button>
           </div>
-          <p className="text-[10px] text-text-secondary">
-            {t('settings.models.contextHint')}
-          </p>
+          <p className="text-[10px] text-text-secondary">{t("settings.models.contextHint")}</p>
         </div>
       </div>
 
-      {error && <p role="alert" aria-live="polite" className="mt-2 text-[11px] text-status-failed">{error}</p>}
-      {success && <p role="status" aria-live="polite" className="mt-2 text-[11px] text-status-done">{t('settings.error.alreadyAdded')}</p>}
+      {error && (
+        <p role="alert" aria-live="polite" className="mt-2 text-[11px] text-status-failed">
+          {error}
+        </p>
+      )}
+      {success && (
+        <p role="status" aria-live="polite" className="mt-2 text-[11px] text-status-done">
+          {t("settings.error.alreadyAdded")}
+        </p>
+      )}
 
       <div className="mt-3 flex justify-end">
         <button
@@ -1927,7 +2322,7 @@ function CustomProviderForm({ onSaved }: { onSaved: () => void }) {
           disabled={busy}
           className="rounded-md bg-chief px-4 py-1.5 text-xs font-medium text-white hover:bg-chief/90 disabled:opacity-30"
         >
-          {busy ? t('settings.action.save') : t('settings.action.create')}
+          {busy ? t("settings.action.save") : t("settings.action.create")}
         </button>
       </div>
     </div>
@@ -1962,7 +2357,7 @@ function QuotaStatusBlock({ rows, onReset }: QuotaStatusBlockProps) {
       const r = await resetQuota(row.role_id, row.model_id);
       if (r.ok) await onReset();
     } catch (e) {
-      console.error('[QuotaStatusBlock] reset failed:', e);
+      console.error("[QuotaStatusBlock] reset failed:", e);
     } finally {
       setBusy(null);
     }
@@ -1971,26 +2366,30 @@ function QuotaStatusBlock({ rows, onReset }: QuotaStatusBlockProps) {
   return (
     <Card>
       <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-text-secondary">
-        {t('settings.roles.quota.heading')}
+        {t("settings.roles.quota.heading")}
       </h3>
       {rows.length === 0 ? (
-        <p className="px-1 text-[10px] text-text-secondary">
-          {t('settings.roles.quota.empty')}
-        </p>
+        <p className="px-1 text-[10px] text-text-secondary">{t("settings.roles.quota.empty")}</p>
       ) : (
         <ol className="flex flex-col gap-1">
           {rows.map((row) => {
             const status = row.status;
             const labelKey =
-              status === 'failed' ? 'failed'
-                : status === 'pending_5h_wait' ? 'pending_5h_wait'
-                : status === 'rate_limited' ? 'rate_limited'
-                : 'failed';
+              status === "failed"
+                ? "failed"
+                : status === "pending_5h_wait"
+                  ? "pending_5h_wait"
+                  : status === "rate_limited"
+                    ? "rate_limited"
+                    : "failed";
             const dotColor =
-              status === 'failed' ? 'bg-status-warn'
-                : status === 'pending_5h_wait' ? 'bg-status-pending'
-                : status === 'rate_limited' ? 'bg-status-failed'
-                : 'bg-text-secondary';
+              status === "failed"
+                ? "bg-status-warn"
+                : status === "pending_5h_wait"
+                  ? "bg-status-pending"
+                  : status === "rate_limited"
+                    ? "bg-status-failed"
+                    : "bg-text-secondary";
             const key = `${row.role_id}:${row.model_id}`;
             return (
               <li
@@ -2005,18 +2404,16 @@ function QuotaStatusBlock({ rows, onReset }: QuotaStatusBlockProps) {
                   <span className="text-text-tertiary">·</span>
                   <span>{t(`settings.roles.quota.${labelKey}`)}</span>
                   {row.attempt_count > 1 && (
-                    <span className="text-text-tertiary">
-                      ×{row.attempt_count}
-                    </span>
+                    <span className="text-text-tertiary">×{row.attempt_count}</span>
                   )}
                 </span>
-                {status === 'rate_limited' && (
+                {status === "rate_limited" && (
                   <button
                     onClick={() => void handleReset(row)}
                     disabled={busy === key}
                     className="rounded-md border border-status-failed/40 bg-status-failed/10 px-2 py-0.5 text-[10px] text-status-failed hover:bg-status-failed/20 disabled:opacity-40"
                   >
-                    {busy === key ? '…' : t('settings.roles.quota.reset')}
+                    {busy === key ? "…" : t("settings.roles.quota.reset")}
                   </button>
                 )}
               </li>
@@ -2050,13 +2447,13 @@ function ModelOverrideEditor({
   // built-in fallback or a previously-saved override — either
   // way editing is the same UX).
   const [contextLength, setContextLength] = useState<string>(
-    model.context_length != null ? String(model.context_length) : '',
+    model.context_length != null ? String(model.context_length) : "",
   );
-  const [thinking, setThinking] = useState<'low' | 'medium' | 'high' | ''>(
-    ((): 'low' | 'medium' | 'high' | '' => {
-      const v = (model.thinking_strength ?? '').toLowerCase();
-      if (v === 'low' || v === 'medium' || v === 'high') return v;
-      return '';
+  const [thinking, setThinking] = useState<"low" | "medium" | "high" | "">(
+    ((): "low" | "medium" | "high" | "" => {
+      const v = (model.thinking_strength ?? "").toLowerCase();
+      if (v === "low" || v === "medium" || v === "high") return v;
+      return "";
     })(),
   );
   const [saving, setSaving] = useState(false);
@@ -2070,14 +2467,14 @@ function ModelOverrideEditor({
         provider_id: string;
         model_id: string;
         context_length?: number | null;
-        thinking_strength?: 'low' | 'medium' | 'high' | null;
+        thinking_strength?: "low" | "medium" | "high" | null;
       } = { provider_id: providerId, model_id: model.id };
       // Empty string in the input means "explicit null" —
       // clears the override row for that column. Same for
       // thinking select.
       const ctxTrim = contextLength.trim();
-      patch.context_length = ctxTrim === '' ? null : Number(ctxTrim);
-      patch.thinking_strength = thinking === '' ? null : thinking;
+      patch.context_length = ctxTrim === "" ? null : Number(ctxTrim);
+      patch.thinking_strength = thinking === "" ? null : thinking;
       await setModelOverride(patch);
       onSaved();
     } catch (e) {
@@ -2088,7 +2485,10 @@ function ModelOverrideEditor({
   };
 
   const clear = async () => {
-    if (!confirm(t('settings.models.clearOverrideConfirm', { name: model.display_name ?? model.id }))) return;
+    if (
+      !confirm(t("settings.models.clearOverrideConfirm", { name: model.display_name ?? model.id }))
+    )
+      return;
     setSaving(true);
     setError(null);
     try {
@@ -2105,26 +2505,30 @@ function ModelOverrideEditor({
     <li className="col-span-2 mt-1 rounded border border-border bg-surface-1 p-2 font-sans">
       <div className="grid grid-cols-2 gap-2">
         <label className="text-[11px]">
-          <span className="block text-text-secondary">{t('settings.models.contextLengthLabel')}</span>
+          <span className="block text-text-secondary">
+            {t("settings.models.contextLengthLabel")}
+          </span>
           <input
             type="number"
             min={0}
             value={contextLength}
             onChange={(e) => setContextLength(e.target.value)}
-            placeholder={String(t('settings.models.contextLengthPlaceholder'))}
+            placeholder={String(t("settings.models.contextLengthPlaceholder"))}
             disabled={saving}
             className="mt-1 w-full rounded border border-border bg-surface-2 px-2 py-1 font-mono text-xs"
           />
         </label>
         <label className="text-[11px]">
-          <span className="block text-text-secondary">{t('settings.models.thinkingStrengthLabel')}</span>
+          <span className="block text-text-secondary">
+            {t("settings.models.thinkingStrengthLabel")}
+          </span>
           <select
             value={thinking}
-            onChange={(e) => setThinking(e.target.value as 'low' | 'medium' | 'high' | '')}
+            onChange={(e) => setThinking(e.target.value as "low" | "medium" | "high" | "")}
             disabled={saving}
             className="mt-1 w-full rounded border border-border bg-surface-2 px-2 py-1 text-xs"
           >
-            <option value="">{t('settings.models.thinkingUnset')}</option>
+            <option value="">{t("settings.models.thinkingUnset")}</option>
             <option value="low">low</option>
             <option value="medium">medium</option>
             <option value="high">high</option>
@@ -2133,17 +2537,29 @@ function ModelOverrideEditor({
       </div>
       {error && <p className="mt-1 text-[11px] text-status-failed">{error}</p>}
       <div className="mt-2 flex items-center justify-end gap-1">
-        <button type="button" onClick={clear} disabled={saving}
-          className="rounded px-2 py-1 text-[11px] text-text-secondary hover:bg-status-warn/15 hover:text-status-warn">
-          {t('settings.models.clearOverride')}
+        <button
+          type="button"
+          onClick={clear}
+          disabled={saving}
+          className="rounded px-2 py-1 text-[11px] text-text-secondary hover:bg-status-warn/15 hover:text-status-warn"
+        >
+          {t("settings.models.clearOverride")}
         </button>
-        <button type="button" onClick={onClose} disabled={saving}
-          className="rounded px-2 py-1 text-[11px] text-text-secondary hover:bg-surface-3">
-          {t('settings.models.cancelEdit')}
+        <button
+          type="button"
+          onClick={onClose}
+          disabled={saving}
+          className="rounded px-2 py-1 text-[11px] text-text-secondary hover:bg-surface-3"
+        >
+          {t("settings.models.cancelEdit")}
         </button>
-        <button type="button" onClick={save} disabled={saving}
-          className="rounded bg-primary px-2 py-1 text-[11px] text-white hover:bg-primary/90 disabled:opacity-50">
-          {t('settings.models.saveOverride')}
+        <button
+          type="button"
+          onClick={save}
+          disabled={saving}
+          className="rounded bg-primary px-2 py-1 text-[11px] text-white hover:bg-primary/90 disabled:opacity-50"
+        >
+          {t("settings.models.saveOverride")}
         </button>
       </div>
     </li>

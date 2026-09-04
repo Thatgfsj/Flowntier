@@ -11,11 +11,11 @@
 // chief / critic-a / critic-b / worker map and the ConsoleSource
 // union here in one commit.
 
-import type { ConsoleSource } from '@flowntier/ui';
+import type { ConsoleSource } from "@flowntier/ui";
 
 /** The four roles the dashboard tracks as first-class cards.
  *  Matches the keys of `AgentStatusMap` in workflowReducer.ts. */
-export type AgentRole = 'chief' | 'critic-a' | 'critic-b' | 'worker';
+export type AgentRole = "chief" | "critic-a" | "critic-b" | "worker";
 
 /**
  * Result of decoding an `agent_id` from a Tauri event.
@@ -30,10 +30,10 @@ export type AgentRole = 'chief' | 'critic-a' | 'critic-b' | 'worker';
  *   `system` in the console, no card update.
  */
 export type AgentIdResolution =
-  | { kind: 'role'; role: AgentRole }
-  | { kind: 'worker_task'; taskId: string }
-  | { kind: 'system' }
-  | { kind: 'unknown'; raw: string };
+  | { kind: "role"; role: AgentRole }
+  | { kind: "worker_task"; taskId: string }
+  | { kind: "system" }
+  | { kind: "unknown"; raw: string };
 
 /**
  * Decode an `agent_id` string (e.g. 'agent:chief', 'agent:critic:a',
@@ -55,34 +55,34 @@ export type AgentIdResolution =
  * never split on ':'.
  */
 export function decodeAgentId(agentId: string | null | undefined): AgentIdResolution {
-  if (typeof agentId !== 'string' || agentId.length === 0) {
-    return { kind: 'unknown', raw: String(agentId) };
+  if (typeof agentId !== "string" || agentId.length === 0) {
+    return { kind: "unknown", raw: String(agentId) };
   }
   // Worker with task suffix — split on the FIRST colon after the
   // 'worker' token so 'agent:worker:t0' → worker task t0.
-  if (agentId.startsWith('agent:worker:')) {
-    const taskId = agentId.slice('agent:worker:'.length);
+  if (agentId.startsWith("agent:worker:")) {
+    const taskId = agentId.slice("agent:worker:".length);
     if (taskId.length > 0) {
-      return { kind: 'worker_task', taskId };
+      return { kind: "worker_task", taskId };
     }
-    return { kind: 'role', role: 'worker' };
+    return { kind: "role", role: "worker" };
   }
-  if (agentId === 'agent:worker') {
-    return { kind: 'role', role: 'worker' };
+  if (agentId === "agent:worker") {
+    return { kind: "role", role: "worker" };
   }
-  if (agentId === 'agent:chief') {
-    return { kind: 'role', role: 'chief' };
+  if (agentId === "agent:chief") {
+    return { kind: "role", role: "chief" };
   }
-  if (agentId === 'agent:critic:a') {
-    return { kind: 'role', role: 'critic-a' };
+  if (agentId === "agent:critic:a") {
+    return { kind: "role", role: "critic-a" };
   }
-  if (agentId === 'agent:critic:b') {
-    return { kind: 'role', role: 'critic-b' };
+  if (agentId === "agent:critic:b") {
+    return { kind: "role", role: "critic-b" };
   }
-  if (agentId === 'agent:system') {
-    return { kind: 'system' };
+  if (agentId === "agent:system") {
+    return { kind: "system" };
   }
-  return { kind: 'unknown', raw: agentId };
+  return { kind: "unknown", raw: agentId };
 }
 
 /**
@@ -94,14 +94,14 @@ export function decodeAgentId(agentId: string | null | undefined): AgentIdResolu
 export function agentIdToConsoleSource(agentId: string | null | undefined): ConsoleSource {
   const r = decodeAgentId(agentId);
   switch (r.kind) {
-    case 'role':
+    case "role":
       return r.role;
-    case 'worker_task':
-      return 'worker';
-    case 'system':
-      return 'system';
-    case 'unknown':
-      return 'system';
+    case "worker_task":
+      return "worker";
+    case "system":
+      return "system";
+    case "unknown":
+      return "system";
   }
 }
 
@@ -112,9 +112,7 @@ export function agentIdToConsoleSource(agentId: string | null | undefined): Cons
  * task-id (which the dashboard tracks per-task, not per-role) and
  * for system / unknown ids.
  */
-export function agentIdToHeadRole(
-  agentId: string | null | undefined,
-): AgentRole | null {
+export function agentIdToHeadRole(agentId: string | null | undefined): AgentRole | null {
   const r = decodeAgentId(agentId);
-  return r.kind === 'role' ? r.role : null;
+  return r.kind === "role" ? r.role : null;
 }

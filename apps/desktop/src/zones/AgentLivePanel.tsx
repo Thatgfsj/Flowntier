@@ -16,17 +16,13 @@
 //     (the "currently working on" line).
 //   - `usePhaseStates()` for the currently active phase name.
 
-import { useMemo, type ReactElement } from 'react';
-import { useTranslation } from 'react-i18next';
-import { Tooltip } from '@flowntier/ui';
-import type { WfEvent } from '@flowntier/shared';
-import {
-  useAgentStatus,
-  useEvents,
-  usePhaseStates,
-} from '../contexts/WorkflowContext.js';
-import { PHASES } from '../contexts/workflowReducer.js';
-import { agentIdToHeadRole } from '../lib/agentId.js';
+import { useMemo, type ReactElement } from "react";
+import { useTranslation } from "react-i18next";
+import { Tooltip } from "@flowntier/ui";
+import type { WfEvent } from "@flowntier/shared";
+import { useAgentStatus, useEvents, usePhaseStates } from "../contexts/WorkflowContext.js";
+import { PHASES } from "../contexts/workflowReducer.js";
+import { agentIdToHeadRole } from "../lib/agentId.js";
 
 // ── Helpers ────────────────────────────────────────────────────────
 
@@ -34,11 +30,11 @@ import { agentIdToHeadRole } from '../lib/agentId.js';
  *  discriminated union before reading role/agent metadata. */
 function agentIdOf(e: WfEvent): string | undefined {
   switch (e.kind) {
-    case 'text_delta':
-    case 'tool_started':
-    case 'tool_finished':
-    case 'console':
-    case 'token_usage':
+    case "text_delta":
+    case "tool_started":
+    case "tool_finished":
+    case "console":
+    case "token_usage":
       return e.agent_id;
     default:
       return undefined;
@@ -48,7 +44,7 @@ function agentIdOf(e: WfEvent): string | undefined {
 export interface AgentLivePanelProps {
   /** Dashboard role key. The panel weaves together events
    *  tagged with the matching agent_id. */
-  role: 'chief' | 'critic-a' | 'critic-b' | 'worker';
+  role: "chief" | "critic-a" | "critic-b" | "worker";
 }
 
 export function AgentLivePanel({ role }: AgentLivePanelProps) {
@@ -95,7 +91,7 @@ export function AgentLivePanel({ role }: AgentLivePanelProps) {
     for (let i = events.length - 1; i >= 0; i--) {
       const e = events[i];
       if (!e) continue;
-      if (e.kind !== 'tool_finished') continue;
+      if (e.kind !== "tool_finished") continue;
       const id = e.agent_id;
       if (agentIdToHeadRole(id) !== role) continue;
       finishedIds.add(e.tool_call_id);
@@ -103,7 +99,7 @@ export function AgentLivePanel({ role }: AgentLivePanelProps) {
     for (let i = events.length - 1; i >= 0; i--) {
       const e = events[i];
       if (!e) continue;
-      if (e.kind !== 'tool_started') continue;
+      if (e.kind !== "tool_started") continue;
       if (agentIdToHeadRole(e.agent_id) !== role) continue;
       if (!finishedIds.has(e.call.id)) {
         return e.call;
@@ -113,16 +109,16 @@ export function AgentLivePanel({ role }: AgentLivePanelProps) {
   }, [events, role]);
 
   const thinking = useMemo(() => {
-    if (lastActivity?.kind === 'text_delta') {
+    if (lastActivity?.kind === "text_delta") {
       const txt = lastActivity.delta;
-      return txt.length > 240 ? txt.slice(0, 240) + '…' : txt;
+      return txt.length > 240 ? txt.slice(0, 240) + "…" : txt;
     }
     return null;
   }, [lastActivity]);
 
   const activePhaseName = (() => {
     for (const p of PHASES) {
-      if (phaseStates[p.name] === 'active') return p.name;
+      if (phaseStates[p.name] === "active") return p.name;
     }
     return null;
   })();
@@ -137,11 +133,11 @@ export function AgentLivePanel({ role }: AgentLivePanelProps) {
         </span>
         <span
           className={
-            status === 'thinking'
-              ? 'rounded bg-chief/20 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-chief'
-              : status === 'speaking'
-                ? 'rounded bg-status-done/20 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-status-done'
-                : 'rounded bg-surface-3 px-1.5 py-0.5 font-mono text-[10px] text-text-secondary'
+            status === "thinking"
+              ? "rounded bg-chief/20 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-chief"
+              : status === "speaking"
+                ? "rounded bg-status-done/20 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-status-done"
+                : "rounded bg-surface-3 px-1.5 py-0.5 font-mono text-[10px] text-text-secondary"
           }
         >
           {t(`agentLive.status.${status}`)}
@@ -157,26 +153,21 @@ export function AgentLivePanel({ role }: AgentLivePanelProps) {
       {thinking && (
         <div>
           <div className="text-[10px] uppercase tracking-wide text-text-secondary">
-            {t('agentLive.thinking')}
+            {t("agentLive.thinking")}
           </div>
-          <p className="mt-0.5 text-[11px] leading-snug text-text-primary">
-            {thinking}
-          </p>
+          <p className="mt-0.5 text-[11px] leading-snug text-text-primary">{thinking}</p>
         </div>
       )}
 
       {currentTool && (
         <div>
           <div className="text-[10px] uppercase tracking-wide text-text-secondary">
-            {t('agentLive.working')}
+            {t("agentLive.working")}
           </div>
           <p className="mt-0.5 font-mono text-[11px] text-text-primary">
             {currentTool.name}
             {summariseArgs(currentTool.args) && (
-              <span className="text-text-secondary">
-                {' '}
-                {summariseArgs(currentTool.args)}
-              </span>
+              <span className="text-text-secondary"> {summariseArgs(currentTool.args)}</span>
             )}
           </p>
         </div>
@@ -185,7 +176,7 @@ export function AgentLivePanel({ role }: AgentLivePanelProps) {
       {timeline.length > 0 && (
         <div>
           <div className="text-[10px] uppercase tracking-wide text-text-secondary">
-            {t('agentLive.recent')}
+            {t("agentLive.recent")}
           </div>
           <ol className="mt-0.5 flex flex-col gap-0.5">
             {timeline.map((row, i) => (
@@ -198,9 +189,9 @@ export function AgentLivePanel({ role }: AgentLivePanelProps) {
         </div>
       )}
 
-      {status === 'idle' && (
+      {status === "idle" && (
         <div className="text-[11px] text-text-tertiary">
-          {t('agentLive.idleFor', { seconds: idleSeconds })}
+          {t("agentLive.idleFor", { seconds: idleSeconds })}
         </div>
       )}
     </div>
@@ -212,7 +203,12 @@ export function AgentLivePanelTooltip({
   children,
 }: AgentLivePanelProps & { children: ReactElement }) {
   return (
-    <Tooltip side="right" content={<AgentLivePanel role={role} />}>
+    <Tooltip
+      side="right"
+      delayMs={500}
+      content={<AgentLivePanel role={role} />}
+      className="pointer-events-none max-h-[300px] max-w-[280px] overflow-y-auto opacity-95 shadow-2xl"
+    >
       {children}
     </Tooltip>
   );
@@ -222,17 +218,17 @@ export function AgentLivePanelTooltip({
 
 function describeEvent(e: WfEvent): string | null {
   switch (e.kind) {
-    case 'text_delta':
-      return e.delta.length > 60 ? e.delta.slice(0, 60) + '…' : e.delta;
-    case 'tool_started':
+    case "text_delta":
+      return e.delta.length > 60 ? e.delta.slice(0, 60) + "…" : e.delta;
+    case "tool_started":
       return `tool: ${e.call.name}`;
-    case 'tool_finished':
+    case "tool_finished":
       return `tool done: ${e.preview.slice(0, 60)}`;
-    case 'console':
-      return e.message.length > 60 ? e.message.slice(0, 60) + '…' : e.message;
-    case 'milestone':
-      return `milestone: ${e.label ?? e.phase ?? 'tick'}`;
-    case 'task_status':
+    case "console":
+      return e.message.length > 60 ? e.message.slice(0, 60) + "…" : e.message;
+    case "milestone":
+      return `milestone: ${e.label ?? e.phase ?? "tick"}`;
+    case "task_status":
       return `task ${e.task_id}: ${e.task_status}`;
     default:
       return null;
@@ -240,18 +236,18 @@ function describeEvent(e: WfEvent): string | null {
 }
 
 function summariseArgs(args: unknown): string {
-  if (args === null || args === undefined) return '';
-  if (typeof args === 'string') return args.length > 40 ? args.slice(0, 40) + '…' : args;
+  if (args === null || args === undefined) return "";
+  if (typeof args === "string") return args.length > 40 ? args.slice(0, 40) + "…" : args;
   try {
     const s = JSON.stringify(args);
-    return s.length > 60 ? s.slice(0, 60) + '…' : s;
+    return s.length > 60 ? s.slice(0, 60) + "…" : s;
   } catch {
-    return '';
+    return "";
   }
 }
 
 function hhmm(d: Date): string {
-  const hh = String(d.getHours()).padStart(2, '0');
-  const mm = String(d.getMinutes()).padStart(2, '0');
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
   return `${hh}:${mm}`;
 }

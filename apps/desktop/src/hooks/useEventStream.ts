@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import type { WfEvent } from '@flowntier/shared';
+import { useEffect, useState } from "react";
+import type { WfEvent } from "@flowntier/shared";
 
 /**
  * Subscribe to the ACO event stream. Tauri v2 ships events via the
@@ -18,16 +18,16 @@ export function useEventStream(): WfEvent[] {
       try {
         // Dynamic import to avoid loading Tauri APIs in non-Tauri
         // environments (e.g. Storybook, tests).
-        const { listen } = await import('@tauri-apps/api/event');
+        const { listen } = await import("@tauri-apps/api/event");
         if (cancelled) return;
-        const off = await listen<WfEvent>('wf:event', (e) => {
+        const off = await listen<WfEvent>("wf:event", (e) => {
           setEvents((prev) => [...prev, e.payload]);
         });
         unlisten = off;
       } catch (err) {
         // Not running under Tauri (e.g. browser-only mode).
         // eslint-disable-next-line no-console
-        console.warn('Tauri event API unavailable:', err);
+        console.warn("Tauri event API unavailable:", err);
       }
     })();
 

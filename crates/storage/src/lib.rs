@@ -5,7 +5,8 @@
 //! See `docs/STORAGE_SPEC.md` for the full schema.
 
 #![forbid(unsafe_code)]
-#![allow(missing_docs)]  // internal crate: API documented in STORAGE_SPEC.md and module-level //! docs; per-field doc comments would duplicate the type signature.
+#![allow(missing_docs)]
+#![allow(clippy::type_complexity, clippy::doc_overindented_list_items)]
 
 use std::path::{Path, PathBuf};
 
@@ -246,11 +247,7 @@ impl Repository {
     /// v0.4.22 (event 000069): persist the final workflow
     /// summary so /api/workflow/{wf_id}/status can return it
     /// after the orchestrator's delivery phase finishes.
-    pub async fn set_workflow_summary(
-        &self,
-        id: &str,
-        summary: &str,
-    ) -> Result<(), StorageError> {
+    pub async fn set_workflow_summary(&self, id: &str, summary: &str) -> Result<(), StorageError> {
         let now = chrono::Utc::now().timestamp();
         sqlx::query("UPDATE workflows SET summary = ?, updated_at = ? WHERE id = ?")
             .bind(summary)
@@ -263,11 +260,10 @@ impl Repository {
 
     /// Fetch a workflow by id.
     pub async fn get_workflow(&self, id: &str) -> Result<Option<Workflow>, StorageError> {
-        let row: Option<WorkflowRow> =
-            sqlx::query_as("SELECT * FROM workflows WHERE id = ?")
-                .bind(id)
-                .fetch_optional(&self.pool)
-                .await?;
+        let row: Option<WorkflowRow> = sqlx::query_as("SELECT * FROM workflows WHERE id = ?")
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await?;
         Ok(row.map(Into::into))
     }
 
@@ -334,10 +330,7 @@ impl From<WorkflowRow> for Workflow {
             user_request: r.user_request,
             plan_doc: r.plan_doc,
             summary: r.summary,
-            final_status: r
-                .final_status
-                .as_deref()
-                .and_then(workflow_status_from_str),
+            final_status: r.final_status.as_deref().and_then(workflow_status_from_str),
             total_input_tokens: r.total_input_tokens,
             total_output_tokens: r.total_output_tokens,
             total_cost_usd: r.total_cost_usd,
@@ -473,32 +466,80 @@ impl Repository {
 
     /// Fetch a single secret row. Returns None if not found.
     pub async fn get_secret(&self, name: &str) -> Result<Option<SecretRow>, StorageError> {
-        let r: Option<(String, Vec<u8>, Vec<u8>, Vec<u8>, String, i64, i64, Option<i64>)> =
-            sqlx::query_as(
-                "SELECT name, ciphertext, nonce, ad, key_handle, created_at, updated_at, last_used_at
+        let r: Option<(
+            String,
+            Vec<u8>,
+            Vec<u8>,
+            Vec<u8>,
+            String,
+            i64,
+            i64,
+            Option<i64>,
+        )> = sqlx::query_as(
+            "SELECT name, ciphertext, nonce, ad, key_handle, created_at, updated_at, last_used_at
                  FROM secret WHERE name = ?",
-            )
-            .bind(name)
-            .fetch_optional(&self.pool)
-            .await?;
-        Ok(r.map(|(name, ciphertext, nonce, ad, key_handle, created_at, updated_at, last_used_at)| {
-            SecretRow { name, ciphertext, nonce, ad, key_handle, created_at, updated_at, last_used_at }
-        }))
+        )
+        .bind(name)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(r.map(
+            |(name, ciphertext, nonce, ad, key_handle, created_at, updated_at, last_used_at)| {
+                SecretRow {
+                    name,
+                    ciphertext,
+                    nonce,
+                    ad,
+                    key_handle,
+                    created_at,
+                    updated_at,
+                    last_used_at,
+                }
+            },
+        ))
     }
 
     /// List all secret names + metadata (NEVER returns ciphertext).
     pub async fn list_secret_meta(&self) -> Result<Vec<SecretRow>, StorageError> {
-        let rows: Vec<(String, Vec<u8>, Vec<u8>, Vec<u8>, String, i64, i64, Option<i64>)> =
-            sqlx::query_as(
-                "SELECT name, ciphertext, nonce, ad, key_handle, created_at, updated_at, last_used_at
+        let rows: Vec<(
+            String,
+            Vec<u8>,
+            Vec<u8>,
+            Vec<u8>,
+            String,
+            i64,
+            i64,
+            Option<i64>,
+        )> = sqlx::query_as(
+            "SELECT name, ciphertext, nonce, ad, key_handle, created_at, updated_at, last_used_at
                  FROM secret ORDER BY updated_at DESC",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(
+                |(
+                    name,
+                    ciphertext,
+                    nonce,
+                    ad,
+                    key_handle,
+                    created_at,
+                    updated_at,
+                    last_used_at,
+                )| {
+                    SecretRow {
+                        name,
+                        ciphertext,
+                        nonce,
+                        ad,
+                        key_handle,
+                        created_at,
+                        updated_at,
+                        last_used_at,
+                    }
+                },
             )
-            .fetch_all(&self.pool)
-            .await?;
-        Ok(rows.into_iter()
-            .map(|(name, ciphertext, nonce, ad, key_handle, created_at, updated_at, last_used_at)| {
-                SecretRow { name, ciphertext, nonce, ad, key_handle, created_at, updated_at, last_used_at }
-            })
             .collect())
     }
 
@@ -514,47 +555,56 @@ impl Repository {
 
     /// Update only the `last_used_at` column. Used by the secret
     /// store as an audit trail when reveal() is called.
-    pub async fn touch_secret_last_used(
-        &self,
-        name: &str,
-    ) -> Result<bool, StorageError> {
-        let res = sqlx::query(
-            "UPDATE secret SET last_used_at = strftime('%s','now') WHERE name = ?",
-        )
-        .bind(name)
-        .execute(&self.pool)
-        .await?;
+    pub async fn touch_secret_last_used(&self, name: &str) -> Result<bool, StorageError> {
+        let res =
+            sqlx::query("UPDATE secret SET last_used_at = strftime('%s','now') WHERE name = ?")
+                .bind(name)
+                .execute(&self.pool)
+                .await?;
         Ok(res.rows_affected() > 0)
     }
 
     // ── Provider CRUD ───────────────────────────────────────────
 
     pub async fn get_provider(&self, id: &str) -> Result<Option<ProviderRow>, StorageError> {
-        let r: Option<(String, i64, Option<String>, Option<String>, String, i64)> =
-            sqlx::query_as(
-                "SELECT id, enabled, default_model, base_url, preset_json, updated_at
+        let r: Option<(String, i64, Option<String>, Option<String>, String, i64)> = sqlx::query_as(
+            "SELECT id, enabled, default_model, base_url, preset_json, updated_at
                  FROM provider WHERE id = ?",
-            )
-            .bind(id)
-            .fetch_optional(&self.pool)
-            .await?;
-        Ok(r.map(|(id, enabled, default_model, base_url, preset_json, updated_at)| ProviderRow {
-            id, enabled: enabled != 0, default_model, base_url, preset_json, updated_at,
-        }))
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(r.map(
+            |(id, enabled, default_model, base_url, preset_json, updated_at)| ProviderRow {
+                id,
+                enabled: enabled != 0,
+                default_model,
+                base_url,
+                preset_json,
+                updated_at,
+            },
+        ))
     }
 
     pub async fn list_providers(&self) -> Result<Vec<ProviderRow>, StorageError> {
-        let rows: Vec<(String, i64, Option<String>, Option<String>, String, i64)> =
-            sqlx::query_as(
-                "SELECT id, enabled, default_model, base_url, preset_json, updated_at
+        let rows: Vec<(String, i64, Option<String>, Option<String>, String, i64)> = sqlx::query_as(
+            "SELECT id, enabled, default_model, base_url, preset_json, updated_at
                  FROM provider ORDER BY id",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(
+                |(id, enabled, default_model, base_url, preset_json, updated_at)| ProviderRow {
+                    id,
+                    enabled: enabled != 0,
+                    default_model,
+                    base_url,
+                    preset_json,
+                    updated_at,
+                },
             )
-            .fetch_all(&self.pool)
-            .await?;
-        Ok(rows.into_iter()
-            .map(|(id, enabled, default_model, base_url, preset_json, updated_at)| ProviderRow {
-                id, enabled: enabled != 0, default_model, base_url, preset_json, updated_at,
-            })
             .collect())
     }
 
@@ -647,12 +697,13 @@ impl Repository {
                 default_model
             };
 
-            let chain: Vec<String> =
-                serde_json::from_str(&fallback_chain_json).unwrap_or_default();
-            let new_chain: Vec<String> =
-                chain.into_iter().filter(|s| !s.starts_with(&prefix)).collect();
-            if new_chain.len() !=
-                serde_json::from_str::<Vec<String>>(&fallback_chain_json)
+            let chain: Vec<String> = serde_json::from_str(&fallback_chain_json).unwrap_or_default();
+            let new_chain: Vec<String> = chain
+                .into_iter()
+                .filter(|s| !s.starts_with(&prefix))
+                .collect();
+            if new_chain.len()
+                != serde_json::from_str::<Vec<String>>(&fallback_chain_json)
                     .map(|v| v.len())
                     .unwrap_or(0)
             {
@@ -662,8 +713,7 @@ impl Repository {
             if !changed {
                 continue;
             }
-            let new_chain_json =
-                serde_json::to_string(&new_chain).unwrap_or_else(|_| "[]".into());
+            let new_chain_json = serde_json::to_string(&new_chain).unwrap_or_else(|_| "[]".into());
             sqlx::query(
                 "UPDATE role_overrides
                  SET default_model = ?, fallback_chain = ?, updated_at = strftime('%s','now')
@@ -682,38 +732,74 @@ impl Repository {
     // ── Custom provider CRUD ────────────────────────────────────
 
     pub async fn list_custom_providers(&self) -> Result<Vec<CustomProvider>, StorageError> {
-        let rows: Vec<(String, String, String, String, Option<String>, i64, i64, i64)> =
-            sqlx::query_as(
-                "SELECT id, name, base_url, kind, default_model, enabled, created_at, updated_at
+        let rows: Vec<(
+            String,
+            String,
+            String,
+            String,
+            Option<String>,
+            i64,
+            i64,
+            i64,
+        )> = sqlx::query_as(
+            "SELECT id, name, base_url, kind, default_model, enabled, created_at, updated_at
                  FROM custom_provider ORDER BY created_at DESC",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(
+                |(id, name, base_url, kind, default_model, enabled, created_at, updated_at)| {
+                    CustomProvider {
+                        id,
+                        name,
+                        base_url,
+                        kind,
+                        default_model,
+                        enabled: enabled != 0,
+                        created_at,
+                        updated_at,
+                    }
+                },
             )
-            .fetch_all(&self.pool)
-            .await?;
-        Ok(rows.into_iter()
-            .map(|(id, name, base_url, kind, default_model, enabled, created_at, updated_at)| {
-                CustomProvider {
-                    id, name, base_url, kind, default_model,
-                    enabled: enabled != 0, created_at, updated_at,
-                }
-            })
             .collect())
     }
 
-    pub async fn get_custom_provider(&self, id: &str) -> Result<Option<CustomProvider>, StorageError> {
-        let r: Option<(String, String, String, String, Option<String>, i64, i64, i64)> =
-            sqlx::query_as(
-                "SELECT id, name, base_url, kind, default_model, enabled, created_at, updated_at
+    pub async fn get_custom_provider(
+        &self,
+        id: &str,
+    ) -> Result<Option<CustomProvider>, StorageError> {
+        let r: Option<(
+            String,
+            String,
+            String,
+            String,
+            Option<String>,
+            i64,
+            i64,
+            i64,
+        )> = sqlx::query_as(
+            "SELECT id, name, base_url, kind, default_model, enabled, created_at, updated_at
                  FROM custom_provider WHERE id = ?",
-            )
-            .bind(id)
-            .fetch_optional(&self.pool)
-            .await?;
-        Ok(r.map(|(id, name, base_url, kind, default_model, enabled, created_at, updated_at)| {
-            CustomProvider {
-                id, name, base_url, kind, default_model,
-                enabled: enabled != 0, created_at, updated_at,
-            }
-        }))
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(r.map(
+            |(id, name, base_url, kind, default_model, enabled, created_at, updated_at)| {
+                CustomProvider {
+                    id,
+                    name,
+                    base_url,
+                    kind,
+                    default_model,
+                    enabled: enabled != 0,
+                    created_at,
+                    updated_at,
+                }
+            },
+        ))
     }
 
     pub async fn insert_custom_provider(&self, p: &CustomProvider) -> Result<(), StorageError> {
@@ -773,16 +859,23 @@ impl Repository {
         Ok(r.rows_affected() > 0)
     }
 
-    pub async fn get_model_cache(&self, provider_id: &str) -> Result<Option<ModelCacheRow>, StorageError> {
+    pub async fn get_model_cache(
+        &self,
+        provider_id: &str,
+    ) -> Result<Option<ModelCacheRow>, StorageError> {
         let r: Option<(String, String, i64)> = sqlx::query_as(
             "SELECT provider_id, models_json, fetched_at FROM model_cache WHERE provider_id = ?",
         )
         .bind(provider_id)
         .fetch_optional(&self.pool)
         .await?;
-        Ok(r.map(|(provider_id, models_json, fetched_at)| ModelCacheRow {
-            provider_id, models_json, fetched_at,
-        }))
+        Ok(
+            r.map(|(provider_id, models_json, fetched_at)| ModelCacheRow {
+                provider_id,
+                models_json,
+                fetched_at,
+            }),
+        )
     }
 
     // ── v0.4.30: per-model metadata overrides (audit 000130) ──
@@ -853,13 +946,11 @@ impl Repository {
         provider_id: &str,
         model_id: &str,
     ) -> Result<bool, StorageError> {
-        let r = sqlx::query(
-            "DELETE FROM model_overrides WHERE provider_id = ? AND model_id = ?",
-        )
-        .bind(provider_id)
-        .bind(model_id)
-        .execute(&self.pool)
-        .await?;
+        let r = sqlx::query("DELETE FROM model_overrides WHERE provider_id = ? AND model_id = ?")
+            .bind(provider_id)
+            .bind(model_id)
+            .execute(&self.pool)
+            .await?;
         Ok(r.rows_affected() > 0)
     }
 
@@ -919,13 +1010,11 @@ impl Repository {
         provider_id: &str,
         model_id: &str,
     ) -> Result<bool, StorageError> {
-        let r = sqlx::query(
-            "DELETE FROM disabled_models WHERE provider_id = ? AND model_id = ?",
-        )
-        .bind(provider_id)
-        .bind(model_id)
-        .execute(&self.pool)
-        .await?;
+        let r = sqlx::query("DELETE FROM disabled_models WHERE provider_id = ? AND model_id = ?")
+            .bind(provider_id)
+            .bind(model_id)
+            .execute(&self.pool)
+            .await?;
         Ok(r.rows_affected() > 0)
     }
 
@@ -934,11 +1023,10 @@ impl Repository {
     /// `list_providers` to filter catalogs before sending them to
     /// the webview.
     pub async fn list_disabled_models(&self) -> Result<Vec<(String, String)>, StorageError> {
-        let rows: Vec<(String, String)> = sqlx::query_as(
-            "SELECT provider_id, model_id FROM disabled_models",
-        )
-        .fetch_all(&self.pool)
-        .await?;
+        let rows: Vec<(String, String)> =
+            sqlx::query_as("SELECT provider_id, model_id FROM disabled_models")
+                .fetch_all(&self.pool)
+                .await?;
         Ok(rows)
     }
 
@@ -951,13 +1039,12 @@ impl Repository {
         provider_id: &str,
         model_id: &str,
     ) -> Result<bool, StorageError> {
-        let r: Option<(i64,)> = sqlx::query_as(
-            "SELECT 1 FROM disabled_models WHERE provider_id = ? AND model_id = ?",
-        )
-        .bind(provider_id)
-        .bind(model_id)
-        .fetch_optional(&self.pool)
-        .await?;
+        let r: Option<(i64,)> =
+            sqlx::query_as("SELECT 1 FROM disabled_models WHERE provider_id = ? AND model_id = ?")
+                .bind(provider_id)
+                .bind(model_id)
+                .fetch_optional(&self.pool)
+                .await?;
         Ok(r.is_some())
     }
 
@@ -1001,8 +1088,7 @@ impl Repository {
         match row {
             None => Ok(None),
             Some((role_id, default_model, fallback_chain, updated_at)) => {
-                let chain: Vec<String> = serde_json::from_str(&fallback_chain)
-                    .unwrap_or_default();
+                let chain: Vec<String> = serde_json::from_str(&fallback_chain).unwrap_or_default();
                 Ok(Some(RoleOverrideRow {
                     role_id,
                     default_model,
@@ -1177,13 +1263,12 @@ impl Repository {
     ) -> Result<usize, StorageError> {
         let n = match model_id {
             Some(m) => {
-                let r = sqlx::query(
-                    "DELETE FROM quota_failures WHERE role_id = ? AND model_id = ?",
-                )
-                .bind(role_id)
-                .bind(m)
-                .execute(&self.pool)
-                .await?;
+                let r =
+                    sqlx::query("DELETE FROM quota_failures WHERE role_id = ? AND model_id = ?")
+                        .bind(role_id)
+                        .bind(m)
+                        .execute(&self.pool)
+                        .await?;
                 r.rows_affected() as usize
             }
             None => {
@@ -1259,9 +1344,20 @@ impl Repository {
     /// uses this to render the "任务列表" panel.
     pub async fn list_tasks_for(&self, wf_id: &str) -> Result<Vec<Task>, StorageError> {
         let rows: Vec<(
-            String, String, Option<String>, String, String,
-            Option<String>, Option<String>, i64, i64, i64,
-            Option<f64>, Option<String>, Option<i64>, Option<i64>,
+            String,
+            String,
+            Option<String>,
+            String,
+            String,
+            Option<String>,
+            Option<String>,
+            i64,
+            i64,
+            i64,
+            Option<f64>,
+            Option<String>,
+            Option<i64>,
+            Option<i64>,
             Option<String>,
         )> = sqlx::query_as(
             "SELECT id, wf_id, parent_id, title, status, assigned_to,
@@ -1273,15 +1369,44 @@ impl Repository {
         .bind(wf_id)
         .fetch_all(&self.pool)
         .await?;
-        Ok(rows.into_iter().map(|(id, wf, parent, title, status,
-            assigned, model, rep, in_t, out_t, cost, files,
-            started, finished, result)| Task {
-            id, wf_id: wf, parent_id: parent, title, status,
-            assigned_to: assigned, model, repair_count: rep,
-            input_tokens: in_t, output_tokens: out_t, cost_usd: cost,
-            files_modified: files, started_at: started,
-            finished_at: finished, result,
-        }).collect())
+        Ok(rows
+            .into_iter()
+            .map(
+                |(
+                    id,
+                    wf,
+                    parent,
+                    title,
+                    status,
+                    assigned,
+                    model,
+                    rep,
+                    in_t,
+                    out_t,
+                    cost,
+                    files,
+                    started,
+                    finished,
+                    result,
+                )| Task {
+                    id,
+                    wf_id: wf,
+                    parent_id: parent,
+                    title,
+                    status,
+                    assigned_to: assigned,
+                    model,
+                    repair_count: rep,
+                    input_tokens: in_t,
+                    output_tokens: out_t,
+                    cost_usd: cost,
+                    files_modified: files,
+                    started_at: started,
+                    finished_at: finished,
+                    result,
+                },
+            )
+            .collect())
     }
 
     /// v0.4.21 (event 000064): tasks table was always empty
@@ -1329,10 +1454,7 @@ impl Repository {
 
     /// Internal helper: run a query that returns the 7-column
     /// shape used by every quota row reader.
-    async fn fetch_quota_rows(
-        &self,
-        sql: &str,
-    ) -> Result<Vec<QuotaFailureRow>, StorageError> {
+    async fn fetch_quota_rows(&self, sql: &str) -> Result<Vec<QuotaFailureRow>, StorageError> {
         let rows: Vec<(String, String, i64, String, String, i64, Option<i64>)> =
             sqlx::query_as(sql).fetch_all(&self.pool).await?;
         let out = rows

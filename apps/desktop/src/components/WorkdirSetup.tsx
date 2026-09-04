@@ -22,9 +22,9 @@
  * before the main dashboard renders (handled by App.tsx via a
  *     workdir === null gate).
  */
-import { useState } from 'react';
-import { open as openDialog } from '@tauri-apps/plugin-dialog';
-import { useTranslation } from 'react-i18next';
+import { useState } from "react";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { useTranslation } from "react-i18next";
 
 export interface WorkdirSetupProps {
   /**
@@ -56,16 +56,16 @@ export interface WorkdirSetupProps {
    * 'settings' (modal in Settings modal, optional). Affects copy
    * + whether Skip is shown.
    */
-  mode: 'first-launch' | 'settings';
+  mode: "first-launch" | "settings";
 }
 
 export function WorkdirSetup({ initialPath, onConfirm, onSkip, mode }: WorkdirSetupProps) {
   const { t } = useTranslation();
-  const [path, setPath] = useState(initialPath ?? '');
+  const [path, setPath] = useState(initialPath ?? "");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  const isFirstLaunch = mode === 'first-launch';
+  const isFirstLaunch = mode === "first-launch";
 
   const pick = async () => {
     setBusy(true);
@@ -74,13 +74,13 @@ export function WorkdirSetup({ initialPath, onConfirm, onSkip, mode }: WorkdirSe
       const picked = await openDialog({
         directory: true,
         multiple: false,
-        title: t('workdir.pickTitle'),
+        title: t("workdir.pickTitle"),
       });
-      if (typeof picked === 'string' && picked.length > 0) {
+      if (typeof picked === "string" && picked.length > 0) {
         setPath(picked);
       }
     } catch (e) {
-      setErr(tErr(t, e, 'workdir.errorPick'));
+      setErr(tErr(t, e, "workdir.errorPick"));
     } finally {
       setBusy(false);
     }
@@ -89,7 +89,7 @@ export function WorkdirSetup({ initialPath, onConfirm, onSkip, mode }: WorkdirSe
   const confirm = () => {
     const trimmed = path.trim();
     if (trimmed.length === 0) {
-      setErr(t('workdir.errorEmpty'));
+      setErr(t("workdir.errorEmpty"));
       return;
     }
     setErr(null);
@@ -100,18 +100,14 @@ export function WorkdirSetup({ initialPath, onConfirm, onSkip, mode }: WorkdirSe
     <div
       className={
         isFirstLaunch
-          ? 'flex h-screen w-screen items-center justify-center bg-surface-1 px-6'
-          : 'flex flex-col gap-3'
+          ? "flex h-screen w-screen items-center justify-center bg-surface-1 px-6"
+          : "flex flex-col gap-3"
       }
     >
       <div className="w-full max-w-xl rounded-lg border border-border bg-surface-1 p-6 shadow-sm">
-        <h1 className="text-xl font-semibold text-text-primary">
-          {t('workdir.title')}
-        </h1>
+        <h1 className="text-xl font-semibold text-text-primary">{t("workdir.title")}</h1>
         <p className="mt-1 text-sm text-text-secondary">
-          {isFirstLaunch
-            ? t('workdir.subtitleFirst')
-            : t('workdir.subtitleSettings')}
+          {isFirstLaunch ? t("workdir.subtitleFirst") : t("workdir.subtitleSettings")}
         </p>
 
         <div className="mt-4 flex gap-2">
@@ -128,17 +124,17 @@ export function WorkdirSetup({ initialPath, onConfirm, onSkip, mode }: WorkdirSe
             // expect. Escape clears the field (analogous to
             // the Settings delete dialog's Escape-cancels).
             onKeyDown={(e) => {
-              if (e.key === 'Enter') {
+              if (e.key === "Enter") {
                 e.preventDefault();
                 confirm();
-              } else if (e.key === 'Escape') {
-                setPath('');
+              } else if (e.key === "Escape") {
+                setPath("");
                 setErr(null);
               }
             }}
-            placeholder={t('workdir.placeholder')}
+            placeholder={t("workdir.placeholder")}
             className="flex-1 rounded border border-border bg-surface-2 px-3 py-2 font-mono text-sm outline-none focus:border-chief"
-            aria-label={t('workdir.placeholder')}
+            aria-label={t("workdir.placeholder")}
           />
           <button
             type="button"
@@ -146,24 +142,18 @@ export function WorkdirSetup({ initialPath, onConfirm, onSkip, mode }: WorkdirSe
             disabled={busy}
             className="rounded border border-border bg-surface-2 px-3 py-2 text-sm text-text-secondary hover:bg-surface-3 hover:text-primary disabled:opacity-50"
           >
-            📁 {t('workdir.browse')}
+            📁 {t("workdir.browse")}
           </button>
         </div>
 
         {err && (
-          <p
-            role="alert"
-            aria-live="polite"
-            className="mt-2 text-xs text-status-failed"
-          >
+          <p role="alert" aria-live="polite" className="mt-2 text-xs text-status-failed">
             {err}
           </p>
         )}
 
         {path.trim().length === 0 && (
-          <p className="mt-3 text-xs text-text-secondary">
-            {t('workdir.hint')}
-          </p>
+          <p className="mt-3 text-xs text-text-secondary">{t("workdir.hint")}</p>
         )}
 
         <div className="mt-5 flex items-center justify-end gap-2">
@@ -173,7 +163,7 @@ export function WorkdirSetup({ initialPath, onConfirm, onSkip, mode }: WorkdirSe
               onClick={onSkip}
               className="text-xs text-text-secondary hover:text-primary"
             >
-              {t('workdir.skip')}
+              {t("workdir.skip")}
             </button>
           )}
           <button
@@ -182,7 +172,7 @@ export function WorkdirSetup({ initialPath, onConfirm, onSkip, mode }: WorkdirSe
             disabled={path.trim().length === 0 || busy}
             className="rounded-md bg-chief px-4 py-2 text-sm font-medium text-black hover:brightness-110 disabled:opacity-50"
           >
-            {isFirstLaunch ? t('workdir.confirmFirst') : t('workdir.confirmSettings')}
+            {isFirstLaunch ? t("workdir.confirmFirst") : t("workdir.confirmSettings")}
           </button>
         </div>
       </div>
@@ -193,7 +183,11 @@ export function WorkdirSetup({ initialPath, onConfirm, onSkip, mode }: WorkdirSe
 // Avoid importing tErr from a separate file; mirror its inline
 // implementation here so the workdir dialog is self-contained.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function tErr(t: (k: string, options?: any) => string, error: unknown, fallbackKey: string): string {
+function tErr(
+  t: (k: string, options?: any) => string,
+  error: unknown,
+  fallbackKey: string,
+): string {
   const raw = error instanceof Error ? error.message : String(error);
   return t(fallbackKey, { error: raw });
 }

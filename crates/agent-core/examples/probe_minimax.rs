@@ -49,7 +49,10 @@ async fn main() -> anyhow::Result<()> {
                 let txt = r.text().await.unwrap_or_default();
                 let snippet: String = txt.chars().take(400).collect();
                 eprintln!("← HTTP {status}");
-                eprintln!("{snippet}{}", if txt.chars().count() > 400 { "…" } else { "" });
+                eprintln!(
+                    "{snippet}{}",
+                    if txt.chars().count() > 400 { "…" } else { "" }
+                );
             }
             Err(e) => eprintln!("← ERR {e}"),
         }

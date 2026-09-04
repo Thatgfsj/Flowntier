@@ -90,7 +90,11 @@ impl RpcResponse {
             jsonrpc: "2.0".into(),
             id,
             result: None,
-            error: Some(RpcError { code, message: message.into(), data: None }),
+            error: Some(RpcError {
+                code,
+                message: message.into(),
+                data: None,
+            }),
         }
     }
 }

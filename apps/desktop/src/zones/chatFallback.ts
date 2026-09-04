@@ -34,18 +34,15 @@ export type FallbackEvent = { readonly kind: string; readonly summary?: unknown 
  *                far. If non-empty, we return `null` (streaming
  *                text always wins).
  */
-export function fallbackSummary(
-  events: readonly FallbackEvent[],
-  text: string,
-): string | null {
+export function fallbackSummary(events: readonly FallbackEvent[], text: string): string | null {
   if (text.length > 0) return null;
 
   // Walk events in REVERSE to find the latest `done`.
   for (let i = events.length - 1; i >= 0; i--) {
     const e = events[i];
-    if (!e || e.kind !== 'done') continue;
+    if (!e || e.kind !== "done") continue;
     const summary = e.summary;
-    if (typeof summary === 'string' && summary.trim().length > 0) {
+    if (typeof summary === "string" && summary.trim().length > 0) {
       return summary;
     }
     // Found a done but no usable summary — return null because

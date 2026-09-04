@@ -30,12 +30,8 @@ import {
   useMemo,
   useState,
   type ReactNode,
-} from 'react';
-import {
-  disableProviderModel,
-  enableProviderModel,
-  listDisabledModels,
-} from '../lib/api.js';
+} from "react";
+import { disableProviderModel, enableProviderModel, listDisabledModels } from "../lib/api.js";
 
 type Key = `${string}::${string}`;
 
@@ -78,7 +74,7 @@ export function DisabledModelsProvider({ children }: DisabledModelsProviderProps
       .catch((err) => {
         // Logged but not fatal: Settings still works without the
         // initial Set (× icons appear, click still persists).
-        console.error('[DisabledModels] hydrate failed:', err);
+        console.error("[DisabledModels] hydrate failed:", err);
       });
     return () => {
       cancelled = true;
@@ -109,7 +105,7 @@ export function DisabledModelsProvider({ children }: DisabledModelsProviderProps
       // truth. The catalog filter (handlers.rs list_models)
       // already excludes any disabled row regardless of what
       // the in-memory Set thinks. Next hydrate will resync.
-      console.error('[DisabledModels] disable failed:', err);
+      console.error("[DisabledModels] disable failed:", err);
     } finally {
       setBusy(false);
     }
@@ -127,7 +123,7 @@ export function DisabledModelsProvider({ children }: DisabledModelsProviderProps
     try {
       await enableProviderModel(providerId, modelId);
     } catch (err) {
-      console.error('[DisabledModels] enable failed:', err);
+      console.error("[DisabledModels] enable failed:", err);
     } finally {
       setBusy(false);
     }
@@ -144,19 +140,13 @@ export function DisabledModelsProvider({ children }: DisabledModelsProviderProps
     [isDisabled, disable, enable, set.size, busy],
   );
 
-  return (
-    <DisabledModelsContext.Provider value={value}>
-      {children}
-    </DisabledModelsContext.Provider>
-  );
+  return <DisabledModelsContext.Provider value={value}>{children}</DisabledModelsContext.Provider>;
 }
 
 export function useDisabledModels(): DisabledModelsContextValue {
   const ctx = useContext(DisabledModelsContext);
   if (!ctx) {
-    throw new Error(
-      'useDisabledModels() must be used inside <DisabledModelsProvider>',
-    );
+    throw new Error("useDisabledModels() must be used inside <DisabledModelsProvider>");
   }
   return ctx;
 }

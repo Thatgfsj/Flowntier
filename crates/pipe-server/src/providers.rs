@@ -173,9 +173,24 @@ pub struct ModelEntry {
 }
 
 pub const ANTHROPIC_FALLBACK_MODELS: &[ModelEntry] = &[
-    ModelEntry { id: "claude-opus-4-8",            display_name: "Claude Opus 4.8 (recommended)", thinking_strength: "high",   context_length: 200_000 },
-    ModelEntry { id: "claude-sonnet-4-6",         display_name: "Claude Sonnet 4.6",             thinking_strength: "medium", context_length: 200_000 },
-    ModelEntry { id: "claude-haiku-4-5-20251022", display_name: "Claude Haiku 4.5 (fast)",       thinking_strength: "low",    context_length: 200_000 },
+    ModelEntry {
+        id: "claude-opus-4-8",
+        display_name: "Claude Opus 4.8 (recommended)",
+        thinking_strength: "high",
+        context_length: 200_000,
+    },
+    ModelEntry {
+        id: "claude-sonnet-4-6",
+        display_name: "Claude Sonnet 4.6",
+        thinking_strength: "medium",
+        context_length: 200_000,
+    },
+    ModelEntry {
+        id: "claude-haiku-4-5-20251022",
+        display_name: "Claude Haiku 4.5 (fast)",
+        thinking_strength: "low",
+        context_length: 200_000,
+    },
 ];
 
 // OpenAI-compatible providers that don't expose a /v1/models endpoint.
@@ -183,58 +198,218 @@ pub const ANTHROPIC_FALLBACK_MODELS: &[ModelEntry] = &[
 // context_length metadata to choose models. These are best-effort
 // defaults — the user can override per-model in the custom-models UI.
 pub const OPENAI_FALLBACK_MODELS: &[(&str, &[ModelEntry])] = &[
-    ("minimax", &[
-        // v0.4.22 (event 000118): the previous fallback mis-labelled
-        // `MiniMax-Text-01` as "MiniMax M3 (recommended)" — which
-        // contradicted the id and confused users who later saw the
-        // live cache surface `MiniMax-M3` as a separate model.
-        // Fix: use the canonical MiniMax naming. `Text-01` is the
-        // general text model; `VL-01` adds vision; `M3` is the
-        // MiniMax-M3 family exposed on api.minimaxi.com.
-        ModelEntry { id: "MiniMax-Text-01", display_name: "MiniMax Text-01 (text, recommended)", thinking_strength: "high",   context_length: 128_000 },
-        ModelEntry { id: "MiniMax-VL-01",   display_name: "MiniMax VL-01 (vision+text)",         thinking_strength: "medium", context_length: 128_000 },
-        ModelEntry { id: "MiniMax-M3",      display_name: "MiniMax M3 (reasoning)",              thinking_strength: "high",   context_length: 128_000 },
-        ModelEntry { id: "abab-6.5s-chat",  display_name: "abab-6.5s (fast)",                    thinking_strength: "low",    context_length:  32_000 },
-        ModelEntry { id: "abab-7-chat",     display_name: "abab-7",                              thinking_strength: "medium", context_length:  64_000 },
-    ]),
-    ("kimi", &[
-        ModelEntry { id: "moonshot-v1-128k", display_name: "Moonshot v1 128k (Kimi K2)", thinking_strength: "medium", context_length: 128_000 },
-        ModelEntry { id: "moonshot-v1-32k",  display_name: "Moonshot v1 32k",             thinking_strength: "medium", context_length:  32_000 },
-    ]),
-    ("glm", &[
-        ModelEntry { id: "glm-4",     display_name: "GLM-4 (recommended)", thinking_strength: "high",   context_length: 128_000 },
-        ModelEntry { id: "glm-3-turbo", display_name: "GLM-3 Turbo",         thinking_strength: "low",    context_length:  16_000 },
-    ]),
-    ("mimo", &[
-        ModelEntry { id: "mimo-v1", display_name: "Xiaomi MiMo v1 (recommended)", thinking_strength: "high",   context_length: 64_000 },
-    ]),
-    ("siliconflow", &[
-        ModelEntry { id: "Qwen/Qwen2.5-72B-Instruct", display_name: "Qwen2.5 72B", thinking_strength: "high", context_length: 32_000 },
-        ModelEntry { id: "deepseek-ai/DeepSeek-V2.5",  display_name: "DeepSeek V2.5", thinking_strength: "high", context_length: 32_000 },
-        ModelEntry { id: "meta-llama/Meta-Llama-3.1-70B-Instruct", display_name: "Llama 3.1 70B", thinking_strength: "medium", context_length: 32_000 },
-    ]),
-    ("openai", &[
-        ModelEntry { id: "gpt-4o",       display_name: "GPT-4o (recommended)", thinking_strength: "high",   context_length: 128_000 },
-        ModelEntry { id: "gpt-4o-mini",  display_name: "GPT-4o mini",          thinking_strength: "medium", context_length: 128_000 },
-        ModelEntry { id: "o1",           display_name: "o1 (reasoning)",       thinking_strength: "high",   context_length: 200_000 },
-        ModelEntry { id: "o3-mini",      display_name: "o3-mini",              thinking_strength: "high",   context_length: 200_000 },
-        ModelEntry { id: "gpt-5",        display_name: "GPT-5",                thinking_strength: "high",   context_length: 400_000 },
-        ModelEntry { id: "gpt-5-mini",   display_name: "GPT-5 mini",           thinking_strength: "medium", context_length: 400_000 },
-    ]),
-    ("google", &[
-        ModelEntry { id: "gemini-2.5-pro",   display_name: "Gemini 2.5 Pro (recommended)", thinking_strength: "high",   context_length: 1_000_000 },
-        ModelEntry { id: "gemini-2.5-flash", display_name: "Gemini 2.5 Flash",             thinking_strength: "medium", context_length: 1_000_000 },
-        ModelEntry { id: "gemini-1.5-pro",   display_name: "Gemini 1.5 Pro",               thinking_strength: "medium", context_length: 1_000_000 },
-    ]),
-    ("deepseek", &[
-        ModelEntry { id: "deepseek-chat",    display_name: "DeepSeek Chat (V3)",     thinking_strength: "medium", context_length: 64_000 },
-        ModelEntry { id: "deepseek-reasoner",display_name: "DeepSeek Reasoner (R1)", thinking_strength: "high",   context_length: 64_000 },
-    ]),
-    ("anthropic", &[
-        ModelEntry { id: "claude-opus-4-8",    display_name: "Claude Opus 4.8 (recommended)", thinking_strength: "high",   context_length: 200_000 },
-        ModelEntry { id: "claude-sonnet-4-6", display_name: "Claude Sonnet 4.6",             thinking_strength: "medium", context_length: 200_000 },
-        ModelEntry { id: "claude-haiku-4-5-20251022", display_name: "Claude Haiku 4.5 (fast)", thinking_strength: "low", context_length: 200_000 },
-    ]),
+    (
+        "minimax",
+        &[
+            // v0.4.22 (event 000118): the previous fallback mis-labelled
+            // `MiniMax-Text-01` as "MiniMax M3 (recommended)" — which
+            // contradicted the id and confused users who later saw the
+            // live cache surface `MiniMax-M3` as a separate model.
+            // Fix: use the canonical MiniMax naming. `Text-01` is the
+            // general text model; `VL-01` adds vision; `M3` is the
+            // MiniMax-M3 family exposed on api.minimaxi.com.
+            ModelEntry {
+                id: "MiniMax-Text-01",
+                display_name: "MiniMax Text-01 (text, recommended)",
+                thinking_strength: "high",
+                context_length: 128_000,
+            },
+            ModelEntry {
+                id: "MiniMax-VL-01",
+                display_name: "MiniMax VL-01 (vision+text)",
+                thinking_strength: "medium",
+                context_length: 128_000,
+            },
+            ModelEntry {
+                id: "MiniMax-M3",
+                display_name: "MiniMax M3 (reasoning)",
+                thinking_strength: "high",
+                context_length: 128_000,
+            },
+            ModelEntry {
+                id: "abab-6.5s-chat",
+                display_name: "abab-6.5s (fast)",
+                thinking_strength: "low",
+                context_length: 32_000,
+            },
+            ModelEntry {
+                id: "abab-7-chat",
+                display_name: "abab-7",
+                thinking_strength: "medium",
+                context_length: 64_000,
+            },
+        ],
+    ),
+    (
+        "kimi",
+        &[
+            ModelEntry {
+                id: "moonshot-v1-128k",
+                display_name: "Moonshot v1 128k (Kimi K2)",
+                thinking_strength: "medium",
+                context_length: 128_000,
+            },
+            ModelEntry {
+                id: "moonshot-v1-32k",
+                display_name: "Moonshot v1 32k",
+                thinking_strength: "medium",
+                context_length: 32_000,
+            },
+        ],
+    ),
+    (
+        "glm",
+        &[
+            ModelEntry {
+                id: "glm-4",
+                display_name: "GLM-4 (recommended)",
+                thinking_strength: "high",
+                context_length: 128_000,
+            },
+            ModelEntry {
+                id: "glm-3-turbo",
+                display_name: "GLM-3 Turbo",
+                thinking_strength: "low",
+                context_length: 16_000,
+            },
+        ],
+    ),
+    (
+        "mimo",
+        &[ModelEntry {
+            id: "mimo-v1",
+            display_name: "Xiaomi MiMo v1 (recommended)",
+            thinking_strength: "high",
+            context_length: 64_000,
+        }],
+    ),
+    (
+        "siliconflow",
+        &[
+            ModelEntry {
+                id: "Qwen/Qwen2.5-72B-Instruct",
+                display_name: "Qwen2.5 72B",
+                thinking_strength: "high",
+                context_length: 32_000,
+            },
+            ModelEntry {
+                id: "deepseek-ai/DeepSeek-V2.5",
+                display_name: "DeepSeek V2.5",
+                thinking_strength: "high",
+                context_length: 32_000,
+            },
+            ModelEntry {
+                id: "meta-llama/Meta-Llama-3.1-70B-Instruct",
+                display_name: "Llama 3.1 70B",
+                thinking_strength: "medium",
+                context_length: 32_000,
+            },
+        ],
+    ),
+    (
+        "openai",
+        &[
+            ModelEntry {
+                id: "gpt-4o",
+                display_name: "GPT-4o (recommended)",
+                thinking_strength: "high",
+                context_length: 128_000,
+            },
+            ModelEntry {
+                id: "gpt-4o-mini",
+                display_name: "GPT-4o mini",
+                thinking_strength: "medium",
+                context_length: 128_000,
+            },
+            ModelEntry {
+                id: "o1",
+                display_name: "o1 (reasoning)",
+                thinking_strength: "high",
+                context_length: 200_000,
+            },
+            ModelEntry {
+                id: "o3-mini",
+                display_name: "o3-mini",
+                thinking_strength: "high",
+                context_length: 200_000,
+            },
+            ModelEntry {
+                id: "gpt-5",
+                display_name: "GPT-5",
+                thinking_strength: "high",
+                context_length: 400_000,
+            },
+            ModelEntry {
+                id: "gpt-5-mini",
+                display_name: "GPT-5 mini",
+                thinking_strength: "medium",
+                context_length: 400_000,
+            },
+        ],
+    ),
+    (
+        "google",
+        &[
+            ModelEntry {
+                id: "gemini-2.5-pro",
+                display_name: "Gemini 2.5 Pro (recommended)",
+                thinking_strength: "high",
+                context_length: 1_000_000,
+            },
+            ModelEntry {
+                id: "gemini-2.5-flash",
+                display_name: "Gemini 2.5 Flash",
+                thinking_strength: "medium",
+                context_length: 1_000_000,
+            },
+            ModelEntry {
+                id: "gemini-1.5-pro",
+                display_name: "Gemini 1.5 Pro",
+                thinking_strength: "medium",
+                context_length: 1_000_000,
+            },
+        ],
+    ),
+    (
+        "deepseek",
+        &[
+            ModelEntry {
+                id: "deepseek-chat",
+                display_name: "DeepSeek Chat (V3)",
+                thinking_strength: "medium",
+                context_length: 64_000,
+            },
+            ModelEntry {
+                id: "deepseek-reasoner",
+                display_name: "DeepSeek Reasoner (R1)",
+                thinking_strength: "high",
+                context_length: 64_000,
+            },
+        ],
+    ),
+    (
+        "anthropic",
+        &[
+            ModelEntry {
+                id: "claude-opus-4-8",
+                display_name: "Claude Opus 4.8 (recommended)",
+                thinking_strength: "high",
+                context_length: 200_000,
+            },
+            ModelEntry {
+                id: "claude-sonnet-4-6",
+                display_name: "Claude Sonnet 4.6",
+                thinking_strength: "medium",
+                context_length: 200_000,
+            },
+            ModelEntry {
+                id: "claude-haiku-4-5-20251022",
+                display_name: "Claude Haiku 4.5 (fast)",
+                thinking_strength: "low",
+                context_length: 200_000,
+            },
+        ],
+    ),
 ];
 
 #[cfg(test)]

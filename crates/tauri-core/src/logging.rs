@@ -141,11 +141,7 @@ fn install_panic_hook(log_dir: &Path) {
             info.payload()
                 .downcast_ref::<&str>()
                 .map(|s| s.to_string())
-                .or_else(|| {
-                    info.payload()
-                        .downcast_ref::<String>()
-                        .cloned()
-                })
+                .or_else(|| { info.payload().downcast_ref::<String>().cloned() })
                 .unwrap_or_else(|| "(non-string panic payload)".into()),
             std::backtrace::Backtrace::force_capture(),
         );

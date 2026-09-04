@@ -27,7 +27,7 @@ pub const MAX_COMMAND_BYTES: usize = 64 * 1024; // 64 KiB
 const DANGEROUS_PATTERNS: &[&str] = &[
     "rm -rf /",
     "rm -rf ~",
-    ":(){:|:&};:",          // fork bomb
+    ":(){:|:&};:", // fork bomb
     "mkfs",
     "dd if=",
     "shutdown",
@@ -38,7 +38,7 @@ const DANGEROUS_PATTERNS: &[&str] = &[
     "init 6",
     "passwd ",
     "userdel",
-    "del /f",               // Windows force-delete
+    "del /f", // Windows force-delete
     "rd /s",
     "format ",
     "reg delete",
@@ -150,15 +150,16 @@ impl Tool for BashTool {
         } else {
             tokio::time::timeout(timeout, &mut output_fut).await
         }
-        .map_err(|_| ToolError::Other(format!("timed out after {}s", timeout.as_secs())))?
-        ?;
+        .map_err(|_| ToolError::Other(format!("timed out after {}s", timeout.as_secs())))??;
 
         let mut buf = String::with_capacity(output.stdout.len() + output.stderr.len() + 64);
         if !output.stdout.is_empty() {
             buf.push_str(&String::from_utf8_lossy(&output.stdout));
         }
         if !output.stderr.is_empty() {
-            if !buf.is_empty() { buf.push('\n'); }
+            if !buf.is_empty() {
+                buf.push('\n');
+            }
             buf.push_str("--- stderr ---\n");
             buf.push_str(&String::from_utf8_lossy(&output.stderr));
         }
@@ -179,6 +180,51 @@ impl Tool for BashTool {
 
 #[cfg(target_os = "windows")]
 fn build_shell_command(command: &str) -> Command {
+    // 1. Probe for Git Bash (native Unix bash on Windows)
+    let git_bash_candidates = [
+        r"C:\Program Files\Git\bin\bash.exe",
+        r"C:\Program Files (x86)\Git\bin\bash.exe",
+    ];
+    for path in git_bash_candidates {
+        if std::path::Path::new(path).exists() {
+            let mut c = Command::new(path);
+            c.arg("-c").arg(command);
+            return c;
+        }
+    }
+
+    // 2. Probe for bash in PATH
+    if let Some(path_var) = std::env::var_os("PATH") {
+        for dir in std::env::split_paths(&path_var) {
+            let candidate = dir.join("bash.exe");
+            if candidate.exists() {
+                let mut c = Command::new(candidate);
+                c.arg("-c").arg(command);
+                return c;
+            }
+        }
+    }
+
+    // 3. Fallback to PowerShell (supports ls, cat, pwd, curl aliases)
+    let ps_candidates = [
+        r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
+        "powershell.exe",
+    ];
+    for ps in ps_candidates {
+        if std::path::Path::new(ps).exists() || ps == "powershell.exe" {
+            let mut c = Command::new(ps);
+            c.args([
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                command,
+            ]);
+            return c;
+        }
+    }
+
+    // 4. Ultimate fallback to cmd.exe
     let mut c = Command::new("cmd");
     c.arg("/C").arg(command);
     c
@@ -199,13 +245,33 @@ fn looks_like_network(cmd: &str) -> bool {
     let lower = cmd.to_lowercase();
     // Common network-using binaries and a couple of protocols.
     const MARKERS: &[&str] = &[
-        "curl", "wget", "httpie", "http ", "https://", "http://",
-        "ftp ", "sftp", "scp", "rsync ", "ssh ",
-        "npm install", "pnpm install", "yarn add", "pip install",
-        "git clone", "git fetch", "git pull", "git push",
-        "nslookup", "ping ", "tracert", "traceroute",
-        "telnet ", "nc ", "netcat",
-        "powershell -command",  // over-eager but safe
+        "curl",
+        "wget",
+        "httpie",
+        "http ",
+        "https://",
+        "http://",
+        "ftp ",
+        "sftp",
+        "scp",
+        "rsync ",
+        "ssh ",
+        "npm install",
+        "pnpm install",
+        "yarn add",
+        "pip install",
+        "git clone",
+        "git fetch",
+        "git pull",
+        "git push",
+        "nslookup",
+        "ping ",
+        "tracert",
+        "traceroute",
+        "telnet ",
+        "nc ",
+        "netcat",
+        "powershell -command", // over-eager but safe
     ];
     MARKERS.iter().any(|m| lower.contains(m))
 }
@@ -305,7 +371,11 @@ mod cap_tests {
             .execute(serde_json::json!({"command": "echo local"}), &c)
             .await
             .unwrap();
-        assert!(!out.is_error, "local command must run, got: {}", out.content);
+        assert!(
+            !out.is_error,
+            "local command must run, got: {}",
+            out.content
+        );
     }
 
     #[test]

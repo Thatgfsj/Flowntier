@@ -31,7 +31,8 @@
 //! See `docs/ARCHITECTURE.md` §4 for the full design.
 
 #![forbid(unsafe_code)]
-#![allow(missing_docs)]  // internal crate: API documented in PROMPT_SPEC.md and module-level //! docs; per-field doc comments would duplicate the type signature.
+#![allow(missing_docs)]
+#![allow(clippy::items_after_test_module)]
 
 pub mod context;
 pub mod event;

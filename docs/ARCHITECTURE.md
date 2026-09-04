@@ -43,10 +43,10 @@ which is in turn captured by `crates/agent-core/`,
                           │                                │
                           │   React 19 + TS + Tailwind v4  │
                           │   ┌────────────────────────┐   │
-                          │   │  IDE-style UI           │   │
-                          │   │  文件树 │ Monaco │ Timeline │   │
-                          │   │       │  diff  │          │   │
-                          │   │       │ xterm.js│  Chat   │   │
+                          │   │  Workbench UI          │   │
+                          │   │  花名册 │ 推理区 │ Timeline  │   │
+                          │   │  文件树 │ 审查流 │ 日志/摘要 │   │
+                          │   │        │        │ ChatZone   │   │
                           │   └────────────┬───────────┘   │
                           │                │ Tauri IPC     │
                           └────────────────┼───────────────┘

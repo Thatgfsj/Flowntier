@@ -11,29 +11,59 @@
  * the *current* chat session. A `reset()` helper starts a new
  * session.
  */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from "react";
 
 export type AgentEvent =
-  | { kind: 'text_delta'; agent_id: string; agent_display: string; delta: string; task_id?: string | null }
-  | { kind: 'tool_started'; agent_id: string; agent_display: string; call: { id: string; name: string; args: unknown }; task_id?: string | null }
-  | { kind: 'tool_finished'; agent_id: string; agent_display: string; tool_call_id: string; preview: string; is_error: boolean; elapsed_ms: number; task_id?: string | null }
-  | { kind: 'phase_transition'; wf_id: string; from: string | null; to: string }
-  | { kind: 'token_usage'; agent_id: string; provider: string; model: string; input_tokens: number; output_tokens: number; cost_usd: number | null; task_id?: string | null }
-  | { kind: 'done'; wf_id: string; status: string; summary: string | null };
+  | {
+      kind: "text_delta";
+      agent_id: string;
+      agent_display: string;
+      delta: string;
+      task_id?: string | null;
+    }
+  | {
+      kind: "tool_started";
+      agent_id: string;
+      agent_display: string;
+      call: { id: string; name: string; args: unknown };
+      task_id?: string | null;
+    }
+  | {
+      kind: "tool_finished";
+      agent_id: string;
+      agent_display: string;
+      tool_call_id: string;
+      preview: string;
+      is_error: boolean;
+      elapsed_ms: number;
+      task_id?: string | null;
+    }
+  | { kind: "phase_transition"; wf_id: string; from: string | null; to: string }
+  | {
+      kind: "token_usage";
+      agent_id: string;
+      provider: string;
+      model: string;
+      input_tokens: number;
+      output_tokens: number;
+      cost_usd: number | null;
+      task_id?: string | null;
+    }
+  | { kind: "done"; wf_id: string; status: string; summary: string | null };
 
 const AGENT_KINDS: ReadonlySet<string> = new Set([
-  'text_delta',
-  'tool_started',
-  'tool_finished',
-  'phase_transition',
-  'token_usage',
-  'done',
+  "text_delta",
+  "tool_started",
+  "tool_finished",
+  "phase_transition",
+  "token_usage",
+  "done",
 ]);
 
 function isAgentEvent(payload: unknown): payload is AgentEvent {
-  if (typeof payload !== 'object' || payload === null) return false;
+  if (typeof payload !== "object" || payload === null) return false;
   const k = (payload as { kind?: string }).kind;
-  return typeof k === 'string' && AGENT_KINDS.has(k);
+  return typeof k === "string" && AGENT_KINDS.has(k);
 }
 
 export interface UseAgentStreamResult {
@@ -51,7 +81,7 @@ export interface UseAgentStreamResult {
 
 export function useAgentStream(): UseAgentStreamResult {
   const [events, setEvents] = useState<AgentEvent[]>([]);
-  const [text, setText] = useState('');
+  const [text, setText] = useState("");
   const [done, setDone] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
 
@@ -65,18 +95,18 @@ export function useAgentStream(): UseAgentStreamResult {
 
     void (async () => {
       try {
-        const { listen } = await import('@tauri-apps/api/event');
+        const { listen } = await import("@tauri-apps/api/event");
         if (cancelled) return;
-        const off = await listen<unknown>('wf:event', (e) => {
+        const off = await listen<unknown>("wf:event", (e) => {
           if (!isAgentEvent(e.payload)) return;
           const ev = e.payload;
           setEventsRef.current((prev) => [...prev, ev]);
-          if (ev.kind === 'text_delta') {
+          if (ev.kind === "text_delta") {
             setText((t) => t + ev.delta);
-          } else if (ev.kind === 'done') {
+          } else if (ev.kind === "done") {
             setDone(true);
             setStatus(ev.status);
-          } else if (ev.kind === 'tool_finished') {
+          } else if (ev.kind === "tool_finished") {
             // After a tool finishes, a fresh assistant turn may follow.
             // We do not clear `text` here — the next text_delta will
             // continue to append, which matches the user's mental model.
@@ -86,7 +116,7 @@ export function useAgentStream(): UseAgentStreamResult {
       } catch (err) {
         // Not running under Tauri — silent no-op.
         // eslint-disable-next-line no-console
-        console.warn('Tauri event API unavailable for useAgentStream:', err);
+        console.warn("Tauri event API unavailable for useAgentStream:", err);
       }
     })();
 
@@ -98,7 +128,7 @@ export function useAgentStream(): UseAgentStreamResult {
 
   const reset = useCallback(() => {
     setEvents([]);
-    setText('');
+    setText("");
     setDone(false);
     setStatus(null);
   }, []);

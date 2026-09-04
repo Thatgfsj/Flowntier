@@ -9,27 +9,27 @@
  */
 
 export type SimPhaseId =
-  | 'requirement'
-  | 'planning'
-  | 'plan_review'
-  | 'dispatch'
-  | 'development'
-  | 'review'
-  | 'repair'
-  | 'delivery';
+  | "requirement"
+  | "planning"
+  | "plan_review"
+  | "dispatch"
+  | "development"
+  | "review"
+  | "repair"
+  | "delivery";
 
 export type SimTaskState =
-  | 'PENDING'
-  | 'DISPATCHED'
-  | 'IN_PROGRESS'
-  | 'SUBMITTED'
-  | 'UNDER_REVIEW'
-  | 'REPAIR_REQUESTED'
-  | 'REPAIRING'
-  | 'APPROVED'
-  | 'DONE'
-  | 'FAILED'
-  | 'ABORTED';
+  | "PENDING"
+  | "DISPATCHED"
+  | "IN_PROGRESS"
+  | "SUBMITTED"
+  | "UNDER_REVIEW"
+  | "REPAIR_REQUESTED"
+  | "REPAIRING"
+  | "APPROVED"
+  | "DONE"
+  | "FAILED"
+  | "ABORTED";
 
 export interface SimTask {
   id: string;
@@ -43,17 +43,17 @@ export interface SimTask {
 }
 
 export interface SimAgentStatus {
-  chief: 'idle' | 'thinking' | 'speaking';
-  'critic-a': 'idle' | 'thinking' | 'speaking';
-  'critic-b': 'idle' | 'thinking' | 'speaking';
-  worker: 'idle' | 'thinking' | 'speaking';
+  chief: "idle" | "thinking" | "speaking";
+  "critic-a": "idle" | "thinking" | "speaking";
+  "critic-b": "idle" | "thinking" | "speaking";
+  worker: "idle" | "thinking" | "speaking";
 }
 
 export interface SimEvent {
   /** Console log line (agent_id, level, message). */
-  log?: { agent_id: string; level: 'info' | 'warn' | 'error' | 'debug'; message: string };
+  log?: { agent_id: string; level: "info" | "warn" | "error" | "debug"; message: string };
   /** Phase changed to this name + new state. */
-  phase?: { name: SimPhaseId; state: 'pending' | 'active' | 'done' | 'failed' };
+  phase?: { name: SimPhaseId; state: "pending" | "active" | "done" | "failed" };
   /** Task transitioned. */
   task?: { id: string; state: SimTaskState };
   /** Agent status change. */
@@ -61,7 +61,7 @@ export interface SimEvent {
   /** Milestone label (shown on the timeline). */
   milestone?: string;
   /** Workflow is done. */
-  done?: { status: 'DONE' | 'FAILED' | 'ABORTED' };
+  done?: { status: "DONE" | "FAILED" | "ABORTED" };
 }
 
 export interface SimulatorCallbacks {
@@ -78,34 +78,34 @@ export interface SimOptions {
 
 const TASKS: SimTask[] = [
   {
-    id: 't1',
-    title: '后端：实现 /login 接口',
-    owner: '实施 1',
-    fileHint: 'src/auth/login.py',
+    id: "t1",
+    title: "后端：实现 /login 接口",
+    owner: "实施 1",
+    fileHint: "src/auth/login.py",
     durationMs: 1600,
     passesFirstTry: true,
   },
   {
-    id: 't2',
-    title: '前端：LoginForm 组件',
-    owner: '实施 2',
-    fileHint: 'src/components/LoginForm.tsx',
+    id: "t2",
+    title: "前端：LoginForm 组件",
+    owner: "实施 2",
+    fileHint: "src/components/LoginForm.tsx",
     durationMs: 1400,
     passesFirstTry: true,
   },
   {
-    id: 't3',
-    title: '数据库：users 表迁移',
-    owner: '实施 3',
-    fileHint: 'migrations/0001_users.sql',
+    id: "t3",
+    title: "数据库：users 表迁移",
+    owner: "实施 3",
+    fileHint: "migrations/0001_users.sql",
     durationMs: 1200,
     passesFirstTry: false, // will be repaired
   },
   {
-    id: 't4',
-    title: '测试：登录流程端到端',
-    owner: '实施 4',
-    fileHint: 'tests/e2e/test_login.py',
+    id: "t4",
+    title: "测试：登录流程端到端",
+    owner: "实施 4",
+    fileHint: "tests/e2e/test_login.py",
     durationMs: 1000,
     passesFirstTry: true,
   },
@@ -130,87 +130,90 @@ export function startSimulation(
   };
 
   const fire = (event: SimEvent) => callbacks.onEvent(event);
-  const log = (agent_id: string, message: string, level: 'info' | 'warn' | 'error' | 'debug' = 'info') =>
-    fire({ log: { agent_id, level, message } });
-  const phase = (name: SimPhaseId, state: 'pending' | 'active' | 'done') =>
+  const log = (
+    agent_id: string,
+    message: string,
+    level: "info" | "warn" | "error" | "debug" = "info",
+  ) => fire({ log: { agent_id, level, message } });
+  const phase = (name: SimPhaseId, state: "pending" | "active" | "done") =>
     fire({ phase: { name, state } });
   const task = (id: string, state: SimTaskState) => fire({ task: { id, state } });
   const agent = (a: Partial<SimAgentStatus>) => fire({ agent: a });
   const milestone = (label: string) => fire({ milestone: label });
 
   // ── Phase 1: Requirement ─────────────────────────────────────
-  log('agent:user', '收到用户请求：实现登录接口', 'info');
-  cancels.push(delay(200, speed, () => milestone('收到用户请求')));
+  log("agent:user", "收到用户请求：实现登录接口", "info");
+  cancels.push(delay(200, speed, () => milestone("收到用户请求")));
 
-  cancels.push(delay(300, speed, () => phase('requirement', 'active')));
+  cancels.push(delay(300, speed, () => phase("requirement", "active")));
   cancels.push(
     delay(500, speed, () => {
-      agent({ chief: 'thinking' });
-      log('agent:chief', '分析用户意图：用户希望实现 POST /auth/login');
+      agent({ chief: "thinking" });
+      log("agent:chief", "分析用户意图：用户希望实现 POST /auth/login");
     }),
   );
   cancels.push(
     delay(1200, speed, () => {
-      log('agent:chief', '需求已澄清，无歧义');
-      agent({ chief: 'idle' });
-      phase('requirement', 'done');
-      phase('planning', 'active');
-      milestone('开始规划');
+      log("agent:chief", "需求已澄清，无歧义");
+      agent({ chief: "idle" });
+      phase("requirement", "done");
+      phase("planning", "active");
+      milestone("开始规划");
     }),
   );
 
   // ── Phase 2: Planning ────────────────────────────────────────
   cancels.push(
     delay(1700, speed, () => {
-      agent({ chief: 'thinking' });
-      log('agent:chief', '草拟 4 个任务的计划：后端 /login、前端 LoginForm、数据库 users 表、测试');
+      agent({ chief: "thinking" });
+      log("agent:chief", "草拟 4 个任务的计划：后端 /login、前端 LoginForm、数据库 users 表、测试");
     }),
   );
   cancels.push(
     delay(2600, speed, () => {
-      log('agent:chief', '计划已生成');
-      agent({ chief: 'idle' });
-      phase('planning', 'done');
-      phase('plan_review', 'active');
-      milestone('计划已生成，提交审核');
+      log("agent:chief", "计划已生成");
+      agent({ chief: "idle" });
+      phase("planning", "done");
+      phase("plan_review", "active");
+      milestone("计划已生成，提交审核");
     }),
   );
 
   // ── Phase 3: Plan Review ─────────────────────────────────────
   cancels.push(
     delay(3100, speed, () => {
-      agent({ 'critic-a': 'thinking' });
-      log('agent:critic:a', '正在审核计划：边界、接口、依赖关系...');
+      agent({ "critic-a": "thinking" });
+      log("agent:critic:a", "正在审核计划：边界、接口、依赖关系...");
     }),
   );
   cancels.push(
     delay(4000, speed, () => {
-      agent({ 'critic-a': 'idle' });
-      agent({ 'critic-b': 'thinking' });
-      log('agent:critic:b', '审核架构：模块划分是否合理');
+      agent({ "critic-a": "idle" });
+      agent({ "critic-b": "thinking" });
+      log("agent:critic:b", "审核架构：模块划分是否合理");
     }),
   );
   cancels.push(
     delay(4800, speed, () => {
-      log('agent:critic:b', 'PASS：模块边界清晰');
-      agent({ 'critic-b': 'idle' });
-      phase('plan_review', 'done');
-      phase('dispatch', 'active');
-      milestone('计划已批准');
+      log("agent:critic:b", "PASS：模块边界清晰");
+      agent({ "critic-b": "idle" });
+      phase("plan_review", "done");
+      phase("dispatch", "active");
+      milestone("计划已批准");
     }),
   );
 
   // ── Phase 4: Dispatch + 5: Development ───────────────────────
   cancels.push(
     delay(5200, speed, () => {
-      log('agent:chief', '派发任务给 4 个实施');
-      for (const t of TASKS) task(t.id, 'DISPATCHED');
+      log("agent:chief", "派发任务给 4 个实施");
+      for (const t of TASKS) task(t.id, "DISPATCHED");
     }),
   );
   cancels.push(
     delay(5400, speed, () => {
-      phase('dispatch', 'done');
-      phase('development', 'active');
+      phase("dispatch", "done");
+      phase("development", "active");
     }),
   );
 
@@ -222,24 +225,24 @@ export function startSimulation(
     const start = cursor;
     cancels.push(
       delay(start, speed, () => {
-        task(t.id, 'IN_PROGRESS');
-        agent({ worker: 'thinking' });
-        log('agent:worker', `开始任务：${t.title}`);
+        task(t.id, "IN_PROGRESS");
+        agent({ worker: "thinking" });
+        log("agent:worker", `开始任务：${t.title}`);
       }),
     );
     const endSubmit = start + t.durationMs;
     cancels.push(
       delay(endSubmit, speed, () => {
-        task(t.id, 'SUBMITTED');
-        log('agent:worker', `完成：${t.title}`);
+        task(t.id, "SUBMITTED");
+        log("agent:worker", `完成：${t.title}`);
       }),
     );
     const endReview = endSubmit + 600;
     cancels.push(
       delay(endReview, speed, () => {
-        task(t.id, 'UNDER_REVIEW');
-        agent({ 'critic-a': 'thinking' });
-        log('agent:critic:a', `正在评审：${t.title}`);
+        task(t.id, "UNDER_REVIEW");
+        agent({ "critic-a": "thinking" });
+        log("agent:critic:a", `正在评审：${t.title}`);
       }),
     );
     const shouldFail = triggerRepair && !t.passesFirstTry;
@@ -247,32 +250,32 @@ export function startSimulation(
     if (shouldFail) {
       cancels.push(
         delay(endCritic, speed, () => {
-          task(t.id, 'REPAIR_REQUESTED');
-          log('agent:critic:a', '发现问题：缺少主键约束');
-          agent({ 'critic-a': 'idle' });
+          task(t.id, "REPAIR_REQUESTED");
+          log("agent:critic:a", "发现问题：缺少主键约束");
+          agent({ "critic-a": "idle" });
         }),
       );
       const endRepair = endCritic + 500;
       cancels.push(
         delay(endRepair, speed, () => {
-          task(t.id, 'REPAIRING');
-          log('agent:worker', '修复中...');
+          task(t.id, "REPAIRING");
+          log("agent:worker", "修复中...");
         }),
       );
       const endDone = endRepair + 800;
       cancels.push(
         delay(endDone, speed, () => {
-          task(t.id, 'DONE');
-          log('agent:worker', '修复完成');
+          task(t.id, "DONE");
+          log("agent:worker", "修复完成");
         }),
       );
       cursor = endDone + 100;
     } else {
       cancels.push(
         delay(endCritic, speed, () => {
-          task(t.id, 'APPROVED');
-          log('agent:critic:a', 'PASS');
-          agent({ 'critic-a': 'idle' });
+          task(t.id, "APPROVED");
+          log("agent:critic:a", "PASS");
+          agent({ "critic-a": "idle" });
         }),
       );
       cursor = endCritic + 100;
@@ -282,12 +285,12 @@ export function startSimulation(
   // ── Phase 6: Review (final) ─────────────────────────────────
   cancels.push(
     delay(cursor, speed, () => {
-      task(TASKS[TASKS.length - 1]!.id, 'DONE');
-      for (const t of TASKS) task(t.id, 'DONE');
-      log('agent:chief', '所有任务完成，开始最终评审');
-      phase('development', 'done');
-      phase('review', 'active');
-      milestone('进入最终评审');
+      task(TASKS[TASKS.length - 1]!.id, "DONE");
+      for (const t of TASKS) task(t.id, "DONE");
+      log("agent:chief", "所有任务完成，开始最终评审");
+      phase("development", "done");
+      phase("review", "active");
+      milestone("进入最终评审");
     }),
   );
 
@@ -299,23 +302,23 @@ export function startSimulation(
   const deliveryAt = cursor + 1000;
   cancels.push(
     delay(deliveryAt, speed, () => {
-      phase('review', 'done');
-      phase('delivery', 'active');
-      log('agent:chief', '生成最终交付摘要');
-      agent({ chief: 'thinking' });
+      phase("review", "done");
+      phase("delivery", "active");
+      log("agent:chief", "生成最终交付摘要");
+      agent({ chief: "thinking" });
     }),
   );
   cancels.push(
     delay(deliveryAt + 800, speed, () => {
-      log('agent:chief', '摘要已生成：4 个任务全部完成');
-      agent({ chief: 'idle' });
-      phase('delivery', 'done');
-      milestone('✓ 全部完成');
+      log("agent:chief", "摘要已生成：4 个任务全部完成");
+      agent({ chief: "idle" });
+      phase("delivery", "done");
+      milestone("✓ 全部完成");
     }),
   );
   cancels.push(
     delay(deliveryAt + 1100, speed, () => {
-      fire({ done: { status: 'DONE' } });
+      fire({ done: { status: "DONE" } });
       callbacks.onComplete();
     }),
   );

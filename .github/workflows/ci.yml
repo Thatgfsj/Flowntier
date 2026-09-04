@@ -74,13 +74,16 @@ jobs:
               --exclude-dir=node_modules \
               --exclude-dir=dist \
               --exclude-dir=.git \
+              --exclude-dir=.nwt \
               --exclude=pnpm-lock.yaml \
               --exclude=Cargo.lock \
               --exclude=tools/replace_in_files.py \
               --exclude=Makefile \
               --exclude=CHANGELOG.md \
               --exclude=docs/DEPRECATIONS.md \
+              --exclude=docs/SECURITY.md \
               --exclude=.github/workflows/release.yml \
+              --exclude=.github/workflows/ci.yml \
               . || true)
           if [ -n "$HITS" ]; then
             echo "::error::Brand regression: old ACO / Agent Company OS strings found"
@@ -104,10 +107,15 @@ jobs:
           toolchain: 1.85
           components: rustfmt, clippy
 
+      - name: Install Linux GUI / WebKit dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf libssl-dev
+
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: 'crates/ -> target'
+          workspaces: '. -> target'
           cache-on-failure: true
 
       - name: cargo fmt --check
@@ -174,7 +182,7 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: 'crates/ -> target'
+          workspaces: '. -> target'
           cache-on-failure: true
 
       - name: Build runtime sidecar
@@ -182,7 +190,7 @@ jobs:
           cargo build --release -p pipe-server --bin flowntier-runtime
           mkdir -p apps/desktop/src-tauri/binaries
           cp target/release/flowntier-runtime.exe `
-             apps/desktop/src-tauri/binaries/flowntier-runtime-x86_64-pc-windows-msvc.exe
+             apps/desktop/src-tauri/binaries/flowntier_runtime-x86_64-pc-windows-msvc.exe
 
       - name: Run end-to-end test
         run: |

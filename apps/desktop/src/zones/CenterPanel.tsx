@@ -1,6 +1,6 @@
-import type { ReactNode } from 'react';
-import { useTranslation } from 'react-i18next';
-import { Card, ReasoningBubble, ReviewVerdict } from '@flowntier/ui';
+import type { ReactNode } from "react";
+import { useTranslation } from "react-i18next";
+import { Card, ReasoningBubble, ReviewVerdict } from "@flowntier/ui";
 
 export interface CenterPanelProps {
   chiefCard: ReactNode;
@@ -32,25 +32,55 @@ export function CenterPanel({ chiefCard, hasActiveWorkflow, onTrySample }: Cente
   if (!hasActiveWorkflow) {
     return (
       <div className="flex flex-col gap-3">
-        <Card>
-          <div className="flex flex-col items-start gap-3 py-6 text-center">
-            <div className="self-center text-3xl">▶</div>
-            <h3 className="text-base font-semibold text-text-primary">{t('centerPanel.emptyTitle')}</h3>
-            <p className="text-sm text-text-secondary">
-              {t('centerPanel.emptyHint')}
-            </p>
-            <ul className="self-start space-y-1 text-left text-sm text-text-secondary">
-              <li>• <span className="font-mono text-xs">{t('centerPanel.exampleAddTests')}</span></li>
-              <li>• <span className="font-mono text-xs">{t('centerPanel.exampleAuth')}</span></li>
-              <li>• <span className="font-mono text-xs">{t('centerPanel.exampleRefactor')}</span></li>
-            </ul>
+        <Card className="border-white/10 bg-surface-2/95 shadow-lg">
+          <div className="flex flex-col items-center gap-4 py-8 text-center max-w-lg mx-auto">
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-chief/20 to-blue-500/10 border border-chief/30 text-chief shadow-lg shadow-chief/15">
+              <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M13 10V3L4 14h7v7l9-11h-7z"
+                />
+              </svg>
+            </div>
+            <div>
+              <h3 className="text-base font-semibold text-white tracking-tight">
+                {t("centerPanel.emptyTitle")}
+              </h3>
+              <p className="mt-1 text-xs text-text-secondary">{t("centerPanel.emptyHint")}</p>
+            </div>
+            <div className="w-full flex flex-col gap-1.5 rounded-xl border border-white/5 bg-surface-1/80 p-3 text-left">
+              <span className="text-[11px] font-medium uppercase tracking-wider text-text-tertiary px-1">
+                示例指令
+              </span>
+              <div className="space-y-1">
+                <div className="rounded-lg bg-surface-2/60 px-2.5 py-1.5 font-mono text-xs text-text-secondary border border-white/5">
+                  ▸ {t("centerPanel.exampleAddTests")}
+                </div>
+                <div className="rounded-lg bg-surface-2/60 px-2.5 py-1.5 font-mono text-xs text-text-secondary border border-white/5">
+                  ▸ {t("centerPanel.exampleAuth")}
+                </div>
+                <div className="rounded-lg bg-surface-2/60 px-2.5 py-1.5 font-mono text-xs text-text-secondary border border-white/5">
+                  ▸ {t("centerPanel.exampleRefactor")}
+                </div>
+              </div>
+            </div>
             {onTrySample && (
               <button
                 type="button"
                 onClick={onTrySample}
-                className="mt-2 self-center rounded-md bg-chief px-4 py-2 text-sm font-medium text-black transition-opacity hover:opacity-90"
+                className="mt-1 flex items-center gap-2 rounded-xl bg-gradient-to-r from-chief to-blue-500 px-5 py-2 text-xs font-semibold text-white shadow-md shadow-chief/25 transition-all hover:brightness-110 active:scale-95"
               >
-                {t('centerPanel.orTrySample')}
+                <span>{t("centerPanel.orTrySample")}</span>
+                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M9 5l7 7-7 7"
+                  />
+                </svg>
               </button>
             )}
           </div>
@@ -73,20 +103,20 @@ export function CenterPanel({ chiefCard, hasActiveWorkflow, onTrySample }: Cente
       {!chiefCard && (
         <>
           <ReasoningBubble
-            agentName={t('perTask.agent.chief')}
+            agentName={t("perTask.agent.chief")}
             roleColorClass="border-t-chief"
-            step={t('centerPanel.activeStep')}
-            body={t('centerPanel.activeBody')}
-            ago={t('centerPanel.agoSeconds', { seconds: 2 })}
+            step={t("centerPanel.activeStep")}
+            body={t("centerPanel.activeBody")}
+            ago={t("centerPanel.agoSeconds", { seconds: 2 })}
           />
 
           <Card>
-            <h3 className="mb-2 text-sm font-semibold">{t('centerPanel.reviewHeading')}</h3>
+            <h3 className="mb-2 text-sm font-semibold">{t("centerPanel.reviewHeading")}</h3>
             <ReviewVerdict
               verdict="PASS"
               confidence={0.87}
               issues={[]}
-              summary={t('centerPanel.reviewSummary')}
+              summary={t("centerPanel.reviewSummary")}
             />
           </Card>
         </>

@@ -4,11 +4,11 @@
  * See `docs/UI_GUIDELINES.md` §6.4 and §6.6.
  */
 
-import { useState } from 'react';
-import { useTranslation } from 'react-i18next';
-import { Card, TaskItem, type TaskState } from '@flowntier/ui';
-import type { WfEvent } from '@flowntier/shared';
-import { PerTaskConsole } from '../components/PerTaskConsole.js';
+import { useState } from "react";
+import { useTranslation } from "react-i18next";
+import { Card, TaskItem, type TaskState } from "@flowntier/ui";
+import type { WfEvent } from "@flowntier/shared";
+import { PerTaskConsole } from "../components/PerTaskConsole.js";
 
 export interface RightPanelTask {
   id: string;
@@ -25,36 +25,36 @@ export interface RightPanelProps {
 }
 
 const STATE_LABEL: Record<string, string> = {
-  PENDING: '待办',
-  DISPATCHED: '已派发',
-  IN_PROGRESS: '进行中',
-  SUBMITTED: '已提交',
-  UNDER_REVIEW: '评审中',
-  REPAIR_REQUESTED: '需修复',
-  REPAIRING: '修复中',
+  PENDING: "待办",
+  DISPATCHED: "已派发",
+  IN_PROGRESS: "进行中",
+  SUBMITTED: "已提交",
+  UNDER_REVIEW: "评审中",
+  REPAIR_REQUESTED: "需修复",
+  REPAIRING: "修复中",
   // BUG-FRONTEND-2 (audit 000026 #86/87): REJECTED was
   // missing from both maps, so a task in REJECTED state
   // rendered as "?" + the raw "REJECTED" string.
-  REJECTED: '已驳回',
-  APPROVED: '已通过',
-  DONE: '完成',
-  FAILED: '失败',
-  ABORTED: '已中止',
+  REJECTED: "已驳回",
+  APPROVED: "已通过",
+  DONE: "完成",
+  FAILED: "失败",
+  ABORTED: "已中止",
 };
 
 const STATE_ICONS: Record<string, string> = {
-  PENDING: '○',
-  DISPATCHED: '◐',
-  IN_PROGRESS: '◑',
-  SUBMITTED: '◓',
-  UNDER_REVIEW: '◔',
-  REPAIR_REQUESTED: '⚠',
-  REPAIRING: '↻',
-  REJECTED: '✗',
-  APPROVED: '✓',
-  DONE: '✓',
-  FAILED: '✗',
-  ABORTED: '⊘',
+  PENDING: "○",
+  DISPATCHED: "◐",
+  IN_PROGRESS: "◑",
+  SUBMITTED: "◓",
+  UNDER_REVIEW: "◔",
+  REPAIR_REQUESTED: "⚠",
+  REPAIRING: "↻",
+  REJECTED: "✗",
+  APPROVED: "✓",
+  DONE: "✓",
+  FAILED: "✗",
+  ABORTED: "⊘",
 };
 
 function toTaskState(s: string): TaskState {
@@ -70,7 +70,7 @@ export function RightPanel({ tasks, events = [] }: RightPanelProps) {
   const [showConsole, setShowConsole] = useState(false);
 
   const total = tasks.length;
-  const done = tasks.filter((t) => t.state === 'DONE').length;
+  const done = tasks.filter((t) => t.state === "DONE").length;
   const pct = total > 0 ? Math.round((done / total) * 100) : 0;
 
   const selected = selectedTask ? tasks.find((t) => t.id === selectedTask) : null;
@@ -80,16 +80,13 @@ export function RightPanel({ tasks, events = [] }: RightPanelProps) {
       {/* Task list */}
       <Card>
         <div className="mb-2 flex items-center justify-between">
-          <h2 className="text-sm font-semibold">{t('rightPanel.taskList')}</h2>
+          <h2 className="text-sm font-semibold">{t("rightPanel.taskList")}</h2>
           <span className="text-xs text-text-secondary">
-            {done} / {total} {t('rightPanel.done')}
+            {done} / {total} {t("rightPanel.done")}
           </span>
         </div>
         <div className="mb-2 h-1.5 w-full overflow-hidden rounded-full bg-surface-3">
-          <div
-            className="h-full bg-status-done transition-all"
-            style={{ width: `${pct}%` }}
-          />
+          <div className="h-full bg-status-done transition-all" style={{ width: `${pct}%` }} />
         </div>
         <div className="flex flex-col gap-1.5">
           {tasks.map((t) => (
@@ -104,8 +101,8 @@ export function RightPanel({ tasks, events = [] }: RightPanelProps) {
                   // gets a chief-tinted wash so the user can
                   // see "this is the one I'm inspecting".
                   selectedTask === t.id
-                    ? 'bg-chief/15 ring-1 ring-chief/40 p-1'
-                    : 'hover:bg-surface-2/60 p-1'
+                    ? "bg-chief/15 ring-1 ring-chief/40 p-1"
+                    : "hover:bg-surface-2/60 p-1"
                 }`}
               >
                 <TaskItem
@@ -117,7 +114,7 @@ export function RightPanel({ tasks, events = [] }: RightPanelProps) {
               </button>
               <div className="flex items-center justify-between px-1">
                 <span className="text-[10px] uppercase tracking-wide text-text-secondary">
-                  {STATE_ICONS[t.state] ?? '?'} {STATE_LABEL[t.state] ?? t.state}
+                  {STATE_ICONS[t.state] ?? "?"} {STATE_LABEL[t.state] ?? t.state}
                 </span>
                 {t.summary && (
                   <span className="max-w-[200px] truncate text-[10px] text-text-secondary">
@@ -139,7 +136,7 @@ export function RightPanel({ tasks, events = [] }: RightPanelProps) {
               onClick={() => setShowConsole(!showConsole)}
               className="text-xs text-status-active hover:underline"
             >
-              {showConsole ? t('rightPanel.hideLogs') : t('rightPanel.viewLogs')}
+              {showConsole ? t("rightPanel.hideLogs") : t("rightPanel.viewLogs")}
             </button>
           </div>
 
@@ -154,7 +151,7 @@ export function RightPanel({ tasks, events = [] }: RightPanelProps) {
             </div>
             <div>
               <span className="text-text-secondary">负责人: </span>
-              <span className="text-primary">{selected.owner || t('rightPanel.unassigned')}</span>
+              <span className="text-primary">{selected.owner || t("rightPanel.unassigned")}</span>
             </div>
             {selected.fileHint && (
               <div>
@@ -165,8 +162,7 @@ export function RightPanel({ tasks, events = [] }: RightPanelProps) {
             <div>
               <span className="text-text-secondary">状态: </span>
               <span className="text-primary">
-                {STATE_ICONS[selected.state] ?? '?'}{' '}
-                {STATE_LABEL[selected.state] ?? selected.state}
+                {STATE_ICONS[selected.state] ?? "?"} {STATE_LABEL[selected.state] ?? selected.state}
               </span>
             </div>
             {selected.summary && (
@@ -197,27 +193,25 @@ export function RightPanel({ tasks, events = [] }: RightPanelProps) {
                 key={t.id}
                 className={`flex items-center gap-2 rounded px-1 py-0.5 transition-colors ${
                   selectedTask === t.id
-                    ? 'bg-chief/15 ring-1 ring-chief/40'
-                    : 'hover:bg-surface-1/60'
+                    ? "bg-chief/15 ring-1 ring-chief/40"
+                    : "hover:bg-surface-1/60"
                 }`}
               >
                 <span
                   className={
-                    t.state === 'DONE'
-                      ? 'text-status-done'
-                      : t.state === 'FAILED'
-                        ? 'text-status-failed'
-                        : t.state === 'IN_PROGRESS'
-                          ? 'text-status-active'
-                          : 'text-text-secondary'
+                    t.state === "DONE"
+                      ? "text-status-done"
+                      : t.state === "FAILED"
+                        ? "text-status-failed"
+                        : t.state === "IN_PROGRESS"
+                          ? "text-status-active"
+                          : "text-text-secondary"
                   }
                 >
-                  {STATE_ICONS[t.state] ?? '?'}
+                  {STATE_ICONS[t.state] ?? "?"}
                 </span>
                 <span className="truncate text-primary">{t.title}</span>
-                <span className="ml-auto text-[10px] text-text-secondary">
-                  {t.owner}
-                </span>
+                <span className="ml-auto text-[10px] text-text-secondary">{t.owner}</span>
               </div>
             ))}
           </div>

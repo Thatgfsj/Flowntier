@@ -30,8 +30,8 @@ async fn main() -> anyhow::Result<()> {
 
     let api_key = std::env::var("MINIMAX_API_KEY")
         .map_err(|_| anyhow::anyhow!("MINIMAX_API_KEY env var required"))?;
-    let base_url = std::env::var("MINIMAX_BASE_URL")
-        .unwrap_or_else(|_| "https://api.minimaxi.com/v1".into());
+    let base_url =
+        std::env::var("MINIMAX_BASE_URL").unwrap_or_else(|_| "https://api.minimaxi.com/v1".into());
     let model = std::env::var("MINIMAX_MODEL").unwrap_or_else(|_| "MiniMax-Text-01".into());
 
     let workspace = std::env::args()
@@ -62,8 +62,9 @@ async fn main() -> anyhow::Result<()> {
     );
 
     let task = match std::env::args().nth(2) {
-        Some(p) => std::fs::read_to_string(&p)
-            .map_err(|e| anyhow::anyhow!("read task file {p}: {e}"))?,
+        Some(p) => {
+            std::fs::read_to_string(&p).map_err(|e| anyhow::anyhow!("read task file {p}: {e}"))?
+        }
         None => default_task(&workspace),
     };
 
@@ -80,11 +81,19 @@ async fn main() -> anyhow::Result<()> {
         .map_err(|_| anyhow::anyhow!("agent timed out after 180s"))?
     {
         match ev {
-            AgentEvent::TextDelta { delta, agent_display, .. } => {
+            AgentEvent::TextDelta {
+                delta,
+                agent_display,
+                ..
+            } => {
                 transcript.push_str(&delta);
                 eprint!("[{agent_display}] {delta}");
             }
-            AgentEvent::ToolStarted { call, agent_display, .. } => {
+            AgentEvent::ToolStarted {
+                call,
+                agent_display,
+                ..
+            } => {
                 tool_call_count += 1;
                 eprintln!(
                     "\n  ⚙ [{tool_call_count:02}] [{agent_display}] START {} (id={})\n       args = {}",
@@ -94,14 +103,22 @@ async fn main() -> anyhow::Result<()> {
                 );
                 started.insert(call.id.clone(), call.args.clone());
             }
-            AgentEvent::ToolFinished { tool_call_id, preview, is_error, elapsed_ms, .. } => {
+            AgentEvent::ToolFinished {
+                tool_call_id,
+                preview,
+                is_error,
+                elapsed_ms,
+                ..
+            } => {
                 let mark = if is_error { "✗" } else { "✓" };
                 eprintln!(
                     "  {mark} END  id={tool_call_id} in {elapsed_ms}ms\n       preview = {preview}"
                 );
                 tool_results.push((tool_call_id, is_error, preview, elapsed_ms));
             }
-            AgentEvent::Done { status, summary, .. } => {
+            AgentEvent::Done {
+                status, summary, ..
+            } => {
                 eprintln!("\n=== DONE: {status}");
                 if let Some(s) = summary {
                     eprintln!("    summary: {s}");
@@ -116,7 +133,10 @@ async fn main() -> anyhow::Result<()> {
     eprintln!("\n=== SUMMARY ===");
     eprintln!("  text delta: {} chars", transcript.len());
     eprintln!("  tool calls: {}", tool_call_count);
-    eprintln!("  tool errors: {}", tool_results.iter().filter(|(_, e, _, _)| *e).count());
+    eprintln!(
+        "  tool errors: {}",
+        tool_results.iter().filter(|(_, e, _, _)| *e).count()
+    );
     eprintln!();
 
     eprintln!("=== FILES ON DISK ===");
@@ -126,14 +146,19 @@ async fn main() -> anyhow::Result<()> {
 }
 
 fn list_files(dir: &std::path::Path, depth: usize) -> std::io::Result<()> {
-    if depth > 4 { return Ok(()); }
+    if depth > 4 {
+        return Ok(());
+    }
     for entry in std::fs::read_dir(dir)? {
         let e = entry?;
         let path = e.path();
         let name = path.file_name().unwrap_or_default().to_string_lossy();
         let indent = "  ".repeat(depth + 1);
         if path.is_dir() {
-            if name.starts_with("node_modules") || name.starts_with(".git") || name.starts_with("target") {
+            if name.starts_with("node_modules")
+                || name.starts_with(".git")
+                || name.starts_with("target")
+            {
                 eprintln!("{indent}{name}/ (skipped)");
                 continue;
             }

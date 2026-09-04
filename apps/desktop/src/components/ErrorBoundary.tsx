@@ -1,7 +1,7 @@
-import { Component, type ErrorInfo, type ReactNode } from 'react';
-import i18n from '../i18n/index.js';
-import { invoke } from '@tauri-apps/api/core';
-import { open as openExternal } from '@tauri-apps/plugin-shell';
+import { Component, type ErrorInfo, type ReactNode } from "react";
+import i18n from "../i18n/index.js";
+import { invoke } from "@tauri-apps/api/core";
+import { open as openExternal } from "@tauri-apps/plugin-shell";
 
 /**
  * Top-level React error boundary.
@@ -47,7 +47,6 @@ interface ErrorBoundaryState {
 
 const MAX_CAPTURED_LOGS = 50;
 
-
 // ── FNV-1a 32-bit hash (no dep, just inline) ───────────────────
 function fnv1a(s: string): string {
   let h = 0x811c9dc5 >>> 0;
@@ -55,10 +54,8 @@ function fnv1a(s: string): string {
     h ^= s.charCodeAt(i);
     h = Math.imul(h, 0x01000193) >>> 0;
   }
-  return ('00000000' + h.toString(16)).slice(-8);
+  return ("00000000" + h.toString(16)).slice(-8);
 }
-
-
 
 export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
   // BUG-FRONTEND-RT-5 (event 000031): class-component t() helper.
@@ -86,11 +83,11 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     this.originalConsoleError = console.error;
     this.originalConsoleWarn = console.warn;
     console.error = (...args: unknown[]) => {
-      this.appendLog('error', args);
+      this.appendLog("error", args);
       this.originalConsoleError?.(...args);
     };
     console.warn = (...args: unknown[]) => {
-      this.appendLog('warn', args);
+      this.appendLog("warn", args);
       this.originalConsoleWarn?.(...args);
     };
   }
@@ -109,25 +106,25 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     // grab it from %APPDATA%/flowntier/logs/flowntier.log.YYYY-MM-DD
     // (added in Phase 2.3). We don't await — the boundary
     // shouldn't block the error UI.
-    void invoke('log_frontend_error', {
+    void invoke("log_frontend_error", {
       message: error.message,
-      stack: error.stack ?? '',
-      componentStack: info.componentStack ?? '',
+      stack: error.stack ?? "",
+      componentStack: info.componentStack ?? "",
     }).catch((e) => {
       // The Rust side might not be up yet on first-launch crashes;
       // that's fine, we already have it in capturedLogs.
-      console.warn('[ErrorBoundary] log_frontend_error failed:', e);
+      console.warn("[ErrorBoundary] log_frontend_error failed:", e);
     });
     this.setState({
       componentStack: info.componentStack ?? null,
-      errorCode: 'FE-' + fnv1a((error.message ?? '') + '|' + (error.stack?.split('\n')[0] ?? '')),
+      errorCode: "FE-" + fnv1a((error.message ?? "") + "|" + (error.stack?.split("\n")[0] ?? "")),
     });
   }
 
-  private appendLog(level: 'error' | 'warn', args: unknown[]): void {
+  private appendLog(level: "error" | "warn", args: unknown[]): void {
     const line = `[${new Date().toISOString()}] ${level}: ${args
-      .map((a) => (typeof a === 'string' ? a : JSON.stringify(a)))
-      .join(' ')}`;
+      .map((a) => (typeof a === "string" ? a : JSON.stringify(a)))
+      .join(" ")}`;
     this.setState((prev) => ({
       capturedLogs: [...prev.capturedLogs, line].slice(-MAX_CAPTURED_LOGS),
     }));
@@ -135,27 +132,27 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
 
   private copyLogs = async (): Promise<void> => {
     const payload = [
-      `Flowntier ${this.props.appVersion}${this.props.buildSha ? ` (build ${this.props.buildSha})` : ''}`,
+      `Flowntier ${this.props.appVersion}${this.props.buildSha ? ` (build ${this.props.buildSha})` : ""}`,
       `Captured at: ${new Date().toISOString()}`,
-      '',
-      '=== Captured console output ===',
+      "",
+      "=== Captured console output ===",
       ...this.state.capturedLogs,
-      '',
-      '=== React error ===',
-      `Message: ${this.state.error?.message ?? '(unknown)'}`,
+      "",
+      "=== React error ===",
+      `Message: ${this.state.error?.message ?? "(unknown)"}`,
       `Stack:`,
-      this.state.error?.stack ?? '(no stack)',
-      '',
-      '=== Component stack ===',
-      this.state.componentStack ?? '(none)',
-    ].join('\n');
+      this.state.error?.stack ?? "(no stack)",
+      "",
+      "=== Component stack ===",
+      this.state.componentStack ?? "(none)",
+    ].join("\n");
     try {
       await navigator.clipboard.writeText(payload);
-      alert(this.t('error.action.copySuccess'));
+      alert(this.t("error.action.copySuccess"));
     } catch (e) {
       // Fallback: select-and-prompt for environments without clipboard API
-      console.warn('clipboard.writeText failed:', e);
-      prompt(this.t('error.copyFallback'), payload);
+      console.warn("clipboard.writeText failed:", e);
+      prompt(this.t("error.copyFallback"), payload);
     }
   };
 
@@ -170,34 +167,34 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
   private report = async (): Promise<void> => {
     const err = this.state.error;
     const params = new URLSearchParams({
-      labels: 'bug',
-      title: `[${this.state.errorCode ?? 'FE-????'}] v${this.props.appVersion}: ${(err?.message ?? 'crash').slice(0, 60)}`,
+      labels: "bug",
+      title: `[${this.state.errorCode ?? "FE-????"}] v${this.props.appVersion}: ${(err?.message ?? "crash").slice(0, 60)}`,
       body: [
-        '**Error code**: `' + (this.state.errorCode ?? 'FE-????') + '`',
-        '',
-        '_(describe what you were doing)_',
-        '',
-        '**Version**',
-        '',
+        "**Error code**: `" + (this.state.errorCode ?? "FE-????") + "`",
+        "",
+        "_(describe what you were doing)_",
+        "",
+        "**Version**",
+        "",
         `- Flowntier ${this.props.appVersion}`,
         ...(this.props.buildSha ? [`- Build ${this.props.buildSha}`] : []),
-        '',
-        '**Error message**',
-        '',
-        '```',
-        err?.message ?? '(unknown)',
-        '```',
-        '',
-        '**Stack**',
-        '',
-        '```',
-        (err?.stack ?? '(no stack)').slice(0, 1500),
-        '```',
-        '',
-        '**Logs**',
-        '',
-        this.t('error.reportBodyLogs'),
-      ].join('\n'),
+        "",
+        "**Error message**",
+        "",
+        "```",
+        err?.message ?? "(unknown)",
+        "```",
+        "",
+        "**Stack**",
+        "",
+        "```",
+        (err?.stack ?? "(no stack)").slice(0, 1500),
+        "```",
+        "",
+        "**Logs**",
+        "",
+        this.t("error.reportBodyLogs"),
+      ].join("\n"),
     });
     const url = `https://github.com/Thatgfsj/Flowntier/issues/new?${params.toString()}`;
     try {
@@ -206,8 +203,8 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
       // No shell capability (shouldn't happen — capabilities/default.json
       // grants shell:allow-open) — fall back to clipboard so the user
       // can paste manually.
-      console.warn('openExternal failed:', e);
-      prompt(this.t('error.reportFallback'), url);
+      console.warn("openExternal failed:", e);
+      prompt(this.t("error.reportFallback"), url);
     }
   };
 
@@ -215,7 +212,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     if (!this.state.error) return this.props.children;
 
     const { appVersion, buildSha } = this.props;
-    const message = this.state.error.message ?? '(unknown)';
+    const message = this.state.error.message ?? "(unknown)";
     // t() is bound at render time; safe in class components because
     // we re-read i18n.language on every render (which happens when
     // i18n emits a 'languageChanged' event and React re-renders).
@@ -225,7 +222,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
         <div className="max-w-2xl space-y-6">
           <div>
             <h1 className="text-3xl font-semibold text-error">
-              {t('error.title', { version: appVersion })}
+              {t("error.title", { version: appVersion })}
               {buildSha && (
                 <span className="ml-2 text-sm font-normal text-text-secondary">
                   · Build {buildSha}
@@ -240,17 +237,15 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
                 </code>
               )}
             </h1>
-            <p className="mt-2 text-sm text-text-secondary">
-              {t('error.subtitle')}
-            </p>
+            <p className="mt-2 text-sm text-text-secondary">{t("error.subtitle")}</p>
           </div>
 
           <div className="rounded-md border border-border bg-surface-2 p-4 font-mono text-xs">
-            <div className="text-text-secondary">{t('error.message')}</div>
+            <div className="text-text-secondary">{t("error.message")}</div>
             <div className="mt-1 break-words text-error">{message}</div>
             {this.state.componentStack && (
               <>
-                <div className="mt-3 text-text-secondary">{t('error.componentStack')}</div>
+                <div className="mt-3 text-text-secondary">{t("error.componentStack")}</div>
                 <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words text-text-secondary">
                   {this.state.componentStack}
                 </pre>
@@ -264,27 +259,27 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
               onClick={() => void this.copyLogs()}
               className="rounded-md border border-border bg-surface-2 px-4 py-2 text-sm hover:bg-surface-3 focus:outline-none focus:ring-2 focus:ring-accent/50"
             >
-              {t('error.action.copyLogs')}
+              {t("error.action.copyLogs")}
             </button>
             <button
               type="button"
               onClick={this.restart}
               className="rounded-md border border-border bg-surface-2 px-4 py-2 text-sm hover:bg-surface-3 focus:outline-none focus:ring-2 focus:ring-accent/50"
             >
-              {t('error.action.restart')}
+              {t("error.action.restart")}
             </button>
             <button
               type="button"
               onClick={() => void this.report()}
               className="rounded-md border border-accent bg-accent/10 px-4 py-2 text-sm text-accent hover:bg-accent/20 focus:outline-none focus:ring-2 focus:ring-accent/50"
             >
-              {t('error.action.report')}
+              {t("error.action.report")}
             </button>
           </div>
 
           <p className="text-xs text-text-secondary">
-            {t('error.logLocation', {
-              path: '%APPDATA%/flowntier/logs/',
+            {t("error.logLocation", {
+              path: "%APPDATA%/flowntier/logs/",
             })}
           </p>
         </div>

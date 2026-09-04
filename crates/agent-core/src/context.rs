@@ -110,13 +110,16 @@ mod tests {
 
     #[test]
     fn compact_drops_oldest_first() {
-        let cfg = ContextConfig { budget: 50, hard_limit: 200 };
+        let cfg = ContextConfig {
+            budget: 50,
+            hard_limit: 200,
+        };
         let m = ContextManager::new(cfg);
         let msgs = vec![
             Message::system("you are concise"),
-            Message::user("a".repeat(400)),  // ~100 tokens
+            Message::user("a".repeat(400)),              // ~100 tokens
             Message::assistant("b".repeat(400), vec![]), // ~100 tokens
-            Message::user("recent"), // 1 token
+            Message::user("recent"),                     // 1 token
         ];
         let compacted = m.compact(msgs);
         assert_eq!(compacted[0].content, "you are concise");

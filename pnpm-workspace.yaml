@@ -2,6 +2,9 @@ packages:
   - "apps/*"
   - "packages/*"
 
+allowBuilds:
+  esbuild: true
+
 # Hoisted by default in pnpm v9; this lets the Tauri webview's Vite
 # resolve workspace deps without per-package node_modules.
 hoistPattern:

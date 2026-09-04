@@ -225,10 +225,10 @@ pub fn log_api_enabled() -> bool {
 /// resolved log directory (or legacy file path) on success,
 /// `None` if file logging is disabled.
 pub fn init() -> Option<PathBuf> {
-    use tracing_subscriber::EnvFilter;
     use tracing_subscriber::fmt::format::FmtSpan;
     use tracing_subscriber::layer::SubscriberExt;
     use tracing_subscriber::util::SubscriberInitExt;
+    use tracing_subscriber::EnvFilter;
 
     let env_filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| EnvFilter::new("info,pipe_server=debug,orchestrator=debug"));
@@ -353,13 +353,10 @@ where
 }
 
 /// Catch-all (no filter).
-fn catch_all_layer<S>(
-    writer: FileWriter,
-) -> impl tracing_subscriber::layer::Layer<S>
+fn catch_all_layer<S>(writer: FileWriter) -> impl tracing_subscriber::layer::Layer<S>
 where
     S: tracing::Subscriber + for<'span> tracing_subscriber::registry::LookupSpan<'span>,
 {
-    use tracing_subscriber::layer::Layer;
     tracing_subscriber::fmt::layer()
         .with_span_events(tracing_subscriber::fmt::format::FmtSpan::NONE)
         .with_writer(writer)
@@ -564,14 +561,8 @@ pub fn clear_log(path_override: Option<&Path>) -> std::io::Result<PathBuf> {
         .truncate(true)
         .open(&path)?;
     use std::io::Write;
-    let mut f = std::fs::OpenOptions::new()
-        .append(true)
-        .open(&path)?;
-    writeln!(
-        f,
-        "[logs cleared at {}]",
-        chrono::Utc::now().to_rfc3339()
-    )?;
+    let mut f = std::fs::OpenOptions::new().append(true).open(&path)?;
+    writeln!(f, "[logs cleared at {}]", chrono::Utc::now().to_rfc3339())?;
     Ok(path)
 }
 

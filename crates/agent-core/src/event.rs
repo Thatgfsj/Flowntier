@@ -320,8 +320,7 @@ mod tests {
         let actual: std::collections::BTreeSet<&'static str> = sample_payloads()
             .iter()
             .map(|(kind, ev)| {
-                let v: Value = serde_json::to_value(ev)
-                    .expect("AgentEvent should serialize");
+                let v: Value = serde_json::to_value(ev).expect("AgentEvent should serialize");
                 let tag = v
                     .get("kind")
                     .and_then(|k| k.as_str())
@@ -351,10 +350,8 @@ mod tests {
     fn every_declared_kind_has_a_sample_variant() {
         let declared: std::collections::BTreeSet<&str> =
             AGENT_EVENT_KINDS.iter().copied().collect();
-        let covered: std::collections::BTreeSet<&str> = sample_payloads()
-            .iter()
-            .map(|(kind, _)| *kind)
-            .collect();
+        let covered: std::collections::BTreeSet<&str> =
+            sample_payloads().iter().map(|(kind, _)| *kind).collect();
         assert_eq!(
             declared, covered,
             "every AGENT_EVENT_KINDS entry needs a sample_payloads() row"
@@ -407,7 +404,10 @@ mod tests {
         // present-but-null in JSON — that lets the TS side
         // distinguish "omitted by Phase 5" from "explicitly
         // None" without extra schema branches. Confirmed below.
-        assert!(v.get("task_id").is_some(), "None should still appear as null in JSON, not be dropped");
+        assert!(
+            v.get("task_id").is_some(),
+            "None should still appear as null in JSON, not be dropped"
+        );
         assert_eq!(v["task_id"], json!(null));
         let back: AgentEvent = serde_json::from_value(v).unwrap();
         match back {
@@ -453,33 +453,59 @@ mod tests {
         // covered by sample_payloads + AGENT_EVENT_KINDS), but
         // for the four it DOES cover, the field must be present.
         let variants: Vec<(&str, AgentEvent)> = vec![
-            ("text_delta", AgentEvent::TextDelta {
-                agent_id: "a".into(), agent_display: "d".into(),
-                delta: "x".into(), task_id: Some("t0".into()),
-            }),
-            ("tool_started", AgentEvent::ToolStarted {
-                agent_id: "a".into(), agent_display: "d".into(),
-                call: crate::message::ToolCall { id: "c".into(), name: "bash".into(), args: json!({}) },
-                task_id: Some("t0".into()),
-            }),
-            ("tool_finished", AgentEvent::ToolFinished {
-                agent_id: "a".into(), agent_display: "d".into(),
-                tool_call_id: "c".into(), preview: "p".into(),
-                is_error: false, elapsed_ms: 0,
-                task_id: Some("t0".into()),
-            }),
-            ("token_usage", AgentEvent::TokenUsage {
-                agent_id: "a".into(), provider: "p".into(),
-                model: "m".into(), input_tokens: 0,
-                output_tokens: 0, cost_usd: None,
-                task_id: Some("t0".into()),
-            }),
+            (
+                "text_delta",
+                AgentEvent::TextDelta {
+                    agent_id: "a".into(),
+                    agent_display: "d".into(),
+                    delta: "x".into(),
+                    task_id: Some("t0".into()),
+                },
+            ),
+            (
+                "tool_started",
+                AgentEvent::ToolStarted {
+                    agent_id: "a".into(),
+                    agent_display: "d".into(),
+                    call: crate::message::ToolCall {
+                        id: "c".into(),
+                        name: "bash".into(),
+                        args: json!({}),
+                    },
+                    task_id: Some("t0".into()),
+                },
+            ),
+            (
+                "tool_finished",
+                AgentEvent::ToolFinished {
+                    agent_id: "a".into(),
+                    agent_display: "d".into(),
+                    tool_call_id: "c".into(),
+                    preview: "p".into(),
+                    is_error: false,
+                    elapsed_ms: 0,
+                    task_id: Some("t0".into()),
+                },
+            ),
+            (
+                "token_usage",
+                AgentEvent::TokenUsage {
+                    agent_id: "a".into(),
+                    provider: "p".into(),
+                    model: "m".into(),
+                    input_tokens: 0,
+                    output_tokens: 0,
+                    cost_usd: None,
+                    task_id: Some("t0".into()),
+                },
+            ),
         ];
         for (expected_kind, ev) in variants {
             let v = serde_json::to_value(&ev).unwrap();
             assert_eq!(v["kind"], json!(expected_kind));
             assert_eq!(
-                v["task_id"], json!("t0"),
+                v["task_id"],
+                json!("t0"),
                 "{expected_kind} must carry task_id in JSON",
             );
         }
@@ -493,22 +519,46 @@ mod tests {
         // the field's absence — and a separate `sample_payloads`
         // round keeps the tags in sync.
         let variants: Vec<(&str, AgentEvent)> = vec![
-            ("phase_transition", AgentEvent::PhaseTransition {
-                wf_id: "wf".into(), from: None, to: "1-requirement".into(),
-            }),
-            ("done", AgentEvent::Done {
-                wf_id: "wf".into(), status: "DONE".into(), summary: None,
-            }),
-            ("reviewer_verdict", AgentEvent::ReviewerVerdict {
-                wf_id: "wf".into(), phase: "plan-review".into(),
-                role: "agent:critic:a".into(), verdict: "PASS".into(),
-                confidence: 0.0, issues: vec![], summary: "ok".into(),
-            }),
-            ("repair_loop", AgentEvent::RepairLoop {
-                wf_id: "wf".into(), loop_index: 1, max_loops: 3,
-                verdict_a: "PASS".into(), verdict_b: "PASS".into(),
-                issues_a: vec![], issues_b: vec![],
-            }),
+            (
+                "phase_transition",
+                AgentEvent::PhaseTransition {
+                    wf_id: "wf".into(),
+                    from: None,
+                    to: "1-requirement".into(),
+                },
+            ),
+            (
+                "done",
+                AgentEvent::Done {
+                    wf_id: "wf".into(),
+                    status: "DONE".into(),
+                    summary: None,
+                },
+            ),
+            (
+                "reviewer_verdict",
+                AgentEvent::ReviewerVerdict {
+                    wf_id: "wf".into(),
+                    phase: "plan-review".into(),
+                    role: "agent:critic:a".into(),
+                    verdict: "PASS".into(),
+                    confidence: 0.0,
+                    issues: vec![],
+                    summary: "ok".into(),
+                },
+            ),
+            (
+                "repair_loop",
+                AgentEvent::RepairLoop {
+                    wf_id: "wf".into(),
+                    loop_index: 1,
+                    max_loops: 3,
+                    verdict_a: "PASS".into(),
+                    verdict_b: "PASS".into(),
+                    issues_a: vec![],
+                    issues_b: vec![],
+                },
+            ),
         ];
         for (expected_kind, ev) in variants {
             let v = serde_json::to_value(&ev).unwrap();

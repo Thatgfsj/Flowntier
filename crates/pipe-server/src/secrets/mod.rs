@@ -267,9 +267,7 @@ impl SecretStore {
                 // Existing DEK. Stored as base64 because some
                 // backends (Keychain on older macOS) reject raw
                 // 32-byte secrets.
-                let bytes = B64
-                    .decode(s.trim())
-                    .context("base64 decode stored DEK")?;
+                let bytes = B64.decode(s.trim()).context("base64 decode stored DEK")?;
                 if bytes.len() != DEK_LEN {
                     return Err(anyhow!(
                         "stored DEK has wrong length: {} (expected {})",
@@ -333,10 +331,8 @@ mod tests {
     use storage::Repository;
 
     fn temp_data_dir() -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "flowntier-secret-test-{}",
-            rand::random::<u64>()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("flowntier-secret-test-{}", rand::random::<u64>()));
         std::fs::create_dir_all(&dir).unwrap();
         dir
     }
@@ -350,7 +346,10 @@ mod tests {
         // Skip if OS keystore is unavailable in this environment
         // (CI without libsecret). The fallback keychain uses a
         // random passphrase in tests.
-        store.put("OPENAI_API_KEY", "sk-test-1234567890").await.unwrap();
+        store
+            .put("OPENAI_API_KEY", "sk-test-1234567890")
+            .await
+            .unwrap();
         let v = store.reveal("OPENAI_API_KEY").await.unwrap();
         assert_eq!(v.as_str(), "sk-test-1234567890");
     }

@@ -103,7 +103,15 @@ pub fn parse_chat_history(body: &serde_json::Value) -> Vec<Message> {
         .and_then(|v| v.as_array())
         .map(|arr| {
             arr.iter()
-                .filter_map(|entry| serde_json::from_value::<Message>(entry.clone()).ok())
+                .filter_map(|entry| {
+                    let msg = serde_json::from_value::<Message>(entry.clone()).ok()?;
+                    if msg.role == Role::Tool
+                        && msg.tool_call_id.as_deref().unwrap_or("").is_empty()
+                    {
+                        return None;
+                    }
+                    Some(msg)
+                })
                 .collect()
         })
         .unwrap_or_default()
@@ -197,7 +205,11 @@ mod tests {
             ]
         });
         let parsed = parse_chat_history(&body);
-        assert_eq!(parsed.len(), 2, "should keep only the 2 well-formed entries");
+        assert_eq!(
+            parsed.len(),
+            2,
+            "should keep only the 2 well-formed entries"
+        );
         assert_eq!(parsed[0].role, Role::User);
         assert_eq!(parsed[0].content, "hello");
         assert_eq!(parsed[1].role, Role::User);

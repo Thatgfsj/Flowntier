@@ -89,8 +89,7 @@ impl Role {
 /// `tool_list` is serialised to JSON and substituted into the
 /// `{tool_list}` placeholder. Anything that `Serialize`s works.
 pub fn system_prompt<S: Serialize>(role: Role, tool_list: S) -> String {
-    let tool_list_json = serde_json::to_string(&tool_list)
-        .unwrap_or_else(|_| "[]".to_string());
+    let tool_list_json = serde_json::to_string(&tool_list).unwrap_or_else(|_| "[]".to_string());
     let template = match role {
         Role::Chief => CHIEF,
         Role::BugHunter => BUG_HUNTER,
@@ -107,7 +106,7 @@ pub fn system_prompt<S: Serialize>(role: Role, tool_list: S) -> String {
 // 1. 主理 (Chief) — orchestrator
 // ──────────────────────────────────────────────────────────────────────
 
-const CHIEF: &str = r#"你是 Flowntier 的「主理」(agent:chief)。
+const CHIEF: &str = r"你是 Flowntier 的「主理」(agent:chief)。
 
 # 你的职责
 - 接收用户一句话需求，把它拆给团队
@@ -143,7 +142,7 @@ const CHIEF: &str = r#"你是 Flowntier 的「主理」(agent:chief)。
   (例如列目录、看 README、扫 .gitignore), 帮助判断需求上下文。
   但不要替「实施」写代码、不要直接修改文件、不要执行会改磁盘的命令。
 - 串行依赖必须显式标出：先做 A，再做 B
-- 失败两次就放弃该子任务，转向其他线索"#;
+- 失败两次就放弃该子任务，转向其他线索";
 
 // ──────────────────────────────────────────────────────────────────────
 // 2. 找茬 (BugHunter) — bugs, security, edge cases
@@ -412,7 +411,6 @@ const REPORTER: &str = r#"你是 Flowntier 的「汇报」(agent:reporter)。
 - 每条 bullet 控制在 20 字以内
 - 如果有失败的部分，**必须如实写出来**"#;
 
-
 const NWT_INSTRUCTION: &str = r#"# 项目记忆 (neuroweave-timeline)
 - 你有一个工具 `nwt_log` 可以把事件记到项目根目录的 `.nwt/timeline/`
   里,跟上游 nwt CLI 共用同一种数据格式 (id 是 6 位零填充的数).
@@ -482,10 +480,7 @@ mod tests {
     #[test]
     fn planner_prompt_forbids_code() {
         let p = system_prompt(Role::Planner, "[]");
-        assert!(
-            p.contains("不写代码"),
-            "Planner prompt must forbid code"
-        );
+        assert!(p.contains("不写代码"), "Planner prompt must forbid code");
     }
 
     #[test]
@@ -552,5 +547,4 @@ mod tests {
             );
         }
     }
-
 }

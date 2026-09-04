@@ -27,7 +27,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::Timelike;
-use serde_json::json;
 use tracing::{error, info, warn};
 
 use crate::handlers::ServerState;
@@ -130,7 +129,7 @@ async fn tick_5h_boundary(state: &Arc<ServerState>) {
         // rate-limit window has rolled over → clear the row.
         // 4xx/5xx → mark rate_limited. No LLM tokens spent,
         // no quota row re-recorded.
-        let succeeded = probe_provider_alive(&state, &role, &model_id).await;
+        let succeeded = probe_provider_alive(state, &role, &model_id).await;
 
         if succeeded {
             // Quiet recovery path: clear the row, no nudge.
@@ -149,11 +148,7 @@ async fn tick_5h_boundary(state: &Arc<ServerState>) {
         }
 
         // Failure path: flip to rate_limited, emit nudge, log.
-        if let Err(e) = state
-            .repo
-            .mark_quota_rate_limited(&role, &model_id)
-            .await
-        {
+        if let Err(e) = state.repo.mark_quota_rate_limited(&role, &model_id).await {
             warn!(
                 error = %e,
                 role = %role, model = %model_id,
@@ -243,11 +238,7 @@ async fn probe_provider_alive(
             return false;
         }
     };
-    let resp = match client.get(&url)
-        .bearer_auth(&api_key)
-        .send()
-        .await
-    {
+    let resp = match client.get(&url).bearer_auth(&api_key).send().await {
         Ok(r) => r,
         Err(e) => {
             info!(
@@ -266,4 +257,3 @@ async fn probe_provider_alive(
     );
     alive
 }
-

@@ -104,14 +104,14 @@ jobs:
         run: |
           mkdir -p apps/desktop/src-tauri/binaries
           cp "target/${{ matrix.target }}/release/flowntier-runtime${{ matrix.ext }}" \
-             "apps/desktop/src-tauri/binaries/flowntier-runtime-${{ matrix.target }}${{ matrix.ext }}"
+             "apps/desktop/src-tauri/binaries/flowntier_runtime-${{ matrix.target }}${{ matrix.ext }}"
           ls -la apps/desktop/src-tauri/binaries/
 
       - name: Upload sidecar artifact
         uses: actions/upload-artifact@v4
         with:
           name: sidecar-${{ matrix.target }}
-          path: apps/desktop/src-tauri/binaries/flowntier-runtime-${{ matrix.target }}${{ matrix.ext }}
+          path: apps/desktop/src-tauri/binaries/flowntier_runtime-${{ matrix.target }}${{ matrix.ext }}
           if-no-files-found: error
           retention-days: 7
 

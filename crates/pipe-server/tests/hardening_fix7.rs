@@ -119,10 +119,10 @@ async fn select_cancel_during_recv_still_wins() {
     // Now fire cancel — the recv branch has nothing to receive
     // (tx was never used), but cancel is biased and fires.
     let _ = tx; // keep tx alive
-    // Trigger cancel from outside the spawn
-    // (the inner `token` is the local one, not the outer one;
-    //  so we need to do the cancel inside the spawn — re-test.)
-    let _ = waiter; // not a real test, just for the doc
+                // Trigger cancel from outside the spawn
+                // (the inner `token` is the local one, not the outer one;
+                //  so we need to do the cancel inside the spawn — re-test.)
+    drop(waiter); // not a real test, just for the doc
 }
 
 #[tokio::test]
@@ -280,7 +280,9 @@ async fn many_workflows_isolated_cancels() {
     victim.cancel();
     assert!(originals[42].is_cancelled());
     for (i, t) in originals.iter().enumerate() {
-        if i == 42 { continue; }
+        if i == 42 {
+            continue;
+        }
         assert!(!t.is_cancelled(), "wf_{i} should not be cancelled");
     }
 }

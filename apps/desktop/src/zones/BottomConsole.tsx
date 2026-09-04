@@ -1,18 +1,18 @@
-import { useTranslation } from 'react-i18next';
-import { ConsoleLine } from '@flowntier/ui';
-import type { LogLevel } from '@flowntier/shared';
-import { useEvents } from '../contexts/WorkflowContext.js';
-import { agentIdToConsoleSource } from '../lib/agentId.js';
+import { useTranslation } from "react-i18next";
+import { ConsoleLine } from "@flowntier/ui";
+import type { LogLevel } from "@flowntier/shared";
+import { useEvents } from "../contexts/WorkflowContext.js";
+import { agentIdToConsoleSource } from "../lib/agentId.js";
 
 // Log-level labels. The key (e.g. 'error') is the LogLevel enum
 // value; the value is the i18n key. We resolve via t() at
 // render time so the labels follow the current language.
 const LEVEL_LABEL_KEYS: Record<LogLevel, string> = {
-  error: 'bottomConsole.levels.error',
-  warn: 'bottomConsole.levels.warn',
-  info: 'bottomConsole.levels.info',
-  debug: 'bottomConsole.levels.debug',
-  trace: 'bottomConsole.levels.trace',
+  error: "bottomConsole.levels.error",
+  warn: "bottomConsole.levels.warn",
+  info: "bottomConsole.levels.info",
+  debug: "bottomConsole.levels.debug",
+  trace: "bottomConsole.levels.trace",
 };
 
 function shortTime(iso: string): string {
@@ -30,7 +30,7 @@ export function BottomConsole() {
   // re-render of App.tsx, which then re-rendered BottomConsole.
   const events = useEvents();
   const visible = events.slice(-200);
-  const hasContent = visible.some((e) => e.kind === 'console');
+  const hasContent = visible.some((e) => e.kind === "console");
   // v0.4.26 (event 000119): chairman flagged the empty panel
   // still leaving a ~160px gap at the bottom of ChatZone.
   // When there are no events to show we collapse the entire
@@ -44,11 +44,11 @@ export function BottomConsole() {
   return (
     <section
       className="h-40 shrink-0 overflow-y-auto border-t border-border bg-surface-2 p-2 font-mono text-[13px]"
-      aria-label={t('bottomConsole.tabs.log')}
+      aria-label={t("bottomConsole.tabs.log")}
     >
       <ol className="flex flex-col gap-0.5">
         {visible.map((e, i) => {
-          if (e.kind !== 'console') return null;
+          if (e.kind !== "console") return null;
           // ConsoleEvent doesn't have ts; use current time as fallback
           const ts = shortTime(new Date().toISOString());
           return (

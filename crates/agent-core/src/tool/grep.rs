@@ -77,7 +77,9 @@ impl Tool for GrepTool {
             }
             let p = entry.path();
             if let Some(g) = &glob_matcher {
-                if !g.is_match(p) { continue; }
+                if !g.is_match(p) {
+                    continue;
+                }
             }
             let rel = ctx.workspace.relativize(p);
             if let Ok(s) = std::fs::read_to_string(p) {
@@ -127,14 +129,15 @@ mod tests {
         write(dir.path(), "a.txt", "hello world\nhello rust\nbye\n");
         write(dir.path(), "b.txt", "nope\n");
         let out = GrepTool
-            .execute(
-                serde_json::json!({"pattern": "hello"}),
-                &ctx(dir.path()),
-            )
+            .execute(serde_json::json!({"pattern": "hello"}), &ctx(dir.path()))
             .await
             .unwrap();
         assert!(!out.is_error);
-        assert!(out.content.contains("a.txt:1: hello world"), "got: {}", out.content);
+        assert!(
+            out.content.contains("a.txt:1: hello world"),
+            "got: {}",
+            out.content
+        );
         assert!(out.content.contains("a.txt:2: hello rust"));
         assert!(!out.content.contains("b.txt"));
         assert!(out.content.contains("2 match(es)"));

@@ -37,8 +37,8 @@ async fn main() -> anyhow::Result<()> {
 
     let api_key = std::env::var("MINIMAX_API_KEY")
         .map_err(|_| anyhow::anyhow!("MINIMAX_API_KEY env var required"))?;
-    let base_url = std::env::var("MINIMAX_BASE_URL")
-        .unwrap_or_else(|_| "https://api.minimaxi.com/v1".into());
+    let base_url =
+        std::env::var("MINIMAX_BASE_URL").unwrap_or_else(|_| "https://api.minimaxi.com/v1".into());
     let model = std::env::var("MINIMAX_MODEL").unwrap_or_else(|_| "MiniMax-M3".into());
 
     let workspace_root = std::env::args()
@@ -89,7 +89,10 @@ async fn main() -> anyhow::Result<()> {
         Workspace::new(workspace_root.clone(), "orchestrated"),
         AgentConfig::default(),
     );
-    drain_events(worker.run("Use bash to confirm `node --version` is installed; print the output.")).await?;
+    drain_events(
+        worker.run("Use bash to confirm `node --version` is installed; print the output."),
+    )
+    .await?;
 
     Ok(())
 }
@@ -102,10 +105,18 @@ async fn drain_events(
         .map_err(|_| anyhow::anyhow!("agent timed out"))?
     {
         match &ev {
-            AgentEvent::TextDelta { delta, agent_display, .. } => {
+            AgentEvent::TextDelta {
+                delta,
+                agent_display,
+                ..
+            } => {
                 eprint!("[{agent_display}] {delta}");
             }
-            AgentEvent::ToolStarted { call, agent_display, .. } => {
+            AgentEvent::ToolStarted {
+                call,
+                agent_display,
+                ..
+            } => {
                 eprintln!(
                     "\n  ⚙ [{agent_display}] {} id={} args={}",
                     call.name,
@@ -113,11 +124,18 @@ async fn drain_events(
                     serde_json::to_string(&call.args).unwrap_or_default()
                 );
             }
-            AgentEvent::ToolFinished { tool_call_id, is_error, elapsed_ms, .. } => {
+            AgentEvent::ToolFinished {
+                tool_call_id,
+                is_error,
+                elapsed_ms,
+                ..
+            } => {
                 let mark = if *is_error { "✗" } else { "✓" };
                 eprintln!("  {mark} END id={tool_call_id} in {elapsed_ms}ms");
             }
-            AgentEvent::Done { status, summary, .. } => {
+            AgentEvent::Done {
+                status, summary, ..
+            } => {
                 eprintln!("\n→ DONE: {status}");
                 if let Some(s) = summary {
                     eprintln!("  summary: {s}");

@@ -44,11 +44,15 @@ pub fn validate_base_url(input: &str) -> Result<String, String> {
     if trimmed.is_empty() {
         return Err("base URL is empty".into());
     }
-    let parsed = url::Url::parse(trimmed)
-        .map_err(|e| format!("base URL is not a valid URL ({e})"))?;
+    let parsed =
+        url::Url::parse(trimmed).map_err(|e| format!("base URL is not a valid URL ({e})"))?;
     match parsed.scheme() {
         "http" | "https" => {}
-        other => return Err(format!("base URL scheme must be http or https (got {other})")),
+        other => {
+            return Err(format!(
+                "base URL scheme must be http or https (got {other})"
+            ))
+        }
     }
     if parsed.host_str().is_none_or(str::is_empty) {
         return Err("base URL is missing a host".into());
@@ -100,7 +104,6 @@ impl OpenAiProvider {
         Ok(Self::compat(cleaned, model, api_key))
     }
 }
-
 
 #[async_trait]
 impl Provider for OpenAiProvider {
@@ -268,11 +271,14 @@ struct ChatRequest<'a> {
 #[derive(Debug, Serialize)]
 #[serde(tag = "role", rename_all = "lowercase")]
 enum RequestMessage {
-    System { content: String },
-    User { content: String },
-    Assistant {
-        #[serde(skip_serializing_if = "String::is_empty")]
+    System {
         content: String,
+    },
+    User {
+        content: String,
+    },
+    Assistant {
+        content: Option<String>,
         #[serde(skip_serializing_if = "Vec::is_empty")]
         tool_calls: Vec<RequestToolCall>,
     },
@@ -305,19 +311,32 @@ fn build_request<'a>(
     let mut out_msgs = Vec::with_capacity(messages.len());
     for m in messages {
         match m.role {
-            Role::System => out_msgs.push(RequestMessage::System { content: m.content.clone() }),
-            Role::User => out_msgs.push(RequestMessage::User { content: m.content.clone() }),
+            Role::System => out_msgs.push(RequestMessage::System {
+                content: m.content.clone(),
+            }),
+            Role::User => out_msgs.push(RequestMessage::User {
+                content: m.content.clone(),
+            }),
             Role::Assistant => {
+                let content = if m.content.is_empty() && !m.tool_calls.is_empty() {
+                    None
+                } else {
+                    Some(m.content.clone())
+                };
                 out_msgs.push(RequestMessage::Assistant {
-                    content: m.content.clone(),
-                    tool_calls: m.tool_calls.iter().map(|tc| RequestToolCall {
-                        id: tc.id.clone(),
-                        kind: "function",
-                        function: RequestFunction {
-                            name: tc.name.clone(),
-                            arguments: tc.args.to_string(),
-                        },
-                    }).collect(),
+                    content,
+                    tool_calls: m
+                        .tool_calls
+                        .iter()
+                        .map(|tc| RequestToolCall {
+                            id: tc.id.clone(),
+                            kind: "function",
+                            function: RequestFunction {
+                                name: tc.name.clone(),
+                                arguments: tc.args.to_string(),
+                            },
+                        })
+                        .collect(),
                 });
             }
             Role::Tool => {
@@ -359,6 +378,7 @@ struct ChunkDelta {
 
 #[derive(Debug, Deserialize)]
 struct ChunkToolCall {
+    #[serde(default)]
     index: u32,
     #[serde(default)]
     id: Option<String>,
@@ -387,10 +407,7 @@ mod tests {
 
     #[test]
     fn request_serializes_with_all_roles() {
-        let mut msgs = vec![
-            Message::system("sys"),
-            Message::user("hi"),
-        ];
+        let mut msgs = vec![Message::system("sys"), Message::user("hi")];
         msgs.push(Message::assistant(
             "ok",
             vec![ToolCall {
@@ -405,6 +422,35 @@ mod tests {
         assert!(json.contains("\"role\":\"system\""));
         assert!(json.contains("\"role\":\"tool\""));
         assert!(json.contains("\"tool_calls\""));
+    }
+
+    #[test]
+    fn build_request_serializes_null_content_when_assistant_has_tool_calls_and_empty_text() {
+        let msgs = vec![Message::assistant(
+            "",
+            vec![ToolCall {
+                id: "call_1".into(),
+                name: "read".into(),
+                args: serde_json::json!({"path": "src/main.rs"}),
+            }],
+        )];
+        let body = build_request(&msgs, &[], "deepseek-chat", false);
+        let json = serde_json::to_string(&body).unwrap();
+        // Crucial for DeepSeek/Ollama: content MUST be present and null
+        assert!(
+            json.contains("\"content\":null"),
+            "Expected 'content': null in JSON payload, but got: {json}"
+        );
+        assert!(json.contains("\"tool_calls\""));
+    }
+
+    #[test]
+    fn chunk_tool_call_handles_missing_index() {
+        let json = r#"{"id":"call_123","function":{"name":"read","arguments":"{}"}}"#;
+        let parsed: ChunkToolCall =
+            serde_json::from_str(json).expect("Should deserialize without index");
+        assert_eq!(parsed.index, 0);
+        assert_eq!(parsed.id.as_deref(), Some("call_123"));
     }
 
     #[test]
@@ -467,11 +513,7 @@ mod tests {
         assert!(!p.base_url.ends_with('/'));
     }
 
-    fn compat_checked_for_test(
-        url: &str,
-        m: &str,
-        k: &str,
-    ) -> Result<OpenAiProvider, String> {
+    fn compat_checked_for_test(url: &str, m: &str, k: &str) -> Result<OpenAiProvider, String> {
         OpenAiProvider::compat_checked(url, m.to_string(), k.to_string())
     }
 }

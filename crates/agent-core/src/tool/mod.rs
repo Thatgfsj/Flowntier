@@ -58,21 +58,33 @@ impl ToolOutput {
     pub fn ok(content: impl Into<String>) -> Self {
         let s = content.into();
         let preview = preview_of(&s);
-        Self { content: s, preview, is_error: false }
+        Self {
+            content: s,
+            preview,
+            is_error: false,
+        }
     }
 
     /// Wrap an error result.
     pub fn err(content: impl Into<String>) -> Self {
         let s = content.into();
         let preview = preview_of(&s);
-        Self { content: s, preview, is_error: true }
+        Self {
+            content: s,
+            preview,
+            is_error: true,
+        }
     }
 }
 
 fn preview_of(s: &str) -> String {
     let first_line = s.lines().next().unwrap_or("");
     let truncated: String = first_line.chars().take(200).collect();
-    if first_line.chars().count() > 200 { format!("{truncated}…") } else { truncated }
+    if first_line.chars().count() > 200 {
+        format!("{truncated}…")
+    } else {
+        truncated
+    }
 }
 
 /// Context handed to every tool invocation.
@@ -146,7 +158,12 @@ pub struct Capabilities {
 
 impl Default for Capabilities {
     fn default() -> Self {
-        Self { read: true, write: true, bash: true, network: true }
+        Self {
+            read: true,
+            write: true,
+            bash: true,
+            network: true,
+        }
     }
 }
 
@@ -154,18 +171,33 @@ impl Capabilities {
     /// File reading + `bash` for inspection commands, but no
     /// modification or outbound network.
     pub fn read_only() -> Self {
-        Self { read: true, write: false, bash: true, network: false }
+        Self {
+            read: true,
+            write: false,
+            bash: true,
+            network: false,
+        }
     }
     /// Completely locked down: nothing but `read`. Useful for
     /// the "inspect this codebase" mode where the user wants
     /// the agent to plan but not touch anything yet.
     pub fn no_modify() -> Self {
-        Self { read: true, write: false, bash: false, network: false }
+        Self {
+            read: true,
+            write: false,
+            bash: false,
+            network: false,
+        }
     }
     /// No outbound network from `bash`, but local file ops and
     /// local subprocesses are fine.
     pub fn network_off() -> Self {
-        Self { read: true, write: true, bash: true, network: false }
+        Self {
+            read: true,
+            write: true,
+            bash: true,
+            network: false,
+        }
     }
 }
 
@@ -235,14 +267,16 @@ impl ToolRegistry {
         let mut out: Vec<_> = self
             .tools
             .values()
-            .map(|t| serde_json::json!({
-                "type": "function",
-                "function": {
-                    "name": t.name(),
-                    "description": t.description(),
-                    "parameters": t.schema(),
-                }
-            }))
+            .map(|t| {
+                serde_json::json!({
+                    "type": "function",
+                    "function": {
+                        "name": t.name(),
+                        "description": t.description(),
+                        "parameters": t.schema(),
+                    }
+                })
+            })
             .collect();
         out.sort_by(|a, b| {
             a["function"]["name"]

@@ -8,8 +8,7 @@
 use std::path::PathBuf;
 
 use pipe_server::{
-    logs, register_all, run_quota_scheduler, Dispatcher, Server,
-    ServerConfig, ServerState,
+    logs, register_all, run_quota_scheduler, Dispatcher, Server, ServerConfig, ServerState,
 };
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 4)]
@@ -58,8 +57,7 @@ async fn main() -> std::io::Result<()> {
     }
     // Default: OS-specific app data dir.
     let data_dir = data_dir.unwrap_or_else(|| {
-        storage::Repository::default_data_dir()
-            .unwrap_or_else(|| workspace.clone())
+        storage::Repository::default_data_dir().unwrap_or_else(|| workspace.clone())
     });
 
     // v0.4.22 (event 000085): read the persisted workdir from
@@ -152,39 +150,40 @@ async fn main() -> std::io::Result<()> {
     // isolation impossible without explicit `unsafe` blocks in
     // every test. Direct param-pass is faster, safer, and
     // makes the test suite cleaner.
-    let bridge_token: Option<String> = if let Some(existing) =
-        pipe_server::ws_bridge::token_from_env()
-    {
-        Some(existing)
-    } else {
-        use rand::Rng;
-        let mut bytes = [0u8; 32];
-        rand::thread_rng().fill(&mut bytes[..]);
-        let hex: String = bytes.iter().map(|b| format!("{:02x}", b)).collect();
-        let token_path = data_dir.join(".bridge_token");
-        if let Err(e) = std::fs::write(&token_path, hex.as_bytes()) {
-            tracing::warn!(
-                target: "pipe_server",
-                error = %e,
-                path = %token_path.display(),
-                "event 000109: failed to write .bridge_token; the portable HTML \
-                 frontend will not be able to auth against the HTTP bridge"
-            );
+    let bridge_token: Option<String> =
+        if let Some(existing) = pipe_server::ws_bridge::token_from_env() {
+            Some(existing)
         } else {
-            tracing::info!(
-                target: "pipe_server",
-                path = %token_path.display(),
-                "event 000109: generated bridge token; portable HTML frontend \
-                 should read this file and use it as `Authorization: Bearer <hex>`"
-            );
-        }
-        Some(hex)
-    };
-    let _ = bridge_token.as_ref().map(|t| tracing::debug!(
-        target: "pipe_server",
-        token_len = t.len(),
-        "event 000109: HTTP bridge auth token active"
-    ));
+            use rand::Rng;
+            let mut bytes = [0u8; 32];
+            rand::thread_rng().fill(&mut bytes[..]);
+            let hex: String = bytes.iter().map(|b| format!("{:02x}", b)).collect();
+            let token_path = data_dir.join(".bridge_token");
+            if let Err(e) = std::fs::write(&token_path, hex.as_bytes()) {
+                tracing::warn!(
+                    target: "pipe_server",
+                    error = %e,
+                    path = %token_path.display(),
+                    "event 000109: failed to write .bridge_token; the portable HTML \
+                     frontend will not be able to auth against the HTTP bridge"
+                );
+            } else {
+                tracing::info!(
+                    target: "pipe_server",
+                    path = %token_path.display(),
+                    "event 000109: generated bridge token; portable HTML frontend \
+                     should read this file and use it as `Authorization: Bearer <hex>`"
+                );
+            }
+            Some(hex)
+        };
+    let _ = bridge_token.as_ref().map(|t| {
+        tracing::debug!(
+            target: "pipe_server",
+            token_len = t.len(),
+            "event 000109: HTTP bridge auth token active"
+        )
+    });
 
     // v0.4.20 (event 000056): background quota scheduler.
     // Spawned AFTER register_all so state.dispatcher() returns Some.
@@ -200,7 +199,9 @@ async fn main() -> std::io::Result<()> {
     //   GET  /health  — health probe
     // Dies with the runtime process.
     let bind = pipe_server::ws_bridge::bind_from_env();
-    let dispatcher_for_bridge = state.dispatcher().expect("dispatcher wired by register_all");
+    let dispatcher_for_bridge = state
+        .dispatcher()
+        .expect("dispatcher wired by register_all");
     let events_for_bridge = state.events.clone();
     // event 000109: pass the resolved token DIRECTLY instead of
     // going through FLOWNTIER_HTTP_BRIDGE_TOKEN env var. Same
@@ -212,7 +213,9 @@ async fn main() -> std::io::Result<()> {
     let bridge_listener = std::net::TcpListener::bind(&bind)
         .or_else(|_| std::net::TcpListener::bind(pipe_server::ws_bridge::DEFAULT_BIND))
         .expect("bind HTTP bridge listener");
-    bridge_listener.set_nonblocking(true).expect("set_nonblocking");
+    bridge_listener
+        .set_nonblocking(true)
+        .expect("set_nonblocking");
     let bridge_listener = tokio::net::TcpListener::from_std(bridge_listener)
         .expect("convert std TcpListener to tokio");
     let bridge = tokio::spawn(pipe_server::run_http_bridge_on_with_token(

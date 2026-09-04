@@ -16,13 +16,13 @@
  *   - <html lang> attribute is synced so screen readers and
  *     webview devtools show the right language.
  */
-import i18n from 'i18next';
-import { initReactI18next } from 'react-i18next';
-import zhCN from './zh-CN';
-import enUS from './en-US';
+import i18n from "i18next";
+import { initReactI18next } from "react-i18next";
+import zhCN from "./zh-CN";
+import enUS from "./en-US";
 
-const STORAGE_KEY = 'flowntier.lang';
-const SUPPORTED = ['zh-CN', 'en-US'] as const;
+const STORAGE_KEY = "flowntier.lang";
+const SUPPORTED = ["zh-CN", "en-US"] as const;
 export type SupportedLang = (typeof SUPPORTED)[number];
 
 function detectInitialLang(): SupportedLang {
@@ -39,11 +39,11 @@ function detectInitialLang(): SupportedLang {
   // 2. navigator.language — only switch if explicitly English;
   //    all other locales default to zh-CN (existing UI is
   //    Chinese-only).
-  if (typeof navigator !== 'undefined') {
+  if (typeof navigator !== "undefined") {
     const nl = navigator.language.toLowerCase();
-    if (nl.startsWith('en')) return 'en-US';
+    if (nl.startsWith("en")) return "en-US";
   }
-  return 'zh-CN';
+  return "zh-CN";
 }
 
 const initialLang = detectInitialLang();
@@ -52,11 +52,11 @@ void i18n
   .use(initReactI18next)
   .init({
     resources: {
-      'zh-CN': { translation: zhCN },
-      'en-US': { translation: enUS },
+      "zh-CN": { translation: zhCN },
+      "en-US": { translation: enUS },
     },
     lng: initialLang,
-    fallbackLng: 'zh-CN',
+    fallbackLng: "zh-CN",
     // Don't warn on missing keys — for v0.4 we have many strings
     // that aren't translated yet (the legacy Chinese UI). The
     // translator reads the raw key, which is at least visible
@@ -74,21 +74,21 @@ void i18n
     react: { useSuspense: false },
   })
   .catch((e) => {
-    console.warn('[i18n] init failed:', e);
+    console.warn("[i18n] init failed:", e);
   });
 
 // Sync <html lang> with the active language so screen readers,
 // webview devtools, and copy-paste between apps use the right
 // language tag.
 function syncHtmlLang(lang: SupportedLang): void {
-  if (typeof document !== 'undefined' && document.documentElement) {
+  if (typeof document !== "undefined" && document.documentElement) {
     document.documentElement.lang = lang;
   }
 }
 
 syncHtmlLang(initialLang);
 
-i18n.on('languageChanged', (lang) => {
+i18n.on("languageChanged", (lang) => {
   syncHtmlLang(lang as SupportedLang);
   try {
     localStorage.setItem(STORAGE_KEY, lang);

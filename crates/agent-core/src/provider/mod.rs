@@ -111,9 +111,7 @@ mod tests {
 
     #[test]
     fn chunk_serde_roundtrip() {
-        let c = StreamChunk::Text {
-            delta: "hi".into(),
-        };
+        let c = StreamChunk::Text { delta: "hi".into() };
         let s = serde_json::to_string(&c).unwrap();
         assert!(s.contains("\"text\""));
         let back: StreamChunk = serde_json::from_str(&s).unwrap();

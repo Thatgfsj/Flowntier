@@ -87,10 +87,7 @@ impl Agent {
     /// a per-task id. Phase 5 uses this so the frontend can
     /// render N worker cards instead of collapsing them. `None`
     /// for any non-Phase-5 caller (chief, critic, planner).
-    pub fn run(
-        self,
-        task: impl Into<String>,
-    ) -> mpsc::UnboundedReceiver<AgentEvent> {
+    pub fn run(self, task: impl Into<String>) -> mpsc::UnboundedReceiver<AgentEvent> {
         self.run_with_task_id(task, None)
     }
 
@@ -128,12 +125,23 @@ impl Agent {
         let cfg = self.cfg;
         let ctx_mgr = self.ctx;
         let cancel = self.cancel;
-        let chat_history = chat_history;
 
         tokio::spawn(async move {
-            if let Err(e) =
-                drive_loop(tx.clone(), agent_id, display, task, task_id, chat_history, provider, tools, workspace, cfg, ctx_mgr, cancel)
-                    .await
+            if let Err(e) = drive_loop(
+                tx.clone(),
+                agent_id,
+                display,
+                task,
+                task_id,
+                chat_history,
+                provider,
+                tools,
+                workspace,
+                cfg,
+                ctx_mgr,
+                cancel,
+            )
+            .await
             {
                 // v0.4.22 (event 000081): include the error
                 // message in the summary so the chairman sees
@@ -267,7 +275,9 @@ async fn drive_loop(
         // ── Execute each tool call ────────────────────────────
         for call in tool_calls {
             let started = Instant::now();
-            let result = tools.execute(&call.name, call.args.clone(), &tool_ctx).await;
+            let result = tools
+                .execute(&call.name, call.args.clone(), &tool_ctx)
+                .await;
             let (content, is_error) = match result {
                 Ok(o) => (o.content, o.is_error),
                 Err(e) => (format!("tool error: {e}"), true),
@@ -282,15 +292,11 @@ async fn drive_loop(
                 elapsed_ms: started.elapsed().as_millis() as u64,
                 task_id: task_id.clone(),
             });
-            history.push(Message::tool(call.id.clone(), content.clone()));
+            let mut final_content = content.clone();
 
             // Repeat-failure detection.
             if is_error && cfg.repeat_abort_after > 0 {
-                let key = format!(
-                    "{}|{}",
-                    call.name,
-                    stable_hash(&call.args)
-                );
+                let key = format!("{}|{}", call.name, stable_hash(&call.args));
                 if last_failure_key.as_deref() == Some(&key) {
                     repeat_count += 1;
                 } else {
@@ -309,11 +315,17 @@ async fn drive_loop(
                         summary: Some(msg),
                     });
                     return Ok(());
+                } else if repeat_count > 1 {
+                    final_content.push_str(&format!(
+                        "\n[Warning: Tool '{}' has failed {} times with identical arguments. Do NOT repeat the exact same call. Try another approach or modify your arguments.]",
+                        call.name, repeat_count
+                    ));
                 }
             } else {
                 last_failure_key = None;
                 repeat_count = 0;
             }
+            history.push(Message::tool(call.id.clone(), final_content));
         }
 
         let _ = iteration; // silence unused

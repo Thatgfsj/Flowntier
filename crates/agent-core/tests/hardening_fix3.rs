@@ -40,14 +40,20 @@ fn log_path() -> String {
     let manifest = std::env::var("CARGO_MANIFEST_DIR")
         .unwrap_or_else(|_| "O:/clawwork/Flowntier/crates/agent-core".into());
     let target = std::path::Path::new(&manifest).join("..").join("target");
-    target.join("hardening_fix3.log").to_string_lossy().into_owned()
+    target
+        .join("hardening_fix3.log")
+        .to_string_lossy()
+        .into_owned()
 }
 
 fn result_path() -> String {
     let manifest = std::env::var("CARGO_MANIFEST_DIR")
         .unwrap_or_else(|_| "O:/clawwork/Flowntier/crates/agent-core".into());
     let target = std::path::Path::new(&manifest).join("..").join("target");
-    target.join("hardening_fix3_result.txt").to_string_lossy().into_owned()
+    target
+        .join("hardening_fix3_result.txt")
+        .to_string_lossy()
+        .into_owned()
 }
 
 fn record(log: &mut String, name: &str, f: impl FnOnce() -> Result<(), String>) -> bool {
@@ -190,115 +196,188 @@ fn main() {
         }
     });
 
-    run("TextDelta task_id=None serialises to JSON null (not omitted)", &|| {
-        let ev = AgentEvent::TextDelta {
-            agent_id: "agent:chief".into(),
-            agent_display: "主理".into(),
-            delta: "x".into(),
-            task_id: None,
-        };
-        let v: Value = serde_json::to_value(&ev).map_err(|e| e.to_string())?;
-        if v.get("task_id").is_none() {
-            return Err("task_id field was OMITTED for None — must be present as null".into());
-        }
-        if v["task_id"] != json!(null) {
-            return Err(format!("task_id != null: {:?}", v["task_id"]));
-        }
-        let back: AgentEvent = serde_json::from_value(v).map_err(|e| e.to_string())?;
-        match back {
-            AgentEvent::TextDelta { task_id, .. } if task_id.is_none() => Ok(()),
-            other => Err(format!("unexpected variant after roundtrip: {other:?}")),
-        }
-    });
+    run(
+        "TextDelta task_id=None serialises to JSON null (not omitted)",
+        &|| {
+            let ev = AgentEvent::TextDelta {
+                agent_id: "agent:chief".into(),
+                agent_display: "主理".into(),
+                delta: "x".into(),
+                task_id: None,
+            };
+            let v: Value = serde_json::to_value(&ev).map_err(|e| e.to_string())?;
+            if v.get("task_id").is_none() {
+                return Err("task_id field was OMITTED for None — must be present as null".into());
+            }
+            if v["task_id"] != json!(null) {
+                return Err(format!("task_id != null: {:?}", v["task_id"]));
+            }
+            let back: AgentEvent = serde_json::from_value(v).map_err(|e| e.to_string())?;
+            match back {
+                AgentEvent::TextDelta { task_id, .. } if task_id.is_none() => Ok(()),
+                other => Err(format!("unexpected variant after roundtrip: {other:?}")),
+            }
+        },
+    );
 
-    run("task_id=\"\" is preserved as a distinct key (not normalised to None)", &|| {
-        let ev = AgentEvent::ToolStarted {
-            agent_id: "agent:worker".into(),
-            agent_display: "实施".into(),
-            call: ToolCall { id: "c".into(), name: "bash".into(), args: json!({}) },
-            task_id: Some(String::new()),
-        };
-        let v: Value = serde_json::to_value(&ev).map_err(|e| e.to_string())?;
-        if v["task_id"] != json!("") {
-            return Err(format!("task_id \"\" not preserved in JSON: {:?}", v["task_id"]));
-        }
-        let back: AgentEvent = serde_json::from_value(v).map_err(|e| e.to_string())?;
-        match back {
-            AgentEvent::ToolStarted { task_id, .. } => match task_id {
-                Some(s) if s.is_empty() => Ok(()),
-                Some(_) => Err("task_id non-empty after roundtrip".into()),
-                None => Err("task_id was silently normalised to None".into()),
-            },
-            other => Err(format!("unexpected variant: {other:?}")),
-        }
-    });
+    run(
+        "task_id=\"\" is preserved as a distinct key (not normalised to None)",
+        &|| {
+            let ev = AgentEvent::ToolStarted {
+                agent_id: "agent:worker".into(),
+                agent_display: "实施".into(),
+                call: ToolCall {
+                    id: "c".into(),
+                    name: "bash".into(),
+                    args: json!({}),
+                },
+                task_id: Some(String::new()),
+            };
+            let v: Value = serde_json::to_value(&ev).map_err(|e| e.to_string())?;
+            if v["task_id"] != json!("") {
+                return Err(format!(
+                    "task_id \"\" not preserved in JSON: {:?}",
+                    v["task_id"]
+                ));
+            }
+            let back: AgentEvent = serde_json::from_value(v).map_err(|e| e.to_string())?;
+            match back {
+                AgentEvent::ToolStarted { task_id, .. } => match task_id {
+                    Some(s) if s.is_empty() => Ok(()),
+                    Some(_) => Err("task_id non-empty after roundtrip".into()),
+                    None => Err("task_id was silently normalised to None".into()),
+                },
+                other => Err(format!("unexpected variant: {other:?}")),
+            }
+        },
+    );
 
     run("task_id present on all 4 task-scoped variants", &|| {
         let variants: Vec<(&str, AgentEvent)> = vec![
-            ("text_delta", AgentEvent::TextDelta {
-                agent_id: "a".into(), agent_display: "d".into(),
-                delta: "x".into(), task_id: Some("t0".into()),
-            }),
-            ("tool_started", AgentEvent::ToolStarted {
-                agent_id: "a".into(), agent_display: "d".into(),
-                call: ToolCall { id: "c".into(), name: "bash".into(), args: json!({}) },
-                task_id: Some("t0".into()),
-            }),
-            ("tool_finished", AgentEvent::ToolFinished {
-                agent_id: "a".into(), agent_display: "d".into(),
-                tool_call_id: "c".into(), preview: "p".into(),
-                is_error: false, elapsed_ms: 0,
-                task_id: Some("t0".into()),
-            }),
-            ("token_usage", AgentEvent::TokenUsage {
-                agent_id: "a".into(), provider: "p".into(),
-                model: "m".into(), input_tokens: 0,
-                output_tokens: 0, cost_usd: None,
-                task_id: Some("t0".into()),
-            }),
+            (
+                "text_delta",
+                AgentEvent::TextDelta {
+                    agent_id: "a".into(),
+                    agent_display: "d".into(),
+                    delta: "x".into(),
+                    task_id: Some("t0".into()),
+                },
+            ),
+            (
+                "tool_started",
+                AgentEvent::ToolStarted {
+                    agent_id: "a".into(),
+                    agent_display: "d".into(),
+                    call: ToolCall {
+                        id: "c".into(),
+                        name: "bash".into(),
+                        args: json!({}),
+                    },
+                    task_id: Some("t0".into()),
+                },
+            ),
+            (
+                "tool_finished",
+                AgentEvent::ToolFinished {
+                    agent_id: "a".into(),
+                    agent_display: "d".into(),
+                    tool_call_id: "c".into(),
+                    preview: "p".into(),
+                    is_error: false,
+                    elapsed_ms: 0,
+                    task_id: Some("t0".into()),
+                },
+            ),
+            (
+                "token_usage",
+                AgentEvent::TokenUsage {
+                    agent_id: "a".into(),
+                    provider: "p".into(),
+                    model: "m".into(),
+                    input_tokens: 0,
+                    output_tokens: 0,
+                    cost_usd: None,
+                    task_id: Some("t0".into()),
+                },
+            ),
         ];
         for (expected_kind, ev) in variants {
             let v: Value = serde_json::to_value(&ev).map_err(|e| e.to_string())?;
             if v["kind"] != json!(expected_kind) {
-                return Err(format!("{}: kind drifted to {:?}", expected_kind, v["kind"]));
+                return Err(format!(
+                    "{}: kind drifted to {:?}",
+                    expected_kind, v["kind"]
+                ));
             }
             if v["task_id"] != json!("t0") {
-                return Err(format!("{}: task_id missing in JSON: {:?}", expected_kind, v["task_id"]));
+                return Err(format!(
+                    "{}: task_id missing in JSON: {:?}",
+                    expected_kind, v["task_id"]
+                ));
             }
         }
         Ok(())
     });
 
-    run("task_id ABSENT from phase_transition/done/reviewer/repair", &|| {
-        let variants: Vec<(&str, AgentEvent)> = vec![
-            ("phase_transition", AgentEvent::PhaseTransition {
-                wf_id: "wf".into(), from: None, to: "1-requirement".into(),
-            }),
-            ("done", AgentEvent::Done {
-                wf_id: "wf".into(), status: "DONE".into(), summary: None,
-            }),
-            ("reviewer_verdict", AgentEvent::ReviewerVerdict {
-                wf_id: "wf".into(), phase: "plan-review".into(),
-                role: "agent:critic:a".into(), verdict: "PASS".into(),
-                confidence: 0.0, issues: vec![], summary: "ok".into(),
-            }),
-            ("repair_loop", AgentEvent::RepairLoop {
-                wf_id: "wf".into(), loop_index: 1, max_loops: 3,
-                verdict_a: "PASS".into(), verdict_b: "PASS".into(),
-                issues_a: vec![], issues_b: vec![],
-            }),
-        ];
-        for (expected_kind, ev) in variants {
-            let v: Value = serde_json::to_value(&ev).map_err(|e| e.to_string())?;
-            if v["kind"] != json!(expected_kind) {
-                return Err(format!("{}: kind drifted", expected_kind));
+    run(
+        "task_id ABSENT from phase_transition/done/reviewer/repair",
+        &|| {
+            let variants: Vec<(&str, AgentEvent)> = vec![
+                (
+                    "phase_transition",
+                    AgentEvent::PhaseTransition {
+                        wf_id: "wf".into(),
+                        from: None,
+                        to: "1-requirement".into(),
+                    },
+                ),
+                (
+                    "done",
+                    AgentEvent::Done {
+                        wf_id: "wf".into(),
+                        status: "DONE".into(),
+                        summary: None,
+                    },
+                ),
+                (
+                    "reviewer_verdict",
+                    AgentEvent::ReviewerVerdict {
+                        wf_id: "wf".into(),
+                        phase: "plan-review".into(),
+                        role: "agent:critic:a".into(),
+                        verdict: "PASS".into(),
+                        confidence: 0.0,
+                        issues: vec![],
+                        summary: "ok".into(),
+                    },
+                ),
+                (
+                    "repair_loop",
+                    AgentEvent::RepairLoop {
+                        wf_id: "wf".into(),
+                        loop_index: 1,
+                        max_loops: 3,
+                        verdict_a: "PASS".into(),
+                        verdict_b: "PASS".into(),
+                        issues_a: vec![],
+                        issues_b: vec![],
+                    },
+                ),
+            ];
+            for (expected_kind, ev) in variants {
+                let v: Value = serde_json::to_value(&ev).map_err(|e| e.to_string())?;
+                if v["kind"] != json!(expected_kind) {
+                    return Err(format!("{}: kind drifted", expected_kind));
+                }
+                if v.get("task_id").is_some() {
+                    return Err(format!(
+                        "{expected_kind} must NOT carry task_id, got: {v:?}"
+                    ));
+                }
             }
-            if v.get("task_id").is_some() {
-                return Err(format!("{expected_kind} must NOT carry task_id, got: {v:?}"));
-            }
-        }
-        Ok(())
-    });
+            Ok(())
+        },
+    );
 
     run("AGENT_EVENT_KINDS matches actual serde tags", &|| {
         let declared: BTreeSet<&str> = AGENT_EVENT_KINDS.iter().copied().collect();
@@ -312,7 +391,9 @@ fn main() {
             })
             .collect();
         if declared != actual {
-            return Err(format!("declared != actual: declared={declared:?}, actual={actual:?}"));
+            return Err(format!(
+                "declared != actual: declared={declared:?}, actual={actual:?}"
+            ));
         }
         Ok(())
     });

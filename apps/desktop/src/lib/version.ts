@@ -12,11 +12,11 @@ declare const __FLOWNTIER_VERSION__: string;
 declare const __FLOWNTIER_BUILD_SHA__: string;
 
 export const appVersion: string =
-  typeof __FLOWNTIER_VERSION__ === 'string' && __FLOWNTIER_VERSION__.length > 0
+  typeof __FLOWNTIER_VERSION__ === "string" && __FLOWNTIER_VERSION__.length > 0
     ? __FLOWNTIER_VERSION__
-    : '0.4.0-dev';
+    : "0.4.0-dev";
 
 export const buildSha: string =
-  typeof __FLOWNTIER_BUILD_SHA__ === 'string' && __FLOWNTIER_BUILD_SHA__.length > 0
+  typeof __FLOWNTIER_BUILD_SHA__ === "string" && __FLOWNTIER_BUILD_SHA__.length > 0
     ? __FLOWNTIER_BUILD_SHA__
-    : 'local';
+    : "local";

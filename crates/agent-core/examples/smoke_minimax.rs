@@ -58,7 +58,10 @@ async fn main() -> anyhow::Result<()> {
     eprintln!("← HTTP {}", resp.status());
     let txt = resp.text().await.unwrap_or_default();
     let snippet: String = txt.chars().take(800).collect();
-    eprintln!("{snippet}{}", if txt.chars().count() > 800 { "…" } else { "" });
+    eprintln!(
+        "{snippet}{}",
+        if txt.chars().count() > 800 { "…" } else { "" }
+    );
     eprintln!("=== /probe ===\n");
 
     let tools = Arc::new(ToolRegistry::with_builtins());
@@ -92,18 +95,27 @@ async fn main() -> anyhow::Result<()> {
                 tool_count += 1;
                 eprintln!("\n  ⚙ tool {}: {} {:?}", tool_count, call.name, call.args);
             }
-            AgentEvent::ToolFinished { preview, is_error, elapsed_ms, .. } => {
+            AgentEvent::ToolFinished {
+                preview,
+                is_error,
+                elapsed_ms,
+                ..
+            } => {
                 let mark = if *is_error { "✗" } else { "✓" };
                 eprintln!("  {mark} done in {elapsed_ms}ms: {preview}");
             }
-            AgentEvent::Done { status, summary, .. } => {
+            AgentEvent::Done {
+                status, summary, ..
+            } => {
                 eprintln!("\n→ status: {status}");
                 if let Some(s) = summary {
                     eprintln!("→ summary: {s}");
                 }
                 anyhow::ensure!(status == "DONE", "expected DONE, got {status}");
-                eprintln!("\n=== full transcript ({text_len} chars, {tool_count} tool calls) ===",
-                    text_len = text_buf.len());
+                eprintln!(
+                    "\n=== full transcript ({text_len} chars, {tool_count} tool calls) ===",
+                    text_len = text_buf.len()
+                );
                 eprintln!("{text_buf}");
                 return Ok(());
             }

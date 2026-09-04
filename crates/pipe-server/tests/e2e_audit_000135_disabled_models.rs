@@ -35,10 +35,7 @@ mod client {
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     use tokio::net::UnixStream;
 
-    pub async fn connect_and_request(
-        addr: &str,
-        body: serde_json::Value,
-    ) -> serde_json::Value {
+    pub async fn connect_and_request(addr: &str, body: serde_json::Value) -> serde_json::Value {
         let mut conn = UnixStream::connect(addr).await.expect("connect failed");
         let mut line = serde_json::to_vec(&body).unwrap();
         line.push(b'\n');
@@ -60,14 +57,9 @@ mod client {
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     use tokio::net::windows::named_pipe::ClientOptions;
 
-    pub async fn connect_and_request(
-        addr: &str,
-        body: serde_json::Value,
-    ) -> serde_json::Value {
+    pub async fn connect_and_request(addr: &str, body: serde_json::Value) -> serde_json::Value {
         let path = addr.to_string();
-        let mut conn = ClientOptions::new()
-            .open(&path)
-            .expect("connect failed");
+        let mut conn = ClientOptions::new().open(&path).expect("connect failed");
         let mut line = serde_json::to_vec(&body).unwrap();
         line.push(b'\n');
         conn.write_all(&line).await.unwrap();
@@ -134,9 +126,13 @@ async fn spawn_server(tag: &str) -> (String, tokio::task::JoinHandle<std::io::Re
     (rpc_path, handle)
 }
 
-async fn rpc(method: &str, path: &str, body: serde_json::Value, addr: &str, id: u64)
-    -> serde_json::Value
-{
+async fn rpc(
+    method: &str,
+    path: &str,
+    body: serde_json::Value,
+    addr: &str,
+    id: u64,
+) -> serde_json::Value {
     client::connect_and_request(
         addr,
         serde_json::json!({
@@ -145,7 +141,8 @@ async fn rpc(method: &str, path: &str, body: serde_json::Value, addr: &str, id: 
             "method": method,
             "params": { "path": path, "body": body }
         }),
-    ).await
+    )
+    .await
 }
 
 // ── Tests ──────────────────────────────────────────────────────
@@ -159,7 +156,14 @@ async fn rpc(method: &str, path: &str, body: serde_json::Value, addr: &str, id: 
 async fn audit_000135_list_disabled_models_endpoint_returns_empty_when_fresh() {
     let (addr, handle) = spawn_server("a0135-empty").await;
 
-    let resp = rpc("GET", "/api/disabled-models", serde_json::Value::Null, &addr, 1).await;
+    let resp = rpc(
+        "GET",
+        "/api/disabled-models",
+        serde_json::Value::Null,
+        &addr,
+        1,
+    )
+    .await;
     let resp_text = serde_json::to_string(&resp).unwrap_or_default();
     assert_eq!(
         resp["result"]["status"].as_u64().unwrap_or(0),
@@ -190,7 +194,14 @@ async fn audit_000135_list_disabled_models_reflects_disable_then_enable() {
     let (addr, handle) = spawn_server("a0135-cycle").await;
 
     // Baseline: no pairs.
-    let before = rpc("GET", "/api/disabled-models", serde_json::Value::Null, &addr, 1).await;
+    let before = rpc(
+        "GET",
+        "/api/disabled-models",
+        serde_json::Value::Null,
+        &addr,
+        1,
+    )
+    .await;
     assert_eq!(before["result"]["status"].as_u64().unwrap_or(0), 200);
     let before_models = before["result"]["body"]["models"].as_array().unwrap();
     assert_eq!(
@@ -210,8 +221,10 @@ async fn audit_000135_list_disabled_models_reflects_disable_then_enable() {
             "provider_id": "anthropic",
             "model_id": "claude-haiku-4-5",
         }),
-        &addr, 2,
-    ).await;
+        &addr,
+        2,
+    )
+    .await;
     let disable_text = serde_json::to_string(&disable).unwrap_or_default();
     assert_eq!(
         disable["result"]["status"].as_u64().unwrap_or(0),
@@ -224,11 +237,15 @@ async fn audit_000135_list_disabled_models_reflects_disable_then_enable() {
         "GET",
         "/api/disabled-models",
         serde_json::Value::Null,
-        &addr, 3,
-    ).await;
+        &addr,
+        3,
+    )
+    .await;
     let after_disable_text = serde_json::to_string(&after_disable).unwrap_or_default();
     assert_eq!(after_disable["result"]["status"].as_u64().unwrap_or(0), 200);
-    let models = after_disable["result"]["body"]["models"].as_array().unwrap();
+    let models = after_disable["result"]["body"]["models"]
+        .as_array()
+        .unwrap();
     assert_eq!(
         models.len(),
         1,
@@ -245,8 +262,10 @@ async fn audit_000135_list_disabled_models_reflects_disable_then_enable() {
             "provider_id": "anthropic",
             "model_id": "claude-haiku-4-5",
         }),
-        &addr, 4,
-    ).await;
+        &addr,
+        4,
+    )
+    .await;
     let enable_text = serde_json::to_string(&enable).unwrap_or_default();
     assert_eq!(
         enable["result"]["status"].as_u64().unwrap_or(0),
@@ -259,8 +278,10 @@ async fn audit_000135_list_disabled_models_reflects_disable_then_enable() {
         "GET",
         "/api/disabled-models",
         serde_json::Value::Null,
-        &addr, 5,
-    ).await;
+        &addr,
+        5,
+    )
+    .await;
     assert_eq!(after_enable["result"]["status"].as_u64().unwrap_or(0), 200);
     let models = after_enable["result"]["body"]["models"].as_array().unwrap();
     assert_eq!(

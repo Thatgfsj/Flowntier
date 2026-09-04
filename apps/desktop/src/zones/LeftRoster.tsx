@@ -1,10 +1,10 @@
-import { useState } from 'react';
-import { useTranslation } from 'react-i18next';
-import { AgentCard, type AgentStatus } from '@flowntier/ui';
-import { FileTree } from '../components/FileTree.js';
-import { useAgentStatus, useEvents } from '../contexts/WorkflowContext.js';
-import { agentIdToHeadRole } from '../lib/agentId.js';
-import { AgentLivePanelTooltip } from './AgentLivePanel.js';
+import { useState } from "react";
+import { useTranslation } from "react-i18next";
+import { AgentCard, type AgentStatus } from "@flowntier/ui";
+import { FileTree } from "../components/FileTree.js";
+import { useAgentStatus, useEvents } from "../contexts/WorkflowContext.js";
+import { agentIdToHeadRole } from "../lib/agentId.js";
+import { AgentLivePanelTooltip } from "./AgentLivePanel.js";
 
 /**
  * Z2 — left roster. Lists every agent with status.
@@ -29,7 +29,7 @@ import { AgentLivePanelTooltip } from './AgentLivePanel.js';
  */
 export function LeftRoster() {
   const { t } = useTranslation();
-  const [tab, setTab] = useState<'agents' | 'files'>('agents');
+  const [tab, setTab] = useState<"agents" | "files">("agents");
 
   const agentStatus = useAgentStatus();
   // v0.4.29 (Phase A): derive per-task worker status from the
@@ -44,16 +44,16 @@ export function LeftRoster() {
   for (let i = events.length - 1; i >= 0; i--) {
     const e = events[i];
     if (!e) continue;
-    if (e.kind === 'task_status' && e.task_id) {
+    if (e.kind === "task_status" && e.task_id) {
       if (workerTaskTitles[e.task_id] === undefined && e.task_title) {
         workerTaskTitles[e.task_id] = e.task_title;
       }
       continue;
     }
-    if (e.kind === 'text_delta' || e.kind === 'tool_started' || e.kind === 'tool_finished') {
+    if (e.kind === "text_delta" || e.kind === "tool_started" || e.kind === "tool_finished") {
       const tid = e.task_id;
       if (tid && workerTaskStatus[tid] === undefined) {
-        workerTaskStatus[tid] = e.kind === 'tool_started' ? 'thinking' : 'speaking';
+        workerTaskStatus[tid] = e.kind === "tool_started" ? "thinking" : "speaking";
       }
     }
   }
@@ -64,89 +64,89 @@ export function LeftRoster() {
       <div
         role="tablist"
         aria-label="Left panel sections"
-        className="flex gap-1 border-b border-border"
+        className="flex rounded-lg border border-white/8 bg-surface-2/90 p-1 shadow-inner backdrop-blur-sm"
       >
         <button
           type="button"
           role="tab"
-          aria-selected={tab === 'agents'}
-          onClick={() => setTab('agents')}
+          aria-selected={tab === "agents"}
+          onClick={() => setTab("agents")}
           className={
-            'px-2 py-1 text-xs ' +
-            (tab === 'agents'
-              ? 'border-b-2 border-primary font-semibold text-text-primary'
-              : 'text-text-secondary hover:text-text-primary')
+            "flex-1 rounded-md py-1 text-center text-xs font-medium transition-all " +
+            (tab === "agents"
+              ? "bg-chief/20 text-white shadow-sm shadow-chief/20 border border-chief/40"
+              : "text-text-tertiary hover:text-text-primary")
           }
         >
-          角色
+          智能体
         </button>
         <button
           type="button"
           role="tab"
-          aria-selected={tab === 'files'}
-          onClick={() => setTab('files')}
+          aria-selected={tab === "files"}
+          onClick={() => setTab("files")}
           className={
-            'px-2 py-1 text-xs ' +
-            (tab === 'files'
-              ? 'border-b-2 border-primary font-semibold text-text-primary'
-              : 'text-text-secondary hover:text-text-primary')
+            "flex-1 rounded-md py-1 text-center text-xs font-medium transition-all " +
+            (tab === "files"
+              ? "bg-chief/20 text-white shadow-sm shadow-chief/20 border border-chief/40"
+              : "text-text-tertiary hover:text-text-primary")
           }
         >
-          文件
+          工作区文件
         </button>
       </div>
 
-      {tab === 'agents' && (
+      {tab === "agents" && (
         <div className="flex flex-col gap-2">
           <h2 className="px-1 text-xs font-semibold uppercase tracking-wide text-text-secondary">
-            {t('perTask.agent.chief')}
+            {t("perTask.agent.chief")}
           </h2>
           <AgentLivePanelTooltip role="chief">
             <AgentCard
               role="chief"
-              name={t('perTask.agent.chief')}
+              name={t("perTask.agent.chief")}
               status={agentStatus.chief.status}
               statusLabel={t(`agentCard.status.${agentStatus.chief.status}`)}
-              subtitle={t('roster.chief.thinking')}
-              progress={agentStatus.chief.status === 'thinking' ? 0.5 : undefined}
+              subtitle={t("roster.chief.thinking")}
+              progress={agentStatus.chief.status === "thinking" ? 0.5 : undefined}
             />
           </AgentLivePanelTooltip>
 
           <h2 className="mt-3 px-1 text-xs font-semibold uppercase tracking-wide text-text-secondary">
-            {t('leftRoster.reviewers')}
+            {t("leftRoster.reviewers")}
           </h2>
           <AgentLivePanelTooltip role="critic-a">
             <AgentCard
               role="critic-a"
-              name={t('perTask.agent.criticA')}
-              status={agentStatus['critic-a'].status}
-              statusLabel={t(`agentCard.status.${agentStatus['critic-a'].status}`)}
-              subtitle={t('leftRoster.criticASubtitle')}
+              name={t("perTask.agent.criticA")}
+              status={agentStatus["critic-a"].status}
+              statusLabel={t(`agentCard.status.${agentStatus["critic-a"].status}`)}
+              subtitle={t("leftRoster.criticASubtitle")}
             />
           </AgentLivePanelTooltip>
           <AgentLivePanelTooltip role="critic-b">
             <AgentCard
               role="critic-b"
-              name={t('perTask.agent.criticB')}
-              status={agentStatus['critic-b'].status}
-              statusLabel={t(`agentCard.status.${agentStatus['critic-b'].status}`)}
-              subtitle={t('leftRoster.criticBSubtitle')}
+              name={t("perTask.agent.criticB")}
+              status={agentStatus["critic-b"].status}
+              statusLabel={t(`agentCard.status.${agentStatus["critic-b"].status}`)}
+              subtitle={t("leftRoster.criticBSubtitle")}
             />
           </AgentLivePanelTooltip>
 
           <h2 className="mt-3 px-1 text-xs font-semibold uppercase tracking-wide text-text-secondary">
-            {t('perTask.agent.worker')}
+            {t("perTask.agent.worker")}
             {perTaskIds.length > 1 && (
               <span className="ml-1 text-text-tertiary">({perTaskIds.length})</span>
             )}
           </h2>
           {perTaskIds.length > 0 ? (
             perTaskIds.map((tid) => {
-              const s = workerTaskStatus[tid] ?? 'idle';
+              const s = workerTaskStatus[tid] ?? "idle";
               const title = workerTaskTitles[tid];
               const display = title
-                ? `${t('perTask.agent.worker')} · ${tid}: ${title}`
-                : `${t('perTask.agent.worker')} · ${tid}`;
+                ? `${t("perTask.agent.worker")} · ${tid}: ${title}`
+                : `${t("perTask.agent.worker")} · ${tid}`;
               // Per-task worker cards still share the same
               // `worker` AgentLivePanel — the panel shows the
               // same role-wide timeline because the runtime
@@ -159,7 +159,7 @@ export function LeftRoster() {
                     name={display}
                     status={s}
                     statusLabel={t(`agentCard.status.${s}`)}
-                    subtitle={t('leftRoster.workerSubtitle')}
+                    subtitle={t("leftRoster.workerSubtitle")}
                   />
                 </AgentLivePanelTooltip>
               );
@@ -171,17 +171,17 @@ export function LeftRoster() {
             <AgentLivePanelTooltip role="worker">
               <AgentCard
                 role="worker"
-                name={t('perTask.agent.worker')}
+                name={t("perTask.agent.worker")}
                 status={agentStatus.worker.status}
                 statusLabel={t(`agentCard.status.${agentStatus.worker.status}`)}
-                subtitle={t('leftRoster.workerSubtitle')}
+                subtitle={t("leftRoster.workerSubtitle")}
               />
             </AgentLivePanelTooltip>
           )}
         </div>
       )}
 
-      {tab === 'files' && (
+      {tab === "files" && (
         <div className="mt-2">
           <FileTree pollMs={5000} />
         </div>

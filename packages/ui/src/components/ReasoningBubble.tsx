@@ -28,8 +28,8 @@ export function ReasoningBubble({
   return (
     <article
       className={cn(
-        'rounded-md border border-border bg-surface-1 p-3',
-        'border-t-4',
+        'relative overflow-hidden rounded-xl border border-white/8 bg-surface-2/90 p-4 shadow-sm backdrop-blur-md transition-all hover:border-white/15',
+        'before:absolute before:inset-x-0 before:top-0 before:h-0.5 before:bg-gradient-to-r before:from-transparent before:via-current before:to-transparent',
         roleColorClass,
         className,
       )}

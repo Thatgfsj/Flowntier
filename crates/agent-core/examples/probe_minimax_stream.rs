@@ -4,8 +4,8 @@
 #[tokio::main(flavor = "multi_thread", worker_threads = 2)]
 async fn main() -> anyhow::Result<()> {
     let api_key = std::env::var("MINIMAX_API_KEY")?;
-    let base = std::env::var("MINIMAX_BASE_URL")
-        .unwrap_or_else(|_| "https://api.minimaxi.com/v1".into());
+    let base =
+        std::env::var("MINIMAX_BASE_URL").unwrap_or_else(|_| "https://api.minimaxi.com/v1".into());
     let model = std::env::var("MINIMAX_MODEL").unwrap_or_else(|_| "MiniMax-Text-01".into());
 
     let body = serde_json::json!({

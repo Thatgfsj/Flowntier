@@ -45,27 +45,45 @@ impl Tool for ReadTool {
             .get("path")
             .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError::InvalidArgs("missing 'path'".into()))?;
-        let start_line = args.get("start_line").and_then(|v| v.as_u64()).map(|n| n as usize);
-        let end_line = args.get("end_line").and_then(|v| v.as_u64()).map(|n| n as usize);
+        let start_line = args
+            .get("start_line")
+            .and_then(|v| v.as_u64())
+            .map(|n| n as usize);
+        let end_line = args
+            .get("end_line")
+            .and_then(|v| v.as_u64())
+            .map(|n| n as usize);
 
         let abs = ctx.workspace.resolve(path);
         if !ctx.workspace.contains(&abs) {
-            return Ok(ToolOutput::err(format!("refused: {path} is outside the workspace")));
+            return Ok(ToolOutput::err(format!(
+                "refused: {path} is outside the workspace"
+            )));
         }
         read(&abs, start_line, end_line).await
     }
 }
 
-async fn read(abs: &Path, start: Option<usize>, end: Option<usize>) -> Result<ToolOutput, ToolError> {
-    let raw = tokio::fs::read_to_string(abs).await.map_err(ToolError::Io)?;
+async fn read(
+    abs: &Path,
+    start: Option<usize>,
+    end: Option<usize>,
+) -> Result<ToolOutput, ToolError> {
+    let raw = tokio::fs::read_to_string(abs)
+        .await
+        .map_err(ToolError::Io)?;
     let total_lines = raw.lines().count();
     let s = start.unwrap_or(1).max(1);
     let e = end.unwrap_or(total_lines).min(total_lines.max(s));
     let mut out = String::new();
     for (idx, line) in raw.lines().enumerate() {
         let n = idx + 1;
-        if n < s { continue; }
-        if n > e { break; }
+        if n < s {
+            continue;
+        }
+        if n > e {
+            break;
+        }
         out.push_str(&format!("{n:>5}  {line}\n"));
     }
     if out.is_empty() {
@@ -95,7 +113,10 @@ mod tests {
             ..Default::default()
         };
         let out = ReadTool
-            .execute(serde_json::json!({"path": "a.txt", "start_line": 2, "end_line": 2}), &ctx)
+            .execute(
+                serde_json::json!({"path": "a.txt", "start_line": 2, "end_line": 2}),
+                &ctx,
+            )
             .await
             .unwrap();
         assert!(out.content.contains("2  two"));

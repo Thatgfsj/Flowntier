@@ -12,9 +12,9 @@
  * `kvGet`/`kvSet`. The panel itself is "dumb" — it takes the
  * list and a few callbacks, renders, no I/O.
  */
-import { useState } from 'react';
-import { useTranslation } from 'react-i18next';
-import type { ChatSession } from './chatSessions.js';
+import { useState } from "react";
+import { useTranslation } from "react-i18next";
+import type { ChatSession } from "./chatSessions.js";
 
 export interface ChatSessionsPanelProps {
   sessions: ChatSession[];
@@ -63,34 +63,27 @@ export function ChatSessionsPanel({
           aria-expanded={open}
           aria-controls="chat-sessions-list"
         >
-          <span aria-hidden="true">{open ? '▾' : '▸'}</span>
+          <span aria-hidden="true">{open ? "▾" : "▸"}</span>
           <span className="font-mono text-[10px] uppercase tracking-wide">
-            {t('chatZone.sessionsTitle', { defaultValue: '对话历史' })}
+            {t("chatZone.sessionsTitle", { defaultValue: "对话历史" })}
           </span>
-          <span className="text-text-secondary">
-            ({sessions.length})
-          </span>
+          <span className="text-text-secondary">({sessions.length})</span>
         </button>
         <button
           type="button"
           onClick={onCreate}
           className="rounded border border-border px-2 py-0.5 text-[11px] text-text-secondary hover:bg-surface-2"
-          aria-label={t('chatZone.sessionsNew', { defaultValue: '新建对话' })}
+          aria-label={t("chatZone.sessionsNew", { defaultValue: "新建对话" })}
         >
-          + {t('chatZone.sessionsNew', { defaultValue: '新对话' })}
+          + {t("chatZone.sessionsNew", { defaultValue: "新对话" })}
         </button>
       </div>
       {open && (
-        <ul
-          id="chat-sessions-list"
-          className="mt-2 flex max-h-40 flex-col gap-1 overflow-y-auto"
-        >
-          {loading && (
-            <li className="text-text-secondary">…</li>
-          )}
+        <ul id="chat-sessions-list" className="mt-2 flex max-h-40 flex-col gap-1 overflow-y-auto">
+          {loading && <li className="text-text-secondary">…</li>}
           {!loading && visible.length === 0 && (
             <li className="text-text-secondary">
-              {t('chatZone.sessionsEmpty', { defaultValue: '还没有对话 — 发一条消息即可创建' })}
+              {t("chatZone.sessionsEmpty", { defaultValue: "还没有对话 — 发一条消息即可创建" })}
             </li>
           )}
           {visible.map((s) => {
@@ -99,41 +92,45 @@ export function ChatSessionsPanel({
               <li
                 key={s.id}
                 className={
-                  'group flex items-center gap-2 rounded px-2 py-1 ' +
+                  "group flex items-center gap-2 rounded px-2 py-1 " +
                   (isActive
-                    ? 'bg-accent/10 text-text-primary'
-                    : 'text-text-secondary hover:bg-surface-2 hover:text-text-primary')
+                    ? "bg-accent/10 text-text-primary"
+                    : "text-text-secondary hover:bg-surface-2 hover:text-text-primary")
                 }
               >
                 <button
                   type="button"
                   onClick={() => onSelect(s.id)}
                   className="flex-1 truncate text-left"
-                  aria-current={isActive ? 'true' : undefined}
+                  aria-current={isActive ? "true" : undefined}
                 >
                   <span className="block truncate text-[12px]">{s.title}</span>
                   <span className="block text-[10px] text-text-secondary">
                     {new Date(s.updatedAt).toLocaleString()}
-                    {' · '}
-                    {s.mode === 'chat'
-                      ? t('chatZone.modeChat', { defaultValue: '对话' })
-                      : t('chatZone.modeWorkflow', { defaultValue: '工作流' })}
-                    {' · '}
-                    {s.messages.length} {t('chatZone.sessionsTurns', { defaultValue: '轮' })}
+                    {" · "}
+                    {s.mode === "chat"
+                      ? t("chatZone.modeChat", { defaultValue: "对话" })
+                      : t("chatZone.modeWorkflow", { defaultValue: "工作流" })}
+                    {" · "}
+                    {s.messages.length} {t("chatZone.sessionsTurns", { defaultValue: "轮" })}
                   </span>
                 </button>
                 <button
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation();
-                    if (confirm(t('chatZone.sessionsConfirmDelete', {
-                      defaultValue: '删除这个对话?',
-                    }))) {
+                    if (
+                      confirm(
+                        t("chatZone.sessionsConfirmDelete", {
+                          defaultValue: "删除这个对话?",
+                        }),
+                      )
+                    ) {
                       onDelete(s.id);
                     }
                   }}
                   className="hidden rounded px-1 text-[10px] text-text-secondary hover:bg-status-failed/20 hover:text-status-failed group-hover:inline-block"
-                  aria-label={t('chatZone.sessionsDelete', { defaultValue: '删除' })}
+                  aria-label={t("chatZone.sessionsDelete", { defaultValue: "删除" })}
                 >
                   ✕
                 </button>

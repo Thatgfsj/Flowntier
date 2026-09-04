@@ -43,10 +43,7 @@ mod client {
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     use tokio::net::UnixStream;
 
-    pub async fn connect_and_request(
-        addr: &str,
-        body: serde_json::Value,
-    ) -> serde_json::Value {
+    pub async fn connect_and_request(addr: &str, body: serde_json::Value) -> serde_json::Value {
         let mut conn = UnixStream::connect(addr).await.expect("connect failed");
         let mut line = serde_json::to_vec(&body).unwrap();
         line.push(b'\n');
@@ -69,13 +66,8 @@ mod client {
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     use tokio::net::windows::named_pipe::ClientOptions;
 
-    pub async fn connect_and_request(
-        addr: &str,
-        body: serde_json::Value,
-    ) -> serde_json::Value {
-        let mut conn = ClientOptions::new()
-            .open(addr)
-            .expect("connect failed");
+    pub async fn connect_and_request(addr: &str, body: serde_json::Value) -> serde_json::Value {
+        let mut conn = ClientOptions::new().open(addr).expect("connect failed");
         let mut line = serde_json::to_vec(&body).unwrap();
         line.push(b'\n');
         conn.write_all(&line).await.unwrap();
@@ -138,7 +130,10 @@ async fn ping_over_pipe_returns_ok() {
     assert_eq!(resp["id"], 1);
     assert_eq!(resp["result"]["status"], 200);
     assert_eq!(resp["result"]["body"]["ok"], serde_json::json!(true));
-    assert_eq!(resp["result"]["body"]["runtime"], serde_json::json!("flowntier-rs"));
+    assert_eq!(
+        resp["result"]["body"]["runtime"],
+        serde_json::json!("flowntier-rs")
+    );
     handle.abort();
 }
 
@@ -194,7 +189,10 @@ async fn secret_roundtrip_persists_across_clients() {
         }),
     )
     .await;
-    assert_eq!(resp["result"]["status"], 200, "save should return 200: {resp}");
+    assert_eq!(
+        resp["result"]["status"], 200,
+        "save should return 200: {resp}"
+    );
     assert_eq!(resp["result"]["body"]["saved"], serde_json::json!(true));
 
     let resp = client::connect_and_request(
@@ -308,7 +306,9 @@ async fn providers_list_returns_presets_with_has_secret_join() {
     assert_eq!(anthropic["has_secret"], serde_json::json!(false));
     assert_eq!(anthropic["default_model"], "claude-opus-4-8");
 
-    let custom = resp["result"]["body"]["custom_providers"].as_array().unwrap();
+    let custom = resp["result"]["body"]["custom_providers"]
+        .as_array()
+        .unwrap();
     assert_eq!(custom.len(), 0);
 
     handle.abort();
@@ -355,8 +355,12 @@ async fn custom_provider_full_crud() {
         }),
     )
     .await;
-    assert_eq!(resp["result"]["status"].as_u64().unwrap_or(0), 200,
-        "PUT secret should return 200; got resp={}", serde_json::to_string(&resp).unwrap_or_default());
+    assert_eq!(
+        resp["result"]["status"].as_u64().unwrap_or(0),
+        200,
+        "PUT secret should return 200; got resp={}",
+        serde_json::to_string(&resp).unwrap_or_default()
+    );
 
     // Step 2 — POST the custom_provider record.
     let resp = client::connect_and_request(
@@ -380,8 +384,12 @@ async fn custom_provider_full_crud() {
         }),
     )
     .await;
-    assert_eq!(resp["result"]["status"].as_u64().unwrap_or(0), 201,
-        "POST custom_provider should return 201; got resp={}", serde_json::to_string(&resp).unwrap_or_default());
+    assert_eq!(
+        resp["result"]["status"].as_u64().unwrap_or(0),
+        201,
+        "POST custom_provider should return 201; got resp={}",
+        serde_json::to_string(&resp).unwrap_or_default()
+    );
     let returned_id = resp["result"]["body"]["id"].as_str().unwrap().to_string();
     assert_eq!(returned_id, id);
 
@@ -398,11 +406,20 @@ async fn custom_provider_full_crud() {
         }),
     )
     .await;
-    let custom = resp["result"]["body"]["custom_providers"].as_array().unwrap();
-    assert_eq!(custom.len(), 1, "expected 1 custom_provider; got resp={}",
-        serde_json::to_string(&resp).unwrap_or_default());
-    assert_eq!(custom[0]["has_secret"], serde_json::json!(true),
-        "custom_provider should have has_secret:true after PUT + POST");
+    let custom = resp["result"]["body"]["custom_providers"]
+        .as_array()
+        .unwrap();
+    assert_eq!(
+        custom.len(),
+        1,
+        "expected 1 custom_provider; got resp={}",
+        serde_json::to_string(&resp).unwrap_or_default()
+    );
+    assert_eq!(
+        custom[0]["has_secret"],
+        serde_json::json!(true),
+        "custom_provider should have has_secret:true after PUT + POST"
+    );
 
     // Step 4 — DELETE the custom_provider. The path uses the
     // concrete id (the dispatcher placeholder {id} only matches
@@ -421,8 +438,12 @@ async fn custom_provider_full_crud() {
         }),
     )
     .await;
-    assert_eq!(resp["result"]["status"].as_u64().unwrap_or(0), 200,
-        "DELETE custom_provider should return 200; got resp={}", serde_json::to_string(&resp).unwrap_or_default());
+    assert_eq!(
+        resp["result"]["status"].as_u64().unwrap_or(0),
+        200,
+        "DELETE custom_provider should return 200; got resp={}",
+        serde_json::to_string(&resp).unwrap_or_default()
+    );
 
     let resp = client::connect_and_request(
         &addr,
@@ -434,7 +455,9 @@ async fn custom_provider_full_crud() {
         }),
     )
     .await;
-    let custom = resp["result"]["body"]["custom_providers"].as_array().unwrap();
+    let custom = resp["result"]["body"]["custom_providers"]
+        .as_array()
+        .unwrap();
     assert_eq!(custom.len(), 0);
 
     handle.abort();
@@ -470,8 +493,11 @@ async fn patch_provider_toggles_enabled() {
     )
     .await;
     let openai = resp["result"]["body"]["providers"]
-        .as_array().unwrap()
-        .iter().find(|p| p["id"] == "openai").unwrap();
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["id"] == "openai")
+        .unwrap();
     assert_eq!(openai["enabled"], serde_json::json!(false));
 
     let resp = client::connect_and_request(
@@ -789,15 +815,22 @@ async fn list_roles_returns_empty_defaults() {
     // addition that wasn't in the v0.4.15 ROLE_KEYS map.
     assert_eq!(roles.len(), 6, "expected 6 roles; got resp={resp_text}");
     let expected_ids = [
-        "agent:chief", "agent:worker", "agent:planner",
-        "agent:critic:a", "agent:critic:b", "agent:reporter",
+        "agent:chief",
+        "agent:worker",
+        "agent:planner",
+        "agent:critic:a",
+        "agent:critic:b",
+        "agent:reporter",
     ];
-    let ids: Vec<String> = roles.iter()
+    let ids: Vec<String> = roles
+        .iter()
         .map(|r| r["role"].as_str().unwrap_or("").to_string())
         .collect();
     for id in &expected_ids {
-        assert!(ids.contains(&id.to_string()),
-                "missing role {id} in {ids:?}");
+        assert!(
+            ids.contains(&id.to_string()),
+            "missing role {id} in {ids:?}"
+        );
     }
     // Every role must start with empty default_model and empty
     // fallback_chain. This is the chairman's explicit v0.4.16
@@ -809,10 +842,12 @@ async fn list_roles_returns_empty_defaults() {
             "",
             "role {id} must have empty default_model; resp={resp_text}"
         );
-        let chain = r["fallback_chain"].as_array()
+        let chain = r["fallback_chain"]
+            .as_array()
             .expect("fallback_chain must be array");
         assert_eq!(
-            chain.len(), 0,
+            chain.len(),
+            0,
             "role {id} must have empty fallback_chain; resp={resp_text}"
         );
     }
@@ -851,11 +886,15 @@ async fn list_models_returns_ok_false_with_error_on_no_key() {
     .await;
     let resp_text = serde_json::to_string(&resp).unwrap_or_default();
     // Status MUST be 200 (info-level failure carried in body).
-    assert_eq!(resp["result"]["status"].as_u64().unwrap_or(0), 200,
-        "status must be 200 even on ok:false; resp={resp_text}");
+    assert_eq!(
+        resp["result"]["status"].as_u64().unwrap_or(0),
+        200,
+        "status must be 200 even on ok:false; resp={resp_text}"
+    );
     let body = &resp["result"]["body"];
     assert_eq!(
-        body["ok"], serde_json::json!(false),
+        body["ok"],
+        serde_json::json!(false),
         "ok:false must be set; resp={resp_text}"
     );
     assert!(
@@ -868,7 +907,8 @@ async fn list_models_returns_ok_false_with_error_on_no_key() {
         "error must mention the missing key; got '{err}'"
     );
     assert_eq!(
-        body["provider_id"], serde_json::json!("minimax"),
+        body["provider_id"],
+        serde_json::json!("minimax"),
         "provider_id must be echoed; resp={resp_text}"
     );
     assert!(
@@ -902,15 +942,26 @@ async fn list_models_returns_ok_true_with_fallback_catalog() {
     assert_eq!(resp["result"]["status"].as_u64().unwrap_or(0), 200);
     let body = &resp["result"]["body"];
     assert_eq!(body["ok"], serde_json::json!(true), "resp={resp_text}");
-    assert_eq!(body["fallback"], serde_json::json!(true), "resp={resp_text}");
+    assert_eq!(
+        body["fallback"],
+        serde_json::json!(true),
+        "resp={resp_text}"
+    );
     let models = body["models"].as_array().expect("models array");
-    assert!(!models.is_empty(), "fallback catalog must list ≥1 model; resp={resp_text}");
+    assert!(
+        !models.is_empty(),
+        "fallback catalog must list ≥1 model; resp={resp_text}"
+    );
     // Each model carries the v0.4.16 metadata fields.
     for m in models {
-        assert!(m.get("thinking_strength").is_some(),
-            "model missing thinking_strength; resp={resp_text}");
-        assert!(m.get("context_length").is_some(),
-            "model missing context_length; resp={resp_text}");
+        assert!(
+            m.get("thinking_strength").is_some(),
+            "model missing thinking_strength; resp={resp_text}"
+        );
+        assert!(
+            m.get("context_length").is_some(),
+            "model missing context_length; resp={resp_text}"
+        );
     }
     handle.abort();
 }
@@ -956,12 +1007,21 @@ async fn put_router_roles_persists_and_overlays() {
     )
     .await;
     let put_text = serde_json::to_string(&put_resp).unwrap_or_default();
-    assert_eq!(put_resp["result"]["status"].as_u64().unwrap_or(0), 200,
-        "PUT status should be 200; resp={put_text}");
-    assert_eq!(put_resp["result"]["body"]["ok"], serde_json::json!(true),
-        "PUT ok:true; resp={put_text}");
-    assert_eq!(put_resp["result"]["body"]["updated"].as_u64().unwrap_or(99), 2,
-        "PUT should report 2 updated; resp={put_text}");
+    assert_eq!(
+        put_resp["result"]["status"].as_u64().unwrap_or(0),
+        200,
+        "PUT status should be 200; resp={put_text}"
+    );
+    assert_eq!(
+        put_resp["result"]["body"]["ok"],
+        serde_json::json!(true),
+        "PUT ok:true; resp={put_text}"
+    );
+    assert_eq!(
+        put_resp["result"]["body"]["updated"].as_u64().unwrap_or(99),
+        2,
+        "PUT should report 2 updated; resp={put_text}"
+    );
 
     // GET must now show the persisted values (not the in-memory
     // empty defaults).
@@ -977,26 +1037,50 @@ async fn put_router_roles_persists_and_overlays() {
     .await;
     let get_text = serde_json::to_string(&get_resp).unwrap_or_default();
     assert_eq!(get_resp["result"]["status"].as_u64().unwrap_or(0), 200);
-    let roles = get_resp["result"]["body"]["roles"].as_array()
+    let roles = get_resp["result"]["body"]["roles"]
+        .as_array()
         .expect("roles array");
-    let chief = roles.iter().find(|r| r["role"] == "agent:chief")
+    let chief = roles
+        .iter()
+        .find(|r| r["role"] == "agent:chief")
         .expect("agent:chief present");
-    assert_eq!(chief["default_model"], serde_json::json!("minimax:MiniMax-Text-01"),
-        "chief default_model must come from DB; resp={get_text}");
+    assert_eq!(
+        chief["default_model"],
+        serde_json::json!("minimax:MiniMax-Text-01"),
+        "chief default_model must come from DB; resp={get_text}"
+    );
     let chain = chief["fallback_chain"].as_array().expect("array");
-    assert_eq!(chain.len(), 2, "chief fallback_chain should have 2 entries; resp={get_text}");
+    assert_eq!(
+        chain.len(),
+        2,
+        "chief fallback_chain should have 2 entries; resp={get_text}"
+    );
     assert_eq!(chain[0], serde_json::json!("minimax:abab-6.5s-chat"));
-    assert_eq!(chain[1], serde_json::json!("anthropic:claude-haiku-4-5-20251022"));
+    assert_eq!(
+        chain[1],
+        serde_json::json!("anthropic:claude-haiku-4-5-20251022")
+    );
 
-    let worker = roles.iter().find(|r| r["role"] == "agent:worker")
+    let worker = roles
+        .iter()
+        .find(|r| r["role"] == "agent:worker")
         .expect("agent:worker present");
-    assert_eq!(worker["default_model"], serde_json::json!("anthropic:claude-sonnet-4-6"));
+    assert_eq!(
+        worker["default_model"],
+        serde_json::json!("anthropic:claude-sonnet-4-6")
+    );
     let worker_chain = worker["fallback_chain"].as_array().expect("array");
-    assert_eq!(worker_chain.len(), 0, "worker fallback_chain should be empty");
+    assert_eq!(
+        worker_chain.len(),
+        0,
+        "worker fallback_chain should be empty"
+    );
 
     // Roles the chairman didn't touch still have the in-memory empty
     // defaults — overlay only affects explicit rows.
-    let planner = roles.iter().find(|r| r["role"] == "agent:planner")
+    let planner = roles
+        .iter()
+        .find(|r| r["role"] == "agent:planner")
         .expect("agent:planner present");
     assert_eq!(planner["default_model"], serde_json::json!(""));
     let planner_chain = planner["fallback_chain"].as_array().expect("array");
@@ -1033,7 +1117,7 @@ async fn put_router_roles_empty_override_is_respected() {
         }),
     )
     .await;
-    let resp_text = serde_json::to_string(&resp).unwrap_or_default();
+    let _resp_text = serde_json::to_string(&resp).unwrap_or_default();
     assert_eq!(resp["result"]["status"].as_u64().unwrap_or(0), 200);
     assert_eq!(resp["result"]["body"]["ok"], serde_json::json!(true));
     assert_eq!(resp["result"]["body"]["updated"].as_u64().unwrap_or(99), 1);
@@ -1051,8 +1135,15 @@ async fn put_router_roles_empty_override_is_respected() {
     .await;
     let resp_text = serde_json::to_string(&resp).unwrap_or_default();
     let roles = resp["result"]["body"]["roles"].as_array().expect("array");
-    let chief = roles.iter().find(|r| r["role"] == "agent:chief").expect("chief");
-    assert_eq!(chief["default_model"], serde_json::json!(""), "resp={resp_text}");
+    let chief = roles
+        .iter()
+        .find(|r| r["role"] == "agent:chief")
+        .expect("chief");
+    assert_eq!(
+        chief["default_model"],
+        serde_json::json!(""),
+        "resp={resp_text}"
+    );
     let chain = chief["fallback_chain"].as_array().expect("array");
     assert_eq!(chain.len(), 0, "resp={resp_text}");
 
@@ -1076,11 +1167,19 @@ async fn put_router_roles_rejects_missing_roles_array() {
     )
     .await;
     let resp_text = serde_json::to_string(&resp).unwrap_or_default();
-    assert_eq!(resp["result"]["status"].as_u64().unwrap_or(0), 400,
-        "missing 'roles' array should be 400; resp={resp_text}");
+    assert_eq!(
+        resp["result"]["status"].as_u64().unwrap_or(0),
+        400,
+        "missing 'roles' array should be 400; resp={resp_text}"
+    );
     assert_eq!(resp["result"]["body"]["ok"], serde_json::json!(false));
-    assert!(resp["result"]["body"]["error"].as_str().unwrap_or("").contains("roles"),
-        "error must mention 'roles'; resp={resp_text}");
+    assert!(
+        resp["result"]["body"]["error"]
+            .as_str()
+            .unwrap_or("")
+            .contains("roles"),
+        "error must mention 'roles'; resp={resp_text}"
+    );
     handle.abort();
 }
 
@@ -1136,14 +1235,22 @@ async fn get_role_resolve_returns_no_key_error_when_keychain_empty() {
     )
     .await;
     let resp_text = serde_json::to_string(&resp).unwrap_or_default();
-    assert_eq!(resp["result"]["status"].as_u64().unwrap_or(0), 200,
-        "resolve endpoint should return 200; resp={resp_text}");
+    assert_eq!(
+        resp["result"]["status"].as_u64().unwrap_or(0),
+        200,
+        "resolve endpoint should return 200; resp={resp_text}"
+    );
     let body = &resp["result"]["body"];
-    assert_eq!(body["ok"], serde_json::json!(false),
-        "ok:false because keychain empty; resp={resp_text}");
+    assert_eq!(
+        body["ok"],
+        serde_json::json!(false),
+        "ok:false because keychain empty; resp={resp_text}"
+    );
     let err = body["error"].as_str().unwrap_or("");
-    assert!(err.contains("flowntier/minimax") || err.contains("no API key"),
-        "error must mention flowntier/minimax or 'no API key'; got '{err}'");
+    assert!(
+        err.contains("flowntier/minimax") || err.contains("no API key"),
+        "error must mention flowntier/minimax or 'no API key'; got '{err}'"
+    );
     assert_eq!(body["role"], serde_json::json!("agent:chief"));
     handle.abort();
 }
@@ -1171,8 +1278,13 @@ async fn get_role_resolve_reports_unconfigured_role() {
     assert_eq!(resp["result"]["status"].as_u64().unwrap_or(0), 200);
     let body = &resp["result"]["body"];
     assert_eq!(body["ok"], serde_json::json!(false));
-    assert!(body["error"].as_str().unwrap_or("").contains("not configured"),
-        "error must mention 'not configured'; resp={resp_text}");
+    assert!(
+        body["error"]
+            .as_str()
+            .unwrap_or("")
+            .contains("not configured"),
+        "error must mention 'not configured'; resp={resp_text}"
+    );
     handle.abort();
 }
 
@@ -1202,15 +1314,23 @@ async fn run_task_with_minimal_body_reports_unconfigured_role() {
     .await;
     let resp_text = serde_json::to_string(&resp).unwrap_or_default();
     assert_eq!(
-        resp["result"]["status"].as_u64().unwrap_or(0), 503,
+        resp["result"]["status"].as_u64().unwrap_or(0),
+        503,
         "missing role config → 503; resp={resp_text}"
     );
     let body = &resp["result"]["body"];
     assert_eq!(body["ok"], serde_json::json!(false));
-    assert!(body["error"].as_str().unwrap_or("").contains("not configured"),
-        "error must mention 'not configured'; resp={resp_text}");
-    assert!(body.get("hint").is_some(),
-        "hint field must be present; resp={resp_text}");
+    assert!(
+        body["error"]
+            .as_str()
+            .unwrap_or("")
+            .contains("not configured"),
+        "error must mention 'not configured'; resp={resp_text}"
+    );
+    assert!(
+        body.get("hint").is_some(),
+        "hint field must be present; resp={resp_text}"
+    );
     handle.abort();
 }
 
@@ -1220,12 +1340,8 @@ async fn run_task_with_minimal_body_reports_unconfigured_role() {
 // `run_task` and `resolve_role` succeed, then exercises the
 // `quota_failures` SQL table via the public RPC endpoints.
 
-async fn put_quota_failure(
-    addr: &str,
-    role: &str,
-    model_id: &str,
-    err_msg: &str,
-) {
+#[allow(dead_code)]
+async fn put_quota_failure(addr: &str, role: &str, model_id: &str, err_msg: &str) {
     // The record_quota_failure path is hit when run_task fails,
     // which we can't trigger without a real provider. We instead
     // poke the SQL table directly via a debug endpoint — but v0.4.20
@@ -1278,8 +1394,11 @@ async fn quota_failure_record_appears_in_status() {
     .await;
     assert_eq!(empty["result"]["status"].as_u64().unwrap_or(0), 200);
     assert_eq!(empty["result"]["body"]["ok"], serde_json::json!(true));
-    assert_eq!(empty["result"]["body"]["rows"], serde_json::json!([]),
-        "fresh DB has no quota_failures rows");
+    assert_eq!(
+        empty["result"]["body"]["rows"],
+        serde_json::json!([]),
+        "fresh DB has no quota_failures rows"
+    );
 
     // 2. Trigger a run_task with no role override → resolves to
     //    Err → run_task returns 503 (no quota_failures row written
@@ -1316,7 +1435,8 @@ async fn quota_reset_returns_cleared_rows_zero_for_unknown_role() {
     assert_eq!(resp["result"]["status"].as_u64().unwrap_or(0), 200);
     assert_eq!(resp["result"]["body"]["ok"], serde_json::json!(true));
     assert_eq!(
-        resp["result"]["body"]["cleared_rows"], serde_json::json!(0),
+        resp["result"]["body"]["cleared_rows"],
+        serde_json::json!(0),
         "no row to clear → cleared_rows=0"
     );
     handle.abort();
@@ -1337,8 +1457,11 @@ async fn quota_reset_rejects_missing_role() {
         }),
     )
     .await;
-    assert_eq!(resp["result"]["status"].as_u64().unwrap_or(0), 400,
-        "missing role → 400");
+    assert_eq!(
+        resp["result"]["status"].as_u64().unwrap_or(0),
+        400,
+        "missing role → 400"
+    );
     assert_eq!(resp["result"]["body"]["ok"], serde_json::json!(false));
     handle.abort();
 }
@@ -1374,8 +1497,10 @@ async fn quota_chief_failure_promotes_to_pending_5h_wait() {
     .await;
     let body = &resp["result"]["body"];
     assert_eq!(body["ok"], serde_json::json!(true));
-    assert!(body.get("rows").is_some(),
-        "rows array must be present (possibly empty)");
+    assert!(
+        body.get("rows").is_some(),
+        "rows array must be present (possibly empty)"
+    );
     handle.abort();
 }
 
@@ -1447,11 +1572,7 @@ async fn quota_5h_tick_clears_on_recovery() {
 //   4. CORS preflight (OPTIONS /rpc)
 //   5. POST /rpc without Content-Length → 400
 
-async fn spawn_bridge(tag: &str) -> (
-    String,
-    tokio::task::JoinHandle<std::io::Result<()>>,
-    String,
-) {
+async fn spawn_bridge(tag: &str) -> (String, tokio::task::JoinHandle<std::io::Result<()>>, String) {
     use pipe_server::{
         bind_listener, register_all, run_http_bridge_on_with_token, Dispatcher, ServerState,
     };
@@ -1474,10 +1595,7 @@ async fn spawn_bridge(tag: &str) -> (
     // using `unsafe { std::env::set_var }` would race between
     // `spawn_bridge` setting the var and the bridge task reading
     // it on a fresh connection.
-    let token = format!(
-        "test-token-{}-{unique}",
-        std::process::id()
-    );
+    let token = format!("test-token-{}-{unique}", std::process::id());
 
     let mut d = Dispatcher::new();
     let state = ServerState::new(data_root.clone(), data_root.clone()).await;
@@ -1486,8 +1604,7 @@ async fn spawn_bridge(tag: &str) -> (
     // Bind on port 0 to let the kernel pick a free loopback port,
     // capture the actual address, then start the bridge on the
     // SAME listener (no rebind race).
-    let (listener, bound_addr) =
-        bind_listener("127.0.0.1:0").await.expect("bind listener");
+    let (listener, bound_addr) = bind_listener("127.0.0.1:0").await.expect("bind listener");
     let bound = bound_addr.to_string();
     let dispatcher = state.dispatcher().expect("dispatcher wired");
     let events = state.events.clone();
@@ -1527,11 +1644,8 @@ async fn http_request(addr: &str, req: String, token: Option<&str>) -> (u16, Str
     s.shutdown().await.expect("shutdown write");
     let mut buf = Vec::with_capacity(4096);
     // Bounded read with timeout: 5 s.
-    let read = tokio::time::timeout(
-        std::time::Duration::from_secs(5),
-        s.read_to_end(&mut buf),
-    )
-    .await;
+    let read =
+        tokio::time::timeout(std::time::Duration::from_secs(5), s.read_to_end(&mut buf)).await;
     let read = match read {
         Ok(r) => r.expect("read"),
         Err(_) => panic!(
@@ -1671,18 +1785,20 @@ mod production_pipe {
         )
     }
 
-    async fn spawn_pipe_server(tag: &str) -> (String, tokio::task::JoinHandle<std::io::Result<()>>) {
-        use pipe_server::{
-            register_all, Dispatcher, Server, ServerConfig, ServerState,
-        };
+    async fn spawn_pipe_server(
+        tag: &str,
+    ) -> (String, tokio::task::JoinHandle<std::io::Result<()>>) {
+        use pipe_server::{register_all, Dispatcher, Server, ServerConfig, ServerState};
         let rpc_path = prod_pipe_name(tag);
         let cfg = ServerConfig {
             rpc_path: rpc_path.clone(),
-            events_path: format!(r"\\.\pipe\flowntier_prod_test_events_{tag}_{}",
+            events_path: format!(
+                r"\\.\pipe\flowntier_prod_test_events_{tag}_{}",
                 std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap()
-                    .as_nanos()),
+                    .as_nanos()
+            ),
         };
         let unique = format!(
             "{tag}-{}",
@@ -1709,12 +1825,10 @@ mod production_pipe {
         // on a CreateFileW syscall — same pattern the Tauri
         // shell uses at apps/desktop/src-tauri/src/lib.rs:56.
         let path_owned = path.to_string();
-        let mut conn = tokio::task::spawn_blocking(move || {
-            ClientOptions::new().open(&path_owned)
-        })
-        .await
-        .map_err(|e| format!("join error: {e}"))?
-        .map_err(|e| format!("open error: {e}"))?;
+        let mut conn = tokio::task::spawn_blocking(move || ClientOptions::new().open(&path_owned))
+            .await
+            .map_err(|e| format!("join error: {e}"))?
+            .map_err(|e| format!("open error: {e}"))?;
         let req = serde_json::json!({
             "jsonrpc": "2.0",
             "id": 1,
@@ -1723,7 +1837,9 @@ mod production_pipe {
         });
         let mut line = serde_json::to_vec(&req).unwrap();
         line.push(b'\n');
-        conn.write_all(&line).await.map_err(|e| format!("write: {e}"))?;
+        conn.write_all(&line)
+            .await
+            .map_err(|e| format!("write: {e}"))?;
         let mut reader = BufReader::new(&mut conn);
         let mut buf = String::new();
         let read = tokio::time::timeout(
@@ -1747,7 +1863,8 @@ mod production_pipe {
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn prod_pipe_cold_start_serves_first_request() {
         let (path, handle) = spawn_pipe_server("cold-start").await;
-        let resp = ping_pipe(&path, 2000).await
+        let resp = ping_pipe(&path, 2000)
+            .await
             .expect("cold-start server did not serve first request");
         assert_eq!(resp["result"]["status"].as_u64().unwrap_or(0), 200);
         assert_eq!(resp["result"]["body"]["ok"], serde_json::json!(true));
@@ -1772,7 +1889,8 @@ mod production_pipe {
         let (path, handle_a) = spawn_pipe_server("kill-respawn").await;
 
         // First server works.
-        let resp = ping_pipe(&path, 2000).await
+        let resp = ping_pipe(&path, 2000)
+            .await
             .expect("first server did not serve first request");
         assert_eq!(resp["result"]["status"].as_u64().unwrap_or(0), 200);
 
@@ -1791,18 +1909,18 @@ mod production_pipe {
             // Re-create the same ServerConfig + a fresh ServerState
             // so the second spawn is truly independent (no shared
             // state with the aborted first server).
-            use pipe_server::{
-                register_all, Dispatcher, Server, ServerState,
-            };
+            use pipe_server::{register_all, Dispatcher, Server, ServerState};
             let cfg = pipe_server::ServerConfig {
                 rpc_path: path_for_server.clone(),
                 events_path: format!("{path_for_server}_events"),
             };
-            let unique = format!("kill-respawn-2-{}",
+            let unique = format!(
+                "kill-respawn-2-{}",
                 std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap()
-                    .as_nanos());
+                    .as_nanos()
+            );
             let data_root = std::env::temp_dir().join(format!("flowntier-prod-pipe-{unique}"));
             let _ = std::fs::remove_dir_all(&data_root);
             let _ = std::fs::create_dir_all(&data_root);
@@ -1819,11 +1937,15 @@ mod production_pipe {
         //   - block forever (worker 0 ERROR_ACCESS_DENIED loop)
         //   - time out past 30s (rpc_listener's 2s backoff
         //     never recovered)
-        let resp = ping_pipe(&path, 2000).await
+        let resp = ping_pipe(&path, 2000)
+            .await
             .expect("second server did not serve first request after kill+respawn");
-        assert_eq!(resp["result"]["status"].as_u64().unwrap_or(0), 200,
+        assert_eq!(
+            resp["result"]["status"].as_u64().unwrap_or(0),
+            200,
             "kill+respawn regression: got resp={}",
-            serde_json::to_string(&resp).unwrap_or_default());
+            serde_json::to_string(&resp).unwrap_or_default()
+        );
         handle_b.abort();
     }
 
@@ -1848,10 +1970,14 @@ mod production_pipe {
         for i in 0..8 {
             let path = path.clone();
             tasks.push(tokio::spawn(async move {
-                let resp = ping_pipe(&path, 5000).await
+                let resp = ping_pipe(&path, 5000)
+                    .await
                     .unwrap_or_else(|e| panic!("client {i} failed: {e}"));
-                assert_eq!(resp["result"]["status"].as_u64().unwrap_or(0), 200,
-                    "client {i} got non-200");
+                assert_eq!(
+                    resp["result"]["status"].as_u64().unwrap_or(0),
+                    200,
+                    "client {i} got non-200"
+                );
             }));
         }
         for t in tasks {
@@ -1888,14 +2014,26 @@ async fn disable_model_persists_pair() {
                 "body": {}
             }
         }),
-    ).await;
+    )
+    .await;
     let put_text = serde_json::to_string(&put_resp).unwrap_or_default();
-    assert_eq!(put_resp["result"]["status"].as_u64().unwrap_or(0), 200,
-        "PUT status should be 200; resp={put_text}");
+    assert_eq!(
+        put_resp["result"]["status"].as_u64().unwrap_or(0),
+        200,
+        "PUT status should be 200; resp={put_text}"
+    );
     let body = &put_resp["result"]["body"];
     assert_eq!(body["disabled"], serde_json::json!(true), "resp={put_text}");
-    assert_eq!(body["provider_id"], serde_json::json!("anthropic"), "resp={put_text}");
-    assert_eq!(body["model_id"], serde_json::json!("claude-haiku-4-5-20251022"), "resp={put_text}");
+    assert_eq!(
+        body["provider_id"],
+        serde_json::json!("anthropic"),
+        "resp={put_text}"
+    );
+    assert_eq!(
+        body["model_id"],
+        serde_json::json!("claude-haiku-4-5-20251022"),
+        "resp={put_text}"
+    );
 
     // PUT again — must be idempotent (ON CONFLICT DO NOTHING).
     let put2 = client::connect_and_request(
@@ -1909,9 +2047,13 @@ async fn disable_model_persists_pair() {
                 "body": {}
             }
         }),
-    ).await;
-    assert_eq!(put2["result"]["status"].as_u64().unwrap_or(0), 200,
-        "second PUT must also return 200");
+    )
+    .await;
+    assert_eq!(
+        put2["result"]["status"].as_u64().unwrap_or(0),
+        200,
+        "second PUT must also return 200"
+    );
 
     // PUT on an unknown provider must return 404.
     let notfound = client::connect_and_request(
@@ -1925,9 +2067,13 @@ async fn disable_model_persists_pair() {
                 "body": {}
             }
         }),
-    ).await;
-    assert_eq!(notfound["result"]["status"].as_u64().unwrap_or(0), 404,
-        "unknown provider must 404");
+    )
+    .await;
+    assert_eq!(
+        notfound["result"]["status"].as_u64().unwrap_or(0),
+        404,
+        "unknown provider must 404"
+    );
 
     handle.abort();
 }
@@ -1949,12 +2095,19 @@ async fn enable_model_restores_pair() {
                 "body": {}
             }
         }),
-    ).await;
+    )
+    .await;
     let first_text = serde_json::to_string(&first).unwrap_or_default();
-    assert_eq!(first["result"]["status"].as_u64().unwrap_or(0), 200,
-        "DELETE status should be 200 even when nothing to delete; resp={first_text}");
-    assert_eq!(first["result"]["body"]["was_disabled"], serde_json::json!(false),
-        "fresh DELETE → was_disabled:false; resp={first_text}");
+    assert_eq!(
+        first["result"]["status"].as_u64().unwrap_or(0),
+        200,
+        "DELETE status should be 200 even when nothing to delete; resp={first_text}"
+    );
+    assert_eq!(
+        first["result"]["body"]["was_disabled"],
+        serde_json::json!(false),
+        "fresh DELETE → was_disabled:false; resp={first_text}"
+    );
 
     // Disable, then DELETE → was_disabled=true.
     client::connect_and_request(
@@ -1968,7 +2121,8 @@ async fn enable_model_restores_pair() {
                 "body": {}
             }
         }),
-    ).await;
+    )
+    .await;
 
     let second = client::connect_and_request(
         &addr,
@@ -1981,12 +2135,19 @@ async fn enable_model_restores_pair() {
                 "body": {}
             }
         }),
-    ).await;
+    )
+    .await;
     let second_text = serde_json::to_string(&second).unwrap_or_default();
-    assert_eq!(second["result"]["status"].as_u64().unwrap_or(0), 200,
-        "second DELETE must still be 200; resp={second_text}");
-    assert_eq!(second["result"]["body"]["was_disabled"], serde_json::json!(true),
-        "DELETE on disabled pair → was_disabled:true; resp={second_text}");
+    assert_eq!(
+        second["result"]["status"].as_u64().unwrap_or(0),
+        200,
+        "second DELETE must still be 200; resp={second_text}"
+    );
+    assert_eq!(
+        second["result"]["body"]["was_disabled"],
+        serde_json::json!(true),
+        "DELETE on disabled pair → was_disabled:true; resp={second_text}"
+    );
 
     // DELETE on unknown provider must 404.
     let nf = client::connect_and_request(
@@ -2000,9 +2161,13 @@ async fn enable_model_restores_pair() {
                 "body": {}
             }
         }),
-    ).await;
-    assert_eq!(nf["result"]["status"].as_u64().unwrap_or(0), 404,
-        "DELETE on unknown provider must 404");
+    )
+    .await;
+    assert_eq!(
+        nf["result"]["status"].as_u64().unwrap_or(0),
+        404,
+        "DELETE on unknown provider must 404"
+    );
 
     handle.abort();
 }
@@ -2024,7 +2189,8 @@ async fn list_models_filters_disabled_pairs() {
                 "body": {}
             }
         }),
-    ).await;
+    )
+    .await;
     assert_eq!(put["result"]["status"].as_u64().unwrap_or(0), 200);
 
     // GET must now exclude the disabled pair.
@@ -2039,10 +2205,14 @@ async fn list_models_filters_disabled_pairs() {
                 "body": {}
             }
         }),
-    ).await;
+    )
+    .await;
     let resp_text = serde_json::to_string(&get_resp).unwrap_or_default();
-    assert_eq!(get_resp["result"]["status"].as_u64().unwrap_or(0), 200,
-        "GET status should be 200; resp={resp_text}");
+    assert_eq!(
+        get_resp["result"]["status"].as_u64().unwrap_or(0),
+        200,
+        "GET status should be 200; resp={resp_text}"
+    );
     let models = get_resp["result"]["body"]["models"]
         .as_array()
         .expect("models array");
@@ -2052,13 +2222,17 @@ async fn list_models_filters_disabled_pairs() {
     let blocked = "claude-haiku-4-5-20251022";
     for m in models {
         let id = m.get("id").and_then(|v| v.as_str()).unwrap_or("");
-        assert_ne!(id, blocked,
-            "disabled model leaked into response: {resp_text}");
+        assert_ne!(
+            id, blocked,
+            "disabled model leaked into response: {resp_text}"
+        );
     }
     // Sanity: the catalog still lists other entries (otherwise
     // 'disabled disabled everything' would pass trivially).
-    assert!(!models.is_empty(),
-        "filter should not empty the catalog entirely; resp={resp_text}");
+    assert!(
+        !models.is_empty(),
+        "filter should not empty the catalog entirely; resp={resp_text}"
+    );
 
     handle.abort();
 }
@@ -2091,15 +2265,21 @@ fn agent_event_reviewer_verdict_serializes_to_kind_tag() {
         summary: "module boundaries are clean".into(),
     };
     let json = serde_json::to_value(&v).expect("serialize");
-    assert_eq!(json["kind"], serde_json::json!("reviewer_verdict"),
-        "tag must be snake_case 'reviewer_verdict' (rename_all = snake_case)");
+    assert_eq!(
+        json["kind"],
+        serde_json::json!("reviewer_verdict"),
+        "tag must be snake_case 'reviewer_verdict' (rename_all = snake_case)"
+    );
     assert_eq!(json["wf_id"], serde_json::json!("wf_abc"));
     assert_eq!(json["phase"], serde_json::json!("final-review"));
     assert_eq!(json["role"], serde_json::json!("agent:critic:b"));
     assert_eq!(json["verdict"], serde_json::json!("PASS"));
     assert_eq!(json["confidence"], serde_json::json!(0.0));
     assert_eq!(json["issues"][0], serde_json::json!("function too long"));
-    assert_eq!(json["summary"], serde_json::json!("module boundaries are clean"));
+    assert_eq!(
+        json["summary"],
+        serde_json::json!("module boundaries are clean")
+    );
 }
 
 #[test]
@@ -2117,7 +2297,15 @@ fn agent_event_reviewer_verdict_round_trips_through_serde() {
     let s = serde_json::to_string(&v).expect("serialize");
     let back: AgentEvent = serde_json::from_str(&s).expect("deserialize");
     match back {
-        AgentEvent::ReviewerVerdict { wf_id, phase, role, verdict, confidence, issues, summary } => {
+        AgentEvent::ReviewerVerdict {
+            wf_id,
+            phase,
+            role,
+            verdict,
+            confidence,
+            issues,
+            summary,
+        } => {
             assert_eq!(wf_id, "wf_xyz");
             assert_eq!(phase, "plan-review");
             assert_eq!(role, "agent:critic:a");
@@ -2267,7 +2455,7 @@ fn parse_verdict_from_text_extracts_structured_json_block() {
   "summary": "Two must-fix issues; mostly clean otherwise."
 }
 ```"#
-        .into(),
+            .into(),
         elapsed_ms: 1234,
         structured_verdict: None,
     };
@@ -2470,6 +2658,9 @@ fn agent_event_repair_loop_serializes_to_kind_tag() {
             assert!(issues_a.is_empty());
             assert_eq!(issues_b.len(), 1);
         }
-        other => panic!("expected RepairLoop, got {:?}", std::mem::discriminant(&other)),
+        other => panic!(
+            "expected RepairLoop, got {:?}",
+            std::mem::discriminant(&other)
+        ),
     }
 }

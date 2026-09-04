@@ -1,5 +1,5 @@
-import type { FormEvent } from 'react';
-import { useTranslation } from 'react-i18next';
+import type { FormEvent } from "react";
+import { useTranslation } from "react-i18next";
 
 export interface CommandDockProps {
   commandInput: string;
@@ -37,31 +37,51 @@ export function CommandDock({
   return (
     <form
       onSubmit={handleSubmit}
-      className="flex shrink-0 items-center gap-2 border-t border-border-strong bg-surface-3 px-4 py-3"
-      aria-label={t('commandDock.placeholder')}
+      className="relative flex shrink-0 items-center gap-3 border-t border-white/8 bg-surface-1/95 px-4 py-3 backdrop-blur-xl"
+      aria-label={t("commandDock.placeholder")}
     >
-      <span className="shrink-0 font-mono text-xs text-text-secondary">主理 ▸</span>
-      <input
-        type="text"
-        value={commandInput}
-        onChange={(e) => onCommandChange(e.target.value)}
-        list={recent && recent.length > 0 ? 'flowntier-cmd-history' : undefined}
-        placeholder={
-          isReset
-            ? t('commandDock.empty')
-            : t('commandDock.placeholder')
-        }
-        disabled={busy}
-        className="flex-1 rounded-md border border-border bg-surface-1 px-3 py-2 text-sm placeholder:text-text-secondary focus:border-chief focus:outline-none focus:ring-2 focus:ring-chief/50 disabled:opacity-50"
-        aria-label={t('commandDock.placeholder')}
-      />
+      {/* Modern Inner Input Capsule */}
+      <div className="flex flex-1 items-center gap-2.5 rounded-xl border border-white/10 bg-surface-2/90 px-3.5 py-2 shadow-sm transition-all focus-within:border-chief/60 focus-within:ring-2 focus-within:ring-chief/25">
+        <span className="inline-flex shrink-0 items-center gap-1 rounded-md bg-chief/15 px-2 py-0.5 text-xs font-semibold text-chief">
+          主理 ▸
+        </span>
+        <input
+          type="text"
+          value={commandInput}
+          onChange={(e) => onCommandChange(e.target.value)}
+          list={recent && recent.length > 0 ? "flowntier-cmd-history" : undefined}
+          placeholder={isReset ? t("commandDock.empty") : t("commandDock.placeholder")}
+          disabled={busy}
+          className="flex-1 bg-transparent text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none disabled:opacity-50"
+          aria-label={t("commandDock.placeholder")}
+        />
+        <span className="hidden sm:inline-block rounded border border-white/10 bg-surface-3/60 px-1.5 py-0.5 text-[10px] font-mono text-text-tertiary">
+          ↵ Enter
+        </span>
+      </div>
+
       <button
         type="submit"
         disabled={!canSubmit}
-        className="rounded-md bg-chief px-4 py-2 text-sm font-medium text-black transition-colors hover:brightness-110 focus:outline-none focus:ring-2 focus:ring-chief/50 disabled:pointer-events-none disabled:opacity-50"
+        className="flex shrink-0 items-center gap-1.5 rounded-xl bg-gradient-to-r from-chief to-blue-500 px-4 py-2.5 text-xs font-semibold text-white shadow-md shadow-chief/20 transition-all hover:brightness-110 active:scale-95 disabled:pointer-events-none disabled:opacity-40"
       >
-        {isReset ? resetLabel : t('commandDock.submit')}
+        {isReset ? (
+          resetLabel
+        ) : (
+          <>
+            <span>{t("commandDock.submit")}</span>
+            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M14 5l7 7m0 0l-7 7m7-7H3"
+              />
+            </svg>
+          </>
+        )}
       </button>
+
       {recent && recent.length > 0 && (
         <datalist id="flowntier-cmd-history">
           {recent.slice(0, 10).map((cmd, i) => (

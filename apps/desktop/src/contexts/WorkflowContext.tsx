@@ -38,14 +38,14 @@ import {
   useRef,
   type Dispatch,
   type ReactNode,
-} from 'react';
-import type { WfEvent } from '@flowntier/shared';
+} from "react";
+import type { WfEvent } from "@flowntier/shared";
 import {
   INITIAL_STATE,
   workflowReducer,
   type RootState,
   type WfAction,
-} from './workflowReducer.js';
+} from "./workflowReducer.js";
 
 // ── Context ───────────────────────────────────────────────────────
 
@@ -63,9 +63,7 @@ export interface WorkflowProviderProps {
 export function WorkflowProvider({ children, initialState }: WorkflowProviderProps) {
   const [state, dispatch] = useReducer(workflowReducer, initialState ?? INITIAL_STATE);
   const value = useMemo(() => ({ state, dispatch }), [state]);
-  return (
-    <WorkflowContext.Provider value={value}>{children}</WorkflowContext.Provider>
-  );
+  return <WorkflowContext.Provider value={value}>{children}</WorkflowContext.Provider>;
 }
 
 // ── Base hook ─────────────────────────────────────────────────────
@@ -73,7 +71,7 @@ export function WorkflowProvider({ children, initialState }: WorkflowProviderPro
 export function useWorkflow(): { state: RootState; dispatch: Dispatch<WfAction> } {
   const ctx = useContext(WorkflowContext);
   if (!ctx) {
-    throw new Error('useWorkflow() must be used inside <WorkflowProvider>');
+    throw new Error("useWorkflow() must be used inside <WorkflowProvider>");
   }
   return ctx;
 }
@@ -117,12 +115,12 @@ export function useMilestones() {
 
 export function useResetWorkflow() {
   const { dispatch } = useWorkflow();
-  return useCallback(() => dispatch({ type: 'RESET' }), [dispatch]);
+  return useCallback(() => dispatch({ type: "RESET" }), [dispatch]);
 }
 
 export function useStartWorkflow() {
   const { dispatch } = useWorkflow();
-  return useCallback(() => dispatch({ type: 'START_WORKFLOW' }), [dispatch]);
+  return useCallback(() => dispatch({ type: "START_WORKFLOW" }), [dispatch]);
 }
 
 // ── TICK driver ───────────────────────────────────────────────────
@@ -139,7 +137,7 @@ export function useTicker(intervalMs: number = 1000) {
   dispatchRef.current = dispatch;
   useEffect(() => {
     const id = window.setInterval(() => {
-      dispatchRef.current({ type: 'TICK', now: Date.now() });
+      dispatchRef.current({ type: "TICK", now: Date.now() });
     }, intervalMs);
     return () => window.clearInterval(id);
   }, [intervalMs]);
@@ -160,14 +158,14 @@ export function useWorkflowEventStream() {
     let unlisten: (() => void) | null = null;
     void (async () => {
       try {
-        const { listen } = await import('@tauri-apps/api/event');
+        const { listen } = await import("@tauri-apps/api/event");
         if (cancelled) return;
-        unlisten = await listen<WfEvent>('wf:event', (msg) => {
-          dispatch({ type: 'EVENT', event: msg.payload });
+        unlisten = await listen<WfEvent>("wf:event", (msg) => {
+          dispatch({ type: "EVENT", event: msg.payload });
         });
       } catch (err) {
         // eslint-disable-next-line no-console
-        console.warn('Tauri event listener unavailable:', err);
+        console.warn("Tauri event listener unavailable:", err);
       }
     })();
     return () => {

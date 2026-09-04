@@ -18,6 +18,7 @@
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
+#![allow(clippy::must_use_candidate, clippy::missing_errors_doc)]
 
 use std::sync::Arc;
 
@@ -99,11 +100,9 @@ impl EventBus {
 #[async_trait]
 impl Publisher for EventBus {
     async fn publish(&self, event: Arc<()>) -> Result<(), EventBusError> {
-        self.tx
-            .send(event)
-            .map_err(|err| match err {
-                tokio::sync::broadcast::error::SendError(_) => EventBusError::NoSubscribers,
-            })?;
+        self.tx.send(event).map_err(|err| match err {
+            tokio::sync::broadcast::error::SendError(_) => EventBusError::NoSubscribers,
+        })?;
         Ok(())
     }
 }
@@ -163,7 +162,9 @@ mod tests {
         let bus = EventBus::new(16);
         let mut sub = bus.subscribe();
         let payload = Arc::new(());
-        bus.publish(payload.clone()).await.expect("publish should succeed");
+        bus.publish(payload.clone())
+            .await
+            .expect("publish should succeed");
         let event = tokio::task::spawn_blocking(move || sub.recv())
             .await
             .expect("spawn_blocking should succeed")

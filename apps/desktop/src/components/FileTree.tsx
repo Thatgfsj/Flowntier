@@ -45,8 +45,14 @@
  * can trust that name / path / is_dir / is_file are safe
  * primitive types.
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { getWorkspaceTree, type FileTreeEntry, type FileTreeResponse, type WorkspaceInfo, getRuntimeWorkspace } from '../lib/api.js';
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  getWorkspaceTree,
+  type FileTreeEntry,
+  type FileTreeResponse,
+  type WorkspaceInfo,
+  getRuntimeWorkspace,
+} from "../lib/api.js";
 
 export interface FileTreeProps {
   /** Optional override; default = poll `/api/workspace/tree` every N ms. */
@@ -54,7 +60,7 @@ export interface FileTreeProps {
 }
 
 function fmtSize(n: number | undefined): string {
-  if (n == null) return '';
+  if (n == null) return "";
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
@@ -65,16 +71,16 @@ function fmtSize(n: number | undefined): string {
 // (including null/undefined/non-string) into a printable string
 // — the user always sees SOMETHING rather than `undefined`.
 function safeStr(v: unknown): string {
-  if (v === null || v === undefined) return '';
-  if (typeof v === 'string') return v;
-  if (typeof v === 'number' || typeof v === 'boolean') return String(v);
-  return '';
+  if (v === null || v === undefined) return "";
+  if (typeof v === "string") return v;
+  if (typeof v === "number" || typeof v === "boolean") return String(v);
+  return "";
 }
 function safeBool(v: unknown): boolean {
   return v === true;
 }
 function safeNum(v: unknown): number | undefined {
-  return typeof v === 'number' && Number.isFinite(v) ? v : undefined;
+  return typeof v === "number" && Number.isFinite(v) ? v : undefined;
 }
 
 /**
@@ -87,15 +93,13 @@ function normalizeEntry(e: FileTreeEntry): FileTreeEntry {
   const isDir = safeBool(e.is_dir);
   const isFile = !isDir && safeBool(e.is_file);
   const size = safeNum(e.size);
-  const children = Array.isArray(e.children)
-    ? e.children.map(normalizeEntry)
-    : undefined;
+  const children = Array.isArray(e.children) ? e.children.map(normalizeEntry) : undefined;
   // v0.4.22 (follow-up): exactOptionalPropertyTypes is on,
   // so we cannot pass `undefined` into a `?: number` slot.
   // Build the result via spread, omitting the optional keys
   // when they're undefined.
   const base: FileTreeEntry = {
-    name: safeStr(e.name) || '(unnamed)',
+    name: safeStr(e.name) || "(unnamed)",
     path: safeStr(e.path),
     is_dir: isDir,
     is_file: isFile,
@@ -115,8 +119,8 @@ function normalizeResponse(r: FileTreeResponse | null | undefined): FileTreeResp
   if (!r) {
     return {
       ok: false,
-      root: '',
-      path: '',
+      root: "",
+      path: "",
       entries: [],
       truncated: false,
       count: 0,
@@ -127,7 +131,7 @@ function normalizeResponse(r: FileTreeResponse | null | undefined): FileTreeResp
     root: safeStr(r.root),
     path: safeStr(r.path),
     truncated: !!r.truncated,
-    count: typeof r.count === 'number' ? r.count : 0,
+    count: typeof r.count === "number" ? r.count : 0,
     entries: Array.isArray(r.entries) ? r.entries.map(normalizeEntry) : [],
   };
 }
@@ -179,9 +183,9 @@ function Node({ entry, depth, onToggle, onNavigate, expanded }: NodeProps) {
             onDoubleClick={() => entry.path && onNavigate(entry.path)}
             className="flex flex-1 items-center gap-1 text-left"
             aria-expanded={open}
-            aria-label={`${open ? '折叠' : '展开'} ${entry.name}`}
+            aria-label={`${open ? "折叠" : "展开"} ${entry.name}`}
           >
-            <span className="w-3 select-none text-text-secondary">{open ? '▾' : '▸'}</span>
+            <span className="w-3 select-none text-text-secondary">{open ? "▾" : "▸"}</span>
             <span className="font-mono">📁 {entry.name}</span>
           </button>
           <button
@@ -227,7 +231,7 @@ function Node({ entry, depth, onToggle, onNavigate, expanded }: NodeProps) {
 }
 
 export function FileTree({ pollMs = 5000 }: FileTreeProps) {
-  const [root, setRoot] = useState<string>('');
+  const [root, setRoot] = useState<string>("");
   const [data, setData] = useState<FileTreeResponse>(normalizeResponse(null));
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -235,7 +239,7 @@ export function FileTree({ pollMs = 5000 }: FileTreeProps) {
   // changes when the user clicks the "进入" button (or
   // double-clicks a folder). Collapsing a folder does NOT
   // touch this. Default empty = workspace root.
-  const [navigatedDir, setNavigatedDir] = useState<string>('');
+  const [navigatedDir, setNavigatedDir] = useState<string>("");
   // Track which folders the user has explicitly expanded.
   // Stored as a Set so the entire tree's expand state survives
   // refreshes — previously this lived in each <Node>'s local
@@ -252,9 +256,10 @@ export function FileTree({ pollMs = 5000 }: FileTreeProps) {
       // root so the user can expand/collapse client-side
       // without losing their place.
       const r = safeStr(ws?.root);
-      const path = navigatedDir && r && navigatedDir.startsWith(r)
-        ? navigatedDir.slice(r.length).replace(/^[\\/]+/, '')
-        : '';
+      const path =
+        navigatedDir && r && navigatedDir.startsWith(r)
+          ? navigatedDir.slice(r.length).replace(/^[\\/]+/, "")
+          : "";
       const resp = await getWorkspaceTree({ path, depth: 4, max_entries: 500 });
       // v0.4.22 (follow-up): pipe every IPC response through
       // normalizeResponse so this component never has to deal
@@ -262,7 +267,7 @@ export function FileTree({ pollMs = 5000 }: FileTreeProps) {
       setData(normalizeResponse(resp));
       setError(null);
     } catch (e) {
-      setError(typeof e === 'string' ? e : (e as Error).message ?? 'tree fetch failed');
+      setError(typeof e === "string" ? e : ((e as Error).message ?? "tree fetch failed"));
     } finally {
       setLoading(false);
     }
@@ -270,7 +275,9 @@ export function FileTree({ pollMs = 5000 }: FileTreeProps) {
 
   useEffect(() => {
     void refresh();
-    const t = setInterval(() => { void refresh(); }, pollMs);
+    const t = setInterval(() => {
+      void refresh();
+    }, pollMs);
     return () => clearInterval(t);
   }, [refresh, pollMs]);
 
@@ -301,22 +308,22 @@ export function FileTree({ pollMs = 5000 }: FileTreeProps) {
   }, []);
 
   const backToRoot = useCallback(() => {
-    setNavigatedDir('');
+    setNavigatedDir("");
   }, []);
 
   const rootLabel = useMemo(() => {
-    if (!root) return '—';
+    if (!root) return "—";
     // Compact display: show last 2 path components.
     const parts = root.split(/[\\/]/).filter(Boolean);
     if (parts.length <= 2) return root;
-    return `…/${parts.slice(-2).join('/')}`;
+    return `…/${parts.slice(-2).join("/")}`;
   }, [root]);
 
   const navigatedLabel = useMemo(() => {
     if (!navigatedDir) return null;
     // Compact: relative path from workspace root.
     if (root && navigatedDir.startsWith(root)) {
-      return navigatedDir.slice(root.length).replace(/^[\\/]+/, '');
+      return navigatedDir.slice(root.length).replace(/^[\\/]+/, "");
     }
     return navigatedDir;
   }, [navigatedDir, root]);
@@ -334,12 +341,14 @@ export function FileTree({ pollMs = 5000 }: FileTreeProps) {
         </div>
         <button
           type="button"
-          onClick={() => { void refresh(); }}
+          onClick={() => {
+            void refresh();
+          }}
           className="shrink-0 rounded border border-border px-2 py-0.5 text-[10px] hover:bg-surface-3"
           disabled={loading}
           aria-label="刷新文件树"
         >
-          {loading ? '…' : '刷新'}
+          {loading ? "…" : "刷新"}
         </button>
       </header>
 
@@ -358,7 +367,7 @@ export function FileTree({ pollMs = 5000 }: FileTreeProps) {
             ↑ 回到根
           </button>
           <span className="truncate font-mono text-[10px] text-text-secondary" title={navigatedDir}>
-            {navigatedLabel || '/'}
+            {navigatedLabel || "/"}
           </span>
         </div>
       )}
@@ -370,9 +379,7 @@ export function FileTree({ pollMs = 5000 }: FileTreeProps) {
       )}
       <div className="max-h-[60vh] overflow-y-auto rounded border border-border bg-surface-1 p-1">
         {data.entries.length === 0 && (
-          <div className="px-2 py-1 text-[11px] text-text-secondary">
-            空目录
-          </div>
+          <div className="px-2 py-1 text-[11px] text-text-secondary">空目录</div>
         )}
         {data.entries.map((e) => (
           <Node

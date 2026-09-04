@@ -122,9 +122,7 @@ impl Dispatcher {
                     if let Some((k, v)) = pair.split_once('=') {
                         map.insert(
                             k.to_string(),
-                            Value::String(
-                                urldecode(v).unwrap_or_else(|| v.to_string()),
-                            ),
+                            Value::String(urldecode(v).unwrap_or_else(|| v.to_string())),
                         );
                     } else if !pair.is_empty() {
                         map.insert(pair.to_string(), Value::Bool(true));
@@ -136,9 +134,7 @@ impl Dispatcher {
                     if let Some((k, v)) = pair.split_once('=') {
                         map.insert(
                             k.to_string(),
-                            Value::String(
-                                urldecode(v).unwrap_or_else(|| v.to_string()),
-                            ),
+                            Value::String(urldecode(v).unwrap_or_else(|| v.to_string())),
                         );
                     } else if !pair.is_empty() {
                         map.insert(pair.to_string(), Value::Bool(true));
@@ -218,8 +214,7 @@ impl Dispatcher {
                         matched = false;
                         break;
                     }
-                    let value: String = incoming_segments[inc_idx..inc_idx + consume]
-                        .join("/");
+                    let value: String = incoming_segments[inc_idx..inc_idx + consume].join("/");
                     placeholder_values.push((name.to_string(), value));
                     inc_idx += consume;
                     pc_idx += 1;
@@ -234,7 +229,8 @@ impl Dispatcher {
                         matched = false;
                         break;
                     }
-                    placeholder_values.push((name.to_string(), incoming_segments[inc_idx].to_string()));
+                    placeholder_values
+                        .push((name.to_string(), incoming_segments[inc_idx].to_string()));
                     inc_idx += 1;
                     pc_idx += 1;
                 } else if pat == incoming_segments[inc_idx] {
@@ -285,184 +281,6 @@ impl Dispatcher {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::protocol::RpcParams;
-
-    fn req(method: &str, path: &str) -> RpcRequest {
-        RpcRequest {
-            jsonrpc: "2.0".into(),
-            id: 1,
-            method: method.into(),
-            params: RpcParams { path: path.into(), body: None },
-        }
-    }
-
-    #[tokio::test]
-    async fn dispatches_known_method() {
-        let mut d = Dispatcher::new();
-        d.register("GET", "/api/ping", |_body| {
-            Box::pin(async { Ok((200, serde_json::json!({"pong": true}))) })
-        });
-        let resp = d.dispatch(1, req("GET", "/api/ping")).await;
-        let r = resp.result.unwrap();
-        assert_eq!(r.status, 200);
-        assert_eq!(r.body["pong"], serde_json::json!(true));
-    }
-
-    #[tokio::test]
-    async fn unknown_method_is_not_found() {
-        let d = Dispatcher::new();
-        let resp = d.dispatch(2, req("GET", "/nope")).await;
-        let e = resp.error.unwrap();
-        assert_eq!(e.code, codes::NOT_FOUND);
-    }
-
-    #[tokio::test]
-    async fn get_and_put_on_same_path_coexist() {
-        // The v0.3 fix: previously the dispatcher only keyed on
-        // path, so a second register on the same path silently
-        // overwrote the first. With (method, path) as the key,
-        // GET and PUT handlers can both be registered.
-        let mut d = Dispatcher::new();
-        d.register("GET", "/api/router/roles", |_body| {
-            Box::pin(async {
-                Ok((
-                    200,
-                    serde_json::json!({"op": "list", "roles": []}),
-                ))
-            })
-        });
-        d.register("PUT", "/api/router/roles", |_body| {
-            Box::pin(async {
-                Ok((
-                    200,
-                    serde_json::json!({"op": "update", "ok": true}),
-                ))
-            })
-        });
-        let list = d.dispatch(1, req("GET", "/api/router/roles")).await;
-        let upd = d.dispatch(2, req("PUT", "/api/router/roles")).await;
-        assert_eq!(list.result.unwrap().body["op"], "list");
-        assert_eq!(upd.result.unwrap().body["op"], "update");
-    }
-
-    #[tokio::test]
-    async fn method_is_case_insensitive() {
-        let mut d = Dispatcher::new();
-        d.register("get", "/api/ping", |_body| {
-            Box::pin(async { Ok((200, serde_json::json!({"ok": true}))) })
-        });
-        // Lowercase 'get' is normalized to GET on register;
-        // dispatch with uppercase GET should still find it.
-        let resp = d.dispatch(1, req("GET", "/api/ping")).await;
-        assert_eq!(resp.result.unwrap().status, 200);
-    }
-
-    /// v0.4.21 (event 000064 follow-up): dispatch should strip
-    /// `?query` from the path so handlers registered on the bare
-    /// path still match. Query parameters are merged into the
-    /// body so handlers can read them via `body.get(...)`.
-    #[tokio::test]
-    async fn dispatch_strips_query_string() {
-        let mut d = Dispatcher::new();
-        d.register("GET", "/api/tasks", |body| {
-            Box::pin(async move {
-                let wf_id = body.get("wf_id").and_then(|v| v.as_str()).unwrap_or("");
-                Ok((200, serde_json::json!({"wf_id": wf_id})))
-            })
-        });
-        let resp = d
-            .dispatch(1, req("GET", "/api/tasks?wf_id=abc123"))
-            .await;
-        let r = resp.result.expect("ok");
-        assert_eq!(r.status, 200);
-        assert_eq!(r.body.get("wf_id").and_then(|v| v.as_str()), Some("abc123"));
-    }
-
-    /// v0.4.30 (audit 000130): the trailing-wildcard
-    /// placeholder `{name+}` absorbs one or more path segments
-    /// into a single `/`-joined value. Necessary because
-    /// Flowntier secret names live under
-    /// `flowntier/<id>` (e.g. `flowntier/minimax`) which
-    /// contains a literal `/`.
-    #[tokio::test]
-    async fn wildcard_placeholder_absorbs_slash() {
-        let mut d = Dispatcher::new();
-        d.register("PUT", "/api/settings/secrets/{name+}", |body| {
-            Box::pin(async move {
-                let name = body.get("name").and_then(|v| v.as_str()).unwrap_or("");
-                Ok((200, serde_json::json!({"name": name})))
-            })
-        });
-        // Two-segment name arrives intact.
-        let resp = d
-            .dispatch(1, req("PUT", "/api/settings/secrets/flowntier/minimax"))
-            .await;
-        let r = resp.result.expect("ok");
-        assert_eq!(r.body.get("name").and_then(|v| v.as_str()),
-                   Some("flowntier/minimax"));
-    }
-
-    /// v0.4.30: `{name+}` also works in the middle of a path
-    /// when followed by a literal suffix (e.g. `/reveal`).
-    /// The wildcard is greedy but must leave enough segments
-    /// for the literal suffix.
-    #[tokio::test]
-    async fn wildcard_placeholder_then_literal_suffix() {
-        let mut d = Dispatcher::new();
-        d.register("GET", "/api/settings/secrets/{name+}/reveal", |body| {
-            Box::pin(async move {
-                let name = body.get("name").and_then(|v| v.as_str()).unwrap_or("");
-                Ok((200, serde_json::json!({"name": name})))
-            })
-        });
-        let resp = d
-            .dispatch(2, req("GET", "/api/settings/secrets/flowntier/minimax/reveal"))
-            .await;
-        let r = resp.result.expect("ok");
-        assert_eq!(r.body.get("name").and_then(|v| v.as_str()),
-                   Some("flowntier/minimax"));
-    }
-
-    /// v0.4.31 (audit 000130, follow-up): the trailing-wildcard
-    /// PUT route for `{name+}` against a 2-segment name like
-    /// `flowntier/minimax`. Reproduces the chairman's reported
-    /// "no handler registered for PUT
-    /// /api/settings/secrets/flowntier/minimax" symptom.
-    #[tokio::test]
-    async fn wildcard_put_flowntier_namespace() {
-        let mut d = Dispatcher::new();
-        d.register("PUT", "/api/settings/secrets/{name+}", |body| {
-            Box::pin(async move {
-                let name = body.get("name").and_then(|v| v.as_str())
-                    .unwrap_or("");
-                let value = body.get("value").and_then(|v| v.as_str())
-                    .unwrap_or("");
-                Ok((200, serde_json::json!({
-                    "name": name,
-                    "value_len": value.len(),
-                })))
-            })
-        });
-        let resp = d.dispatch(
-            1,
-            req("PUT", "/api/settings/secrets/flowntier/minimax"),
-        ).await;
-        assert!(
-            resp.error.is_none(),
-            "expected success, got error: {:?}",
-            resp.error
-        );
-        let r = resp.result.expect("ok");
-        assert_eq!(
-            r.body.get("name").and_then(|v| v.as_str()),
-            Some("flowntier/minimax"),
-        );
-    }
-}
-
 /// v0.4.21: minimal URL-decode for query-string values. Handles
 /// `%XX` hex escapes plus `+` → space (form-encoding style).
 /// Used by [Dispatcher::dispatch] to expose query params as
@@ -499,5 +317,181 @@ fn hex_digit(b: u8) -> Option<u8> {
         b'a'..=b'f' => Some(b - b'a' + 10),
         b'A'..=b'F' => Some(b - b'A' + 10),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::protocol::RpcParams;
+
+    fn req(method: &str, path: &str) -> RpcRequest {
+        RpcRequest {
+            jsonrpc: "2.0".into(),
+            id: 1,
+            method: method.into(),
+            params: RpcParams {
+                path: path.into(),
+                body: None,
+            },
+        }
+    }
+
+    #[tokio::test]
+    async fn dispatches_known_method() {
+        let mut d = Dispatcher::new();
+        d.register("GET", "/api/ping", |_body| {
+            Box::pin(async { Ok((200, serde_json::json!({"pong": true}))) })
+        });
+        let resp = d.dispatch(1, req("GET", "/api/ping")).await;
+        let r = resp.result.unwrap();
+        assert_eq!(r.status, 200);
+        assert_eq!(r.body["pong"], serde_json::json!(true));
+    }
+
+    #[tokio::test]
+    async fn unknown_method_is_not_found() {
+        let d = Dispatcher::new();
+        let resp = d.dispatch(2, req("GET", "/nope")).await;
+        let e = resp.error.unwrap();
+        assert_eq!(e.code, codes::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn get_and_put_on_same_path_coexist() {
+        // The v0.3 fix: previously the dispatcher only keyed on
+        // path, so a second register on the same path silently
+        // overwrote the first. With (method, path) as the key,
+        // GET and PUT handlers can both be registered.
+        let mut d = Dispatcher::new();
+        d.register("GET", "/api/router/roles", |_body| {
+            Box::pin(async { Ok((200, serde_json::json!({"op": "list", "roles": []}))) })
+        });
+        d.register("PUT", "/api/router/roles", |_body| {
+            Box::pin(async { Ok((200, serde_json::json!({"op": "update", "ok": true}))) })
+        });
+        let list = d.dispatch(1, req("GET", "/api/router/roles")).await;
+        let upd = d.dispatch(2, req("PUT", "/api/router/roles")).await;
+        assert_eq!(list.result.unwrap().body["op"], "list");
+        assert_eq!(upd.result.unwrap().body["op"], "update");
+    }
+
+    #[tokio::test]
+    async fn method_is_case_insensitive() {
+        let mut d = Dispatcher::new();
+        d.register("get", "/api/ping", |_body| {
+            Box::pin(async { Ok((200, serde_json::json!({"ok": true}))) })
+        });
+        // Lowercase 'get' is normalized to GET on register;
+        // dispatch with uppercase GET should still find it.
+        let resp = d.dispatch(1, req("GET", "/api/ping")).await;
+        assert_eq!(resp.result.unwrap().status, 200);
+    }
+
+    /// v0.4.21 (event 000064 follow-up): dispatch should strip
+    /// `?query` from the path so handlers registered on the bare
+    /// path still match. Query parameters are merged into the
+    /// body so handlers can read them via `body.get(...)`.
+    #[tokio::test]
+    async fn dispatch_strips_query_string() {
+        let mut d = Dispatcher::new();
+        d.register("GET", "/api/tasks", |body| {
+            Box::pin(async move {
+                let wf_id = body.get("wf_id").and_then(|v| v.as_str()).unwrap_or("");
+                Ok((200, serde_json::json!({"wf_id": wf_id})))
+            })
+        });
+        let resp = d.dispatch(1, req("GET", "/api/tasks?wf_id=abc123")).await;
+        let r = resp.result.expect("ok");
+        assert_eq!(r.status, 200);
+        assert_eq!(r.body.get("wf_id").and_then(|v| v.as_str()), Some("abc123"));
+    }
+
+    /// v0.4.30 (audit 000130): the trailing-wildcard
+    /// placeholder `{name+}` absorbs one or more path segments
+    /// into a single `/`-joined value. Necessary because
+    /// Flowntier secret names live under
+    /// `flowntier/<id>` (e.g. `flowntier/minimax`) which
+    /// contains a literal `/`.
+    #[tokio::test]
+    async fn wildcard_placeholder_absorbs_slash() {
+        let mut d = Dispatcher::new();
+        d.register("PUT", "/api/settings/secrets/{name+}", |body| {
+            Box::pin(async move {
+                let name = body.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                Ok((200, serde_json::json!({"name": name})))
+            })
+        });
+        // Two-segment name arrives intact.
+        let resp = d
+            .dispatch(1, req("PUT", "/api/settings/secrets/flowntier/minimax"))
+            .await;
+        let r = resp.result.expect("ok");
+        assert_eq!(
+            r.body.get("name").and_then(|v| v.as_str()),
+            Some("flowntier/minimax")
+        );
+    }
+
+    /// v0.4.30: `{name+}` also works in the middle of a path
+    /// when followed by a literal suffix (e.g. `/reveal`).
+    /// The wildcard is greedy but must leave enough segments
+    /// for the literal suffix.
+    #[tokio::test]
+    async fn wildcard_placeholder_then_literal_suffix() {
+        let mut d = Dispatcher::new();
+        d.register("GET", "/api/settings/secrets/{name+}/reveal", |body| {
+            Box::pin(async move {
+                let name = body.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                Ok((200, serde_json::json!({"name": name})))
+            })
+        });
+        let resp = d
+            .dispatch(
+                2,
+                req("GET", "/api/settings/secrets/flowntier/minimax/reveal"),
+            )
+            .await;
+        let r = resp.result.expect("ok");
+        assert_eq!(
+            r.body.get("name").and_then(|v| v.as_str()),
+            Some("flowntier/minimax")
+        );
+    }
+
+    /// v0.4.31 (audit 000130, follow-up): the trailing-wildcard
+    /// PUT route for `{name+}` against a 2-segment name like
+    /// `flowntier/minimax`. Reproduces the chairman's reported
+    /// "no handler registered for PUT
+    /// /api/settings/secrets/flowntier/minimax" symptom.
+    #[tokio::test]
+    async fn wildcard_put_flowntier_namespace() {
+        let mut d = Dispatcher::new();
+        d.register("PUT", "/api/settings/secrets/{name+}", |body| {
+            Box::pin(async move {
+                let name = body.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                let value = body.get("value").and_then(|v| v.as_str()).unwrap_or("");
+                Ok((
+                    200,
+                    serde_json::json!({
+                        "name": name,
+                        "value_len": value.len(),
+                    }),
+                ))
+            })
+        });
+        let resp = d
+            .dispatch(1, req("PUT", "/api/settings/secrets/flowntier/minimax"))
+            .await;
+        assert!(
+            resp.error.is_none(),
+            "expected success, got error: {:?}",
+            resp.error
+        );
+        let r = resp.result.expect("ok");
+        assert_eq!(
+            r.body.get("name").and_then(|v| v.as_str()),
+            Some("flowntier/minimax"),
+        );
     }
 }

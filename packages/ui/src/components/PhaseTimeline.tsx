@@ -34,60 +34,101 @@ export interface PhaseTimelineProps {
   className?: string;
 }
 
-const stateClass: Record<PhaseState, string> = {
-  // v0.4.24 (event 000119): the timeline was monochrome and
-  // indistinguishable from the panel behind it. Each phase state
-  // now carries a faint tinted background so the eye can scan
-  // "where are we in the pipeline" without reading labels.
-  // Tints are low-alpha so they still feel mono when no phase is
-  // active — only the active phase really glows.
-  pending: 'border border-border bg-surface-3/40 text-text-secondary',
-  active: 'border-2 border-chief bg-chief/15 text-primary',
-  done: 'border border-status-done/60 bg-status-done/10 text-text-secondary',
-  failed: 'border border-status-failed bg-status-failed/15 text-status-failed',
-};
-
 /**
- * Horizontal 8-step stepper. See `docs/UI_GUIDELINES.md` §3 T0.
+ * Modern connected horizontal pipeline stepper.
  */
 export function PhaseTimeline({ steps, onStepClick, className }: PhaseTimelineProps) {
   return (
-    <ol
-      className={cn('flex w-full items-center gap-1 overflow-x-auto p-2', className)}
-      aria-label="工作流时间线"
+    <nav
+      className={cn(
+        'flex w-full items-center rounded-xl border border-white/8 bg-surface-1/90 p-2.5 shadow-sm backdrop-blur-md',
+        className,
+      )}
+      aria-label="工作流流水线"
     >
-      {steps.map((s, i) => (
-        <li key={s.name} className="flex-1 min-w-[100px]">
-          <button
-            type="button"
-            onClick={() => onStepClick?.(s.name)}
-            className={cn(
-              'flex w-full flex-col items-center gap-1 rounded-md p-2 text-xs transition-colors',
-              'hover:bg-surface-3/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-chief',
-              // v0.4.24 (event 000119): when a phase is active, the
-              // whole button gets the chief glow so the eye snaps
-              // to "the orchestrator is here" without reading text.
-              s.state === 'active' && 'flt-glow-chief',
-            )}
-            aria-label={`${s.label} (${s.state})`}
-          >
-            <span
-              className={cn(
-                'flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-semibold tabular-nums',
-                stateClass[s.state],
+      <ol className="flex w-full items-center justify-between gap-1 overflow-x-auto">
+        {steps.map((s, i) => {
+          const isLast = i === steps.length - 1;
+          const isActive = s.state === 'active';
+          const isDone = s.state === 'done';
+          const isFailed = s.state === 'failed';
+
+          return (
+            <li key={s.name} className="relative flex flex-1 items-center min-w-[72px] sm:min-w-[80px] lg:min-w-[90px]">
+              <button
+                type="button"
+                onClick={() => onStepClick?.(s.name)}
+                className={cn(
+                  'group relative z-10 flex flex-col items-center gap-1.5 rounded-lg px-1.5 py-1.5 transition-all',
+                  'hover:bg-surface-3/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-chief',
+                  isActive && 'scale-105',
+                )}
+                aria-label={`${s.label} (${s.state})`}
+              >
+                {/* Stage Badge / Node Indicator */}
+                <span
+                  className={cn(
+                    'relative flex h-7 w-7 items-center justify-center rounded-full text-xs font-semibold tabular-nums transition-all',
+                    isActive &&
+                      'border border-chief/80 bg-chief/20 text-white shadow-lg shadow-chief/30 ring-2 ring-chief/40',
+                    isDone &&
+                      'border border-status-done/60 bg-status-done/15 text-status-done shadow-sm shadow-status-done/20',
+                    isFailed &&
+                      'border border-status-failed bg-status-failed/20 text-status-failed shadow-sm shadow-status-failed/20',
+                    s.state === 'pending' &&
+                      'border border-white/5 bg-surface-2 text-text-tertiary group-hover:border-white/10 group-hover:text-text-secondary',
+                  )}
+                >
+                  {isDone ? (
+                    <svg className="h-3.5 w-3.5 stroke-[2.5]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                    </svg>
+                  ) : isFailed ? (
+                    <span className="text-[11px]">✕</span>
+                  ) : (
+                    i + 1
+                  )}
+                </span>
+
+                {/* Step Label */}
+                <span
+                  className={cn(
+                    'truncate text-center text-xs tracking-tight transition-colors',
+                    isActive && 'font-medium text-white',
+                    isDone && 'font-normal text-text-primary',
+                    s.state === 'pending' && 'text-text-tertiary group-hover:text-text-secondary',
+                    isFailed && 'font-medium text-status-failed',
+                  )}
+                >
+                  {s.label}
+                </span>
+
+                {/* Duration */}
+                {s.durationMs !== undefined && (
+                  <span className="text-[10px] text-text-tertiary tabular-nums">
+                    {s.durationLabel ?? `${Math.round(s.durationMs / 1000)}秒`}
+                  </span>
+                )}
+              </button>
+
+              {/* Right connector track to next step */}
+              {!isLast && (
+                <div
+                  className={cn(
+                    'h-[2px] flex-1 mx-1 rounded-full transition-all duration-300',
+                    isDone
+                      ? 'bg-status-done/70 shadow-[0_0_6px_rgba(16,185,129,0.3)]'
+                      : isActive
+                        ? 'bg-gradient-to-r from-chief/80 to-surface-3/60'
+                        : 'bg-surface-3/60',
+                  )}
+                  aria-hidden="true"
+                />
               )}
-            >
-              {i + 1}
-            </span>
-            <span className="truncate text-center">{s.label}</span>
-            {s.durationMs !== undefined && (
-              <span className="text-[10px] text-text-secondary tabular-nums">
-                {s.durationLabel ?? `${Math.round(s.durationMs / 1000)}秒`}
-              </span>
-            )}
-          </button>
-        </li>
-      ))}
-    </ol>
+            </li>
+          );
+        })}
+      </ol>
+    </nav>
   );
 }

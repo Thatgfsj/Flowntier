@@ -31,8 +31,8 @@ impl AppState {
     pub async fn build() -> Result<Self, BuildError> {
         // Defaults suitable for development; production reads
         // `flowntier.toml` from the OS-specific config dir.
-        let data_dir = storage::Repository::default_data_dir()
-            .ok_or_else(|| BuildError::NoDataDir)?;
+        let data_dir =
+            storage::Repository::default_data_dir().ok_or_else(|| BuildError::NoDataDir)?;
         std::fs::create_dir_all(&data_dir)?;
         let db_path = data_dir.join("storage.sqlite");
         let repo = storage::Repository::open(&db_path).await?;
@@ -100,8 +100,6 @@ pub enum BuildError {
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
 }
-
-
 
 /// Tauri command payload: a new workflow request from the user.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

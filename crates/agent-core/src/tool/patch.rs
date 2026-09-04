@@ -53,7 +53,9 @@ impl Tool for PatchTool {
         ctx: &ToolContext,
     ) -> Result<ToolOutput, ToolError> {
         if !ctx.capabilities.write {
-            return Ok(ToolOutput::err("refused: write capability disabled (patch)"));
+            return Ok(ToolOutput::err(
+                "refused: write capability disabled (patch)",
+            ));
         }
         let path = args
             .get("path")
@@ -61,7 +63,9 @@ impl Tool for PatchTool {
             .ok_or_else(|| ToolError::InvalidArgs("missing 'path'".into()))?;
         let abs = ctx.workspace.resolve(path);
         if !ctx.workspace.contains(&abs) {
-            return Ok(ToolOutput::err(format!("refused: {path} is outside the workspace")));
+            return Ok(ToolOutput::err(format!(
+                "refused: {path} is outside the workspace"
+            )));
         }
 
         let original = tokio::fs::read_to_string(&abs)
@@ -83,7 +87,9 @@ impl Tool for PatchTool {
         };
 
         if new_content == original {
-            return Ok(ToolOutput::err("no-op: replacement produced identical content"));
+            return Ok(ToolOutput::err(
+                "no-op: replacement produced identical content",
+            ));
         }
 
         // Back up, then atomically write (write.rs handles atomicity).
@@ -101,9 +107,7 @@ impl Tool for PatchTool {
         tokio::fs::write(&tmp, &new_content)
             .await
             .map_err(ToolError::Io)?;
-        tokio::fs::rename(&tmp, &abs)
-            .await
-            .map_err(ToolError::Io)?;
+        tokio::fs::rename(&tmp, &abs).await.map_err(ToolError::Io)?;
 
         Ok(ToolOutput::ok(format!(
             "patched {} ({} → {} bytes)",

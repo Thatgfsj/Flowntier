@@ -2,8 +2,8 @@
  * React hook for runtime connection status.
  */
 
-import { useCallback, useEffect, useState } from 'react';
-import { checkHealth } from './api.js';
+import { useCallback, useEffect, useState } from "react";
+import { checkHealth } from "./api.js";
 
 export interface ConnectionStatus {
   connected: boolean;
@@ -31,8 +31,11 @@ export function useConnection(interval = 5000): ConnectionStatus {
     try {
       // Try multiple times
       for (let i = 0; i < 5; i++) {
-        if (await checkHealth()) { setConnected(true); return true; }
-        await new Promise(r => setTimeout(r, 1000));
+        if (await checkHealth()) {
+          setConnected(true);
+          return true;
+        }
+        await new Promise((r) => setTimeout(r, 1000));
       }
       setConnected(false);
       return false;

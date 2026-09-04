@@ -61,22 +61,39 @@ impl Provider for AnthropicProvider {
     ) -> Result<ChatStream, ProviderError> {
         let (system, msgs) = split_system(messages);
 
+        let anthropic_tools: Vec<serde_json::Value> = tools
+            .iter()
+            .filter_map(|t| {
+                let func = t.get("function")?;
+                Some(serde_json::json!({
+                    "name": func.get("name")?,
+                    "description": func.get("description").unwrap_or(&serde_json::Value::Null),
+                    "input_schema": func.get("parameters").unwrap_or(&serde_json::json!({ "type": "object" }))
+                }))
+            })
+            .collect();
+
         let body = MessagesRequest {
             model: &self.model,
             max_tokens: 8192,
             system: &system,
             messages: &msgs,
-            tools,
+            tools: &anthropic_tools,
             stream: true,
         };
 
-        let url = format!(
-            "{}/v1/messages",
-            self.base_url
-                .as_deref()
-                .unwrap_or("https://api.anthropic.com")
-                .trim_end_matches('/')
-        );
+        let base = self
+            .base_url
+            .as_deref()
+            .unwrap_or("https://api.anthropic.com")
+            .trim_end_matches('/');
+        let url = if base.ends_with("/v1/messages") {
+            base.to_string()
+        } else if base.ends_with("/v1") {
+            format!("{base}/messages")
+        } else {
+            format!("{base}/v1/messages")
+        };
         let resp = reqwest::Client::new()
             .post(&url)
             .header("x-api-key", &self.api_key)
@@ -212,6 +229,19 @@ impl Provider for AnthropicProvider {
                                 });
                                 break;
                             }
+                            "error" => {
+                                let err_data: serde_json::Value = serde_json::from_str(&event.data).unwrap_or_default();
+                                let err_msg = err_data
+                                    .get("error")
+                                    .and_then(|e| e.get("message"))
+                                    .and_then(|m| m.as_str())
+                                    .unwrap_or(&event.data);
+                                yield Err(ProviderError::Api {
+                                    status: 500,
+                                    body: err_msg.to_string(),
+                                });
+                                break;
+                            }
                             "ping" | "message_start" => {}
                             other => {
                                 tracing::debug!(event = %other, "ignoring Anthropic SSE event");
@@ -230,12 +260,18 @@ impl Provider for AnthropicProvider {
 
 // ── Wire types ────────────────────────────────────────────────────
 
+fn slice_is_empty(s: &&[serde_json::Value]) -> bool {
+    s.is_empty()
+}
+
 #[derive(Debug, Serialize)]
 struct MessagesRequest<'a> {
     model: &'a str,
     max_tokens: u32,
+    #[serde(skip_serializing_if = "str::is_empty")]
     system: &'a str,
     messages: &'a [AnthropicMsg],
+    #[serde(skip_serializing_if = "slice_is_empty")]
     tools: &'a [serde_json::Value],
     stream: bool,
 }
@@ -243,31 +279,64 @@ struct MessagesRequest<'a> {
 #[derive(Debug, Serialize)]
 #[serde(tag = "role", rename_all = "lowercase")]
 enum AnthropicMsg {
-    User { content: String },
+    User { content: UserContent },
     Assistant { content: Vec<AssistantBlock> },
+}
+
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+enum UserContent {
+    Text(String),
+    Blocks(Vec<UserBlock>),
+}
+
+#[derive(Debug, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum UserBlock {
+    Text {
+        text: String,
+    },
+    ToolResult {
+        tool_use_id: String,
+        content: String,
+        #[serde(skip_serializing_if = "std::ops::Not::not")]
+        is_error: bool,
+    },
 }
 
 #[derive(Debug, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum AssistantBlock {
-    Text { text: String },
-    ToolUse { id: String, name: String, input: serde_json::Value },
+    Text {
+        text: String,
+    },
+    ToolUse {
+        id: String,
+        name: String,
+        input: serde_json::Value,
+    },
 }
 
 fn split_system(messages: &[Message]) -> (String, Vec<AnthropicMsg>) {
     let mut system = String::new();
-    let mut msgs = Vec::with_capacity(messages.len());
+    let mut msgs: Vec<AnthropicMsg> = Vec::with_capacity(messages.len());
     for m in messages {
         match m.role {
             Role::System => {
-                if !system.is_empty() { system.push('\n'); }
+                if !system.is_empty() {
+                    system.push('\n');
+                }
                 system.push_str(&m.content);
             }
-            Role::User => msgs.push(AnthropicMsg::User { content: m.content.clone() }),
+            Role::User => msgs.push(AnthropicMsg::User {
+                content: UserContent::Text(m.content.clone()),
+            }),
             Role::Assistant => {
                 let mut blocks = Vec::new();
                 if !m.content.is_empty() {
-                    blocks.push(AssistantBlock::Text { text: m.content.clone() });
+                    blocks.push(AssistantBlock::Text {
+                        text: m.content.clone(),
+                    });
                 }
                 for tc in &m.tool_calls {
                     blocks.push(AssistantBlock::ToolUse {
@@ -279,13 +348,33 @@ fn split_system(messages: &[Message]) -> (String, Vec<AnthropicMsg>) {
                 msgs.push(AnthropicMsg::Assistant { content: blocks });
             }
             Role::Tool => {
-                // Anthropic: tool results are *user* messages with
-                // a tool_result content block. We approximate by
-                // emitting them as user-role text. (Better impl
-                // would emit a typed block; kept simple here.)
-                msgs.push(AnthropicMsg::User {
-                    content: format!("[tool_result id={}] {}", m.tool_call_id.as_deref().unwrap_or(""), m.content),
-                });
+                let tool_use_id = m.tool_call_id.clone().unwrap_or_default();
+                let is_error = m.content.starts_with("Error:") || m.content.starts_with("error:");
+                let tool_block = UserBlock::ToolResult {
+                    tool_use_id,
+                    content: m.content.clone(),
+                    is_error,
+                };
+                // Anthropic requires strictly alternating roles (user <-> assistant).
+                // Multiple consecutive tool results must be merged into a single user message.
+                if let Some(AnthropicMsg::User { content }) = msgs.last_mut() {
+                    match content {
+                        UserContent::Blocks(blocks) => {
+                            blocks.push(tool_block);
+                        }
+                        UserContent::Text(txt) => {
+                            let old_text = std::mem::take(txt);
+                            *content = UserContent::Blocks(vec![
+                                UserBlock::Text { text: old_text },
+                                tool_block,
+                            ]);
+                        }
+                    }
+                } else {
+                    msgs.push(AnthropicMsg::User {
+                        content: UserContent::Blocks(vec![tool_block]),
+                    });
+                }
             }
         }
     }
@@ -294,7 +383,11 @@ fn split_system(messages: &[Message]) -> (String, Vec<AnthropicMsg>) {
 
 enum PartialBlock {
     Text,
-    Tool { id: String, name: String, args: String },
+    Tool {
+        id: String,
+        name: String,
+        args: String,
+    },
 }
 
 #[cfg(test)]

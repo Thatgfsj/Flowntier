@@ -53,6 +53,7 @@ export type WfEventKind = typeof WF_EVENT_KINDS[number];
 
 export type WfEvent =
   | TransitionEvent
+  | PhaseTransitionEvent
   | TokenUsageEvent
   | ConsoleEvent
   | MilestoneEvent
@@ -102,6 +103,13 @@ export interface TransitionEvent {
   readonly actor: string;
   /** ISO 8601 timestamp. */
   readonly ts: string;
+}
+
+export interface PhaseTransitionEvent {
+  readonly kind: 'phase_transition';
+  readonly wf_id: string;
+  readonly from?: string | null;
+  readonly to: string;
 }
 
 export interface TokenUsageEvent {

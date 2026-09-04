@@ -13,6 +13,7 @@
 //! cascades:
 //!   - `Repository::clear_role_overrides_for_provider("mimo")`
 //!   - `Repository::set_provider_enabled("mimo", false)`
+//!
 //! and surfaces a one-shot error telling the user to open
 //! Settings → 角色 → 模型 分配.
 //!
@@ -32,10 +33,7 @@ mod client {
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     use tokio::net::UnixStream;
 
-    pub async fn connect_and_request(
-        addr: &str,
-        body: serde_json::Value,
-    ) -> serde_json::Value {
+    pub async fn connect_and_request(addr: &str, body: serde_json::Value) -> serde_json::Value {
         let mut conn = UnixStream::connect(addr).await.expect("connect failed");
         let mut line = serde_json::to_vec(&body).unwrap();
         line.push(b'\n');
@@ -57,14 +55,9 @@ mod client {
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     use tokio::net::windows::named_pipe::ClientOptions;
 
-    pub async fn connect_and_request(
-        addr: &str,
-        body: serde_json::Value,
-    ) -> serde_json::Value {
+    pub async fn connect_and_request(addr: &str, body: serde_json::Value) -> serde_json::Value {
         let path = addr.to_string();
-        let mut conn = ClientOptions::new()
-            .open(&path)
-            .expect("connect failed");
+        let mut conn = ClientOptions::new().open(&path).expect("connect failed");
         let mut line = serde_json::to_vec(&body).unwrap();
         line.push(b'\n');
         conn.write_all(&line).await.unwrap();
@@ -131,9 +124,13 @@ async fn spawn_server(tag: &str) -> (String, tokio::task::JoinHandle<std::io::Re
     (rpc_path, handle)
 }
 
-async fn rpc(method: &str, path: &str, body: serde_json::Value, addr: &str, id: u64)
-    -> serde_json::Value
-{
+async fn rpc(
+    method: &str,
+    path: &str,
+    body: serde_json::Value,
+    addr: &str,
+    id: u64,
+) -> serde_json::Value {
     client::connect_and_request(
         addr,
         serde_json::json!({
@@ -142,7 +139,8 @@ async fn rpc(method: &str, path: &str, body: serde_json::Value, addr: &str, id: 
             "method": method,
             "params": { "path": path, "body": body }
         }),
-    ).await
+    )
+    .await
 }
 
 // ── Tests ──────────────────────────────────────────────────────
@@ -165,18 +163,36 @@ async fn audit_000132_resolve_role_clears_role_overrides_when_key_missing() {
             "default_model": "mimo:mimo-v1",
             "fallback_chain": []
         }]}),
-        &addr, 1,
-    ).await;
-    assert_eq!(put["result"]["status"].as_u64().unwrap_or(0), 200,
-        "PUT /api/router/roles failed: {put:?}");
+        &addr,
+        1,
+    )
+    .await;
+    assert_eq!(
+        put["result"]["status"].as_u64().unwrap_or(0),
+        200,
+        "PUT /api/router/roles failed: {put:?}"
+    );
 
     // Sanity: GET shows the assignment is in place.
-    let before = rpc("GET", "/api/router/roles", serde_json::Value::Null, &addr, 2).await;
+    let before = rpc(
+        "GET",
+        "/api/router/roles",
+        serde_json::Value::Null,
+        &addr,
+        2,
+    )
+    .await;
     assert_eq!(before["result"]["status"].as_u64().unwrap_or(0), 200);
-    let chief_before = before["result"]["body"]["roles"].as_array().unwrap()
-        .iter().find(|r| r["role"] == "agent:chief").unwrap();
-    assert_eq!(chief_before["default_model"], "mimo:mimo-v1",
-        "precondition: chief pinned to mimo before cascade");
+    let chief_before = before["result"]["body"]["roles"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["role"] == "agent:chief")
+        .unwrap();
+    assert_eq!(
+        chief_before["default_model"], "mimo:mimo-v1",
+        "precondition: chief pinned to mimo before cascade"
+    );
 
     // 2. Trigger resolve — orchestrator runs this every phase.
     //    With no keychain entry for flowntier/mimo, the cascade
@@ -185,14 +201,22 @@ async fn audit_000132_resolve_role_clears_role_overrides_when_key_missing() {
         "GET",
         "/api/router/roles/agent:chief/resolve",
         serde_json::json!({ "role": "agent:chief" }),
-        &addr, 3,
-    ).await;
+        &addr,
+        3,
+    )
+    .await;
     let resp_text = serde_json::to_string(&resp).unwrap_or_default();
-    assert_eq!(resp["result"]["status"].as_u64().unwrap_or(0), 200,
-        "resolve returns 200 with structured error; resp={resp_text}");
+    assert_eq!(
+        resp["result"]["status"].as_u64().unwrap_or(0),
+        200,
+        "resolve returns 200 with structured error; resp={resp_text}"
+    );
     let body = &resp["result"]["body"];
-    assert_eq!(body["ok"], serde_json::json!(false),
-        "ok:false because keychain empty; resp={resp_text}");
+    assert_eq!(
+        body["ok"],
+        serde_json::json!(false),
+        "ok:false because keychain empty; resp={resp_text}"
+    );
     let err = body["error"].as_str().unwrap_or("");
     assert!(
         err.contains("flowntier/mimo") || err.contains("no API key"),
@@ -205,24 +229,41 @@ async fn audit_000132_resolve_role_clears_role_overrides_when_key_missing() {
 
     // 3. Verify post-cascade DB state via the public read APIs.
     //    3a. GET /api/router/roles — chief's default_model is now "".
-    let after = rpc("GET", "/api/router/roles", serde_json::Value::Null, &addr, 4).await;
-    let chief_after = after["result"]["body"]["roles"].as_array().unwrap()
-        .iter().find(|r| r["role"] == "agent:chief").unwrap();
+    let after = rpc(
+        "GET",
+        "/api/router/roles",
+        serde_json::Value::Null,
+        &addr,
+        4,
+    )
+    .await;
+    let chief_after = after["result"]["body"]["roles"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["role"] == "agent:chief")
+        .unwrap();
     assert_eq!(
         chief_after["default_model"], "",
         "audit 000132: chief.default_model was cleared by the cascade"
     );
     assert_eq!(
-        chief_after["fallback_chain"], serde_json::json!([]),
+        chief_after["fallback_chain"],
+        serde_json::json!([]),
         "audit 000132: chief.fallback_chain untouched (was empty)"
     );
 
     //    3b. GET /api/providers — mimo row is now enabled=false.
     let providers = rpc("GET", "/api/providers", serde_json::Value::Null, &addr, 5).await;
-    let mimo = providers["result"]["body"]["providers"].as_array().unwrap()
-        .iter().find(|p| p["id"] == "mimo").unwrap();
+    let mimo = providers["result"]["body"]["providers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["id"] == "mimo")
+        .unwrap();
     assert_eq!(
-        mimo["enabled"], serde_json::json!(false),
+        mimo["enabled"],
+        serde_json::json!(false),
         "audit 000132: mimo provider row was disabled by the cascade"
     );
 
@@ -233,8 +274,10 @@ async fn audit_000132_resolve_role_clears_role_overrides_when_key_missing() {
         "GET",
         "/api/router/roles/agent:chief/resolve",
         serde_json::json!({ "role": "agent:chief" }),
-        &addr, 6,
-    ).await;
+        &addr,
+        6,
+    )
+    .await;
     let rerun_body = &rerun["result"]["body"];
     assert_eq!(rerun_body["ok"], serde_json::json!(false));
     let rerun_err = rerun_body["error"].as_str().unwrap_or("");
@@ -262,26 +305,41 @@ async fn audit_000132_cascade_only_touches_target_provider() {
             { "role": "agent:worker",  "default_model": "mimo:mimo-v1",
               "fallback_chain": [] },
         ]}),
-        &addr, 1,
-    ).await;
+        &addr,
+        1,
+    )
+    .await;
 
     let _ = rpc(
         "GET",
         "/api/router/roles/agent:worker/resolve",
         serde_json::json!({ "role": "agent:worker" }),
-        &addr, 2,
-    ).await;
+        &addr,
+        2,
+    )
+    .await;
 
-    let after = rpc("GET", "/api/router/roles", serde_json::Value::Null, &addr, 3).await;
+    let after = rpc(
+        "GET",
+        "/api/router/roles",
+        serde_json::Value::Null,
+        &addr,
+        3,
+    )
+    .await;
     let roles = after["result"]["body"]["roles"].as_array().unwrap();
 
     let chief = roles.iter().find(|r| r["role"] == "agent:chief").unwrap();
-    assert_eq!(chief["default_model"], "minimax:MiniMax-Text-01",
-        "chief's minimax assignment must NOT be touched by mimo cascade");
+    assert_eq!(
+        chief["default_model"], "minimax:MiniMax-Text-01",
+        "chief's minimax assignment must NOT be touched by mimo cascade"
+    );
 
     let worker = roles.iter().find(|r| r["role"] == "agent:worker").unwrap();
-    assert_eq!(worker["default_model"], "",
-        "worker's mimo assignment must be cleared by the cascade");
+    assert_eq!(
+        worker["default_model"], "",
+        "worker's mimo assignment must be cleared by the cascade"
+    );
 
     handle.abort();
 }
@@ -304,8 +362,10 @@ async fn audit_000132_cascade_filters_fallback_chain_only() {
                 "minimax:MiniMax-M3"
             ]
         }]}),
-        &addr, 1,
-    ).await;
+        &addr,
+        1,
+    )
+    .await;
 
     // Trigger cascade by resolving chief: minimax has no key
     // either, but only mimo matches the "preset with no key"
@@ -322,28 +382,46 @@ async fn audit_000132_cascade_filters_fallback_chain_only() {
             "default_model": "mimo:mimo-v1",
             "fallback_chain": ["minimax:MiniMax-Text-01"]
         }]}),
-        &addr, 2,
-    ).await;
+        &addr,
+        2,
+    )
+    .await;
 
     let _ = rpc(
         "GET",
         "/api/router/roles/agent:chief/resolve",
         serde_json::json!({ "role": "agent:chief" }),
-        &addr, 3,
-    ).await;
+        &addr,
+        3,
+    )
+    .await;
 
     // Now chief's default was mimo (cleared) AND its chain
     // contained minimax (kept). But — minimax is also a preset
     // with no key, so resolving chief again would now blow up
     // minimax's role_overrides. Verify that the chain survived
     // the mimo cascade specifically.
-    let after = rpc("GET", "/api/router/roles", serde_json::Value::Null, &addr, 4).await;
-    let chief = after["result"]["body"]["roles"].as_array().unwrap()
-        .iter().find(|r| r["role"] == "agent:chief").unwrap();
-    assert_eq!(chief["default_model"], "",
-        "mimo cascade cleared chief.default_model");
+    let after = rpc(
+        "GET",
+        "/api/router/roles",
+        serde_json::Value::Null,
+        &addr,
+        4,
+    )
+    .await;
+    let chief = after["result"]["body"]["roles"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["role"] == "agent:chief")
+        .unwrap();
     assert_eq!(
-        chief["fallback_chain"], serde_json::json!(["minimax:MiniMax-Text-01"]),
+        chief["default_model"], "",
+        "mimo cascade cleared chief.default_model"
+    );
+    assert_eq!(
+        chief["fallback_chain"],
+        serde_json::json!(["minimax:MiniMax-Text-01"]),
         "fallback chain entry pointing at minimax was preserved (not a mimo reference)"
     );
 
@@ -368,10 +446,15 @@ async fn audit_000132_does_not_cascade_for_custom_provider() {
             "kind": "openai-compatible",
             "models": []
         }),
-        &addr, 1,
-    ).await;
-    assert_eq!(add["result"]["status"].as_u64().unwrap_or(0), 201,
-        "add custom provider failed: {add:?}");
+        &addr,
+        1,
+    )
+    .await;
+    assert_eq!(
+        add["result"]["status"].as_u64().unwrap_or(0),
+        201,
+        "add custom provider failed: {add:?}"
+    );
 
     // Pin chief to it.
     let _ = rpc(
@@ -382,8 +465,10 @@ async fn audit_000132_does_not_cascade_for_custom_provider() {
             "default_model": "relay-x:gpt-4o",
             "fallback_chain": []
         }]}),
-        &addr, 2,
-    ).await;
+        &addr,
+        2,
+    )
+    .await;
 
     // Resolve. relay-x has no key. The cascade branch in
     // handlers.rs is gated on built-in presets, so this must
@@ -392,8 +477,10 @@ async fn audit_000132_does_not_cascade_for_custom_provider() {
         "GET",
         "/api/router/roles/agent:chief/resolve",
         serde_json::json!({ "role": "agent:chief" }),
-        &addr, 3,
-    ).await;
+        &addr,
+        3,
+    )
+    .await;
     let body = &resp["result"]["body"];
     assert_eq!(body["ok"], serde_json::json!(false));
     let err = body["error"].as_str().unwrap_or("");
@@ -403,9 +490,20 @@ async fn audit_000132_does_not_cascade_for_custom_provider() {
     );
 
     // role_overrides is untouched.
-    let after = rpc("GET", "/api/router/roles", serde_json::Value::Null, &addr, 4).await;
-    let chief = after["result"]["body"]["roles"].as_array().unwrap()
-        .iter().find(|r| r["role"] == "agent:chief").unwrap();
+    let after = rpc(
+        "GET",
+        "/api/router/roles",
+        serde_json::Value::Null,
+        &addr,
+        4,
+    )
+    .await;
+    let chief = after["result"]["body"]["roles"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["role"] == "agent:chief")
+        .unwrap();
     assert_eq!(
         chief["default_model"], "relay-x:gpt-4o",
         "custom provider role assignment must NOT be cleared"

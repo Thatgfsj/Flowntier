@@ -37,7 +37,6 @@ use std::time::{Duration, Instant};
 
 use agent_core::event::AgentEvent;
 use agent_core::prompt::Role;
-use agent_core::workspace::Workspace;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::sync::broadcast;
@@ -50,6 +49,7 @@ use tracing::{error, info, warn};
 /// "worker" / "chief" / "chief"). The planner + reporter
 /// delegate to the chief because they run in the chief's
 /// pipeline phases; their detail belongs in chief.log.
+#[allow(dead_code)]
 fn role_to_log_target(role_id: &str) -> &'static str {
     match role_id {
         "agent:chief" => logs::TARGET_CHIEF,
@@ -65,7 +65,7 @@ fn role_to_log_target(role_id: &str) -> &'static str {
 
 use crate::handlers::ServerState;
 use crate::logs;
-use crate::{role_info, role_warn};
+use crate::role_info;
 
 /// Spec-defined phase names. Order is meaningful — the
 /// orchestrator advances through these in lockstep.
@@ -112,10 +112,13 @@ pub struct WorkerTask {
 
 /// The structured Planning Doc chief produces in Phase 2 and
 /// critic reviews in Phase 3 + Phase 6.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PlanDoc {
+    #[serde(default)]
     pub summary: String,
+    #[serde(default)]
     pub architecture: String,
+    #[serde(default)]
     pub tasks: Vec<WorkerTask>,
 }
 
@@ -145,27 +148,98 @@ impl PlanDoc {
 
     /// Best-effort JSON extractor. The chief is asked to wrap
     /// the PlanDoc in a fenced ```json block; we strip the
-    /// fences and parse the first `{...}` block. Falls back to
-    /// a single-task doc derived from the user's raw request
-    /// if no JSON is found, so the orchestrator never silently
-    /// hangs on a "no plan" response.
-    pub fn from_chief_text(text: &str, fallback_request: &str) -> Self {
+    /// fences, strip thinking blocks if present, and parse the
+    /// `{...}` or `[...]` block. Falls back to a single-task
+    /// doc only if all parsing attempts fail.
+    pub fn from_chief_text(raw_text: &str, fallback_request: &str) -> Self {
+        // Strip thinking blocks emitted by reasoning models (DeepSeek-R1, Qwen, etc.)
+        let text_owned = if let Some(start) = raw_text.find("<think>") {
+            if let Some(end) = raw_text[start..].find("</think>") {
+                format!("{}{}", &raw_text[..start], &raw_text[start + end + 8..])
+            } else {
+                raw_text.to_string()
+            }
+        } else {
+            raw_text.to_string()
+        };
+        let text = text_owned.as_str();
+
+        // 1. Try ```json ... ``` blocks
         if let Some(start) = text.find("```json") {
             if let Some(end_rel) = text[start + 7..].find("```") {
-                let body = &text[start + 7..start + 7 + end_rel];
+                let body = text[start + 7..start + 7 + end_rel].trim();
                 if let Ok(parsed) = serde_json::from_str::<PlanDoc>(body) {
-                    return parsed;
+                    if !parsed.tasks.is_empty() || !parsed.summary.is_empty() {
+                        return parsed;
+                    }
+                }
+                if let Ok(tasks) = serde_json::from_str::<Vec<WorkerTask>>(body) {
+                    if !tasks.is_empty() {
+                        return PlanDoc {
+                            summary: String::new(),
+                            architecture: String::new(),
+                            tasks,
+                        };
+                    }
                 }
             }
         }
+
+        // 2. Try any fenced ``` ... ``` blocks
+        if let Some(start) = text.find("```") {
+            let after_fence = &text[start + 3..];
+            let after_lang = if let Some(newline) = after_fence.find('\n') {
+                &after_fence[newline + 1..]
+            } else {
+                after_fence
+            };
+            if let Some(end_rel) = after_lang.find("```") {
+                let body = after_lang[..end_rel].trim();
+                if let Ok(parsed) = serde_json::from_str::<PlanDoc>(body) {
+                    if !parsed.tasks.is_empty() || !parsed.summary.is_empty() {
+                        return parsed;
+                    }
+                }
+                if let Ok(tasks) = serde_json::from_str::<Vec<WorkerTask>>(body) {
+                    if !tasks.is_empty() {
+                        return PlanDoc {
+                            summary: String::new(),
+                            architecture: String::new(),
+                            tasks,
+                        };
+                    }
+                }
+            }
+        }
+
+        // 3. Try finding outermost `{...}`
         if let Some(start) = text.find('{') {
             if let Some(end_rel) = text[start..].rfind('}') {
                 let body = &text[start..start + end_rel + 1];
                 if let Ok(parsed) = serde_json::from_str::<PlanDoc>(body) {
-                    return parsed;
+                    if !parsed.tasks.is_empty() || !parsed.summary.is_empty() {
+                        return parsed;
+                    }
                 }
             }
         }
+
+        // 4. Try finding outermost `[...]`
+        if let Some(start) = text.find('[') {
+            if let Some(end_rel) = text[start..].rfind(']') {
+                let body = &text[start..start + end_rel + 1];
+                if let Ok(tasks) = serde_json::from_str::<Vec<WorkerTask>>(body) {
+                    if !tasks.is_empty() {
+                        return PlanDoc {
+                            summary: String::new(),
+                            architecture: String::new(),
+                            tasks,
+                        };
+                    }
+                }
+            }
+        }
+
         // Fallback: a single worker that just does the literal
         // request. Better than crashing the workflow because
         // chief failed to format JSON.
@@ -350,7 +424,7 @@ impl Orchestrator {
         // returned → no log line for it). Without this,
         // a stuck workflow looked like 'no new log lines
         // since the previous phase started'.
-        if let Some(prev) = from {
+        if let Some(_prev) = from {
             let elapsed_ms = self.phase_started_at.elapsed().as_millis() as u64;
             info!(
                 target: "orchestrator",
@@ -406,11 +480,12 @@ impl Orchestrator {
         // pipe. Best-effort — log on failure but don't block
         // the phase transition.
         let wf_phase = map_phase_name(to);
-        if let Err(e) = self.state.repo.update_workflow_state(
-            &self.wf_id,
-            "ACTIVE",
-            &wf_phase,
-        ).await {
+        if let Err(e) = self
+            .state
+            .repo
+            .update_workflow_state(&self.wf_id, "ACTIVE", &wf_phase)
+            .await
+        {
             warn!(target: "orchestrator", error = %e, wf_id = %self.wf_id, "update_workflow_state failed");
         }
     }
@@ -426,11 +501,7 @@ impl Orchestrator {
     /// summary now come from the JSON block critics are
     /// instructed to emit (parsed by `parse_verdict_from_text`),
     /// not the legacy prose scan.
-    fn emit_reviewer_verdict(
-        &self,
-        phase: &str,
-        outcome: &TaskOutcome,
-    ) {
+    fn emit_reviewer_verdict(&self, phase: &str, outcome: &TaskOutcome) {
         // v0.4.22 (event 000115): prefer the structured verdict
         // parsed out of the critic's JSON block. If the critic
         // didn't emit one (older model, timeout before reaching
@@ -452,71 +523,176 @@ impl Orchestrator {
         });
     }
 
-    /// v0.4.22 (event 000113): Phase 5 (develop) runner
-    /// extracted from `run` so the repair loop can re-invoke
-    /// it with critic feedback appended. `repair_context`, when
-    /// `Some`, is appended to every worker prompt so they
-    /// know *what* to fix in this re-run; the original task
-    /// spec is unchanged so workers still target the same
-    /// plan.tasks[i] objective.
+    /// Partition worker tasks into sequential execution stages (batches) based on `dependencies`.
+    /// Tasks within each stage have their dependencies satisfied by earlier stages and can run concurrently.
+    pub fn partition_tasks_into_stages(tasks: &[WorkerTask]) -> Vec<Vec<usize>> {
+        if tasks.is_empty() {
+            return Vec::new();
+        }
+        let mut stages: Vec<Vec<usize>> = Vec::new();
+        let mut completed: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut remaining: Vec<usize> = (0..tasks.len()).collect();
+
+        while !remaining.is_empty() {
+            let mut current_stage = Vec::new();
+            let mut next_remaining = Vec::new();
+
+            for &idx in &remaining {
+                let t = &tasks[idx];
+                // Check if all declared dependencies have been completed in earlier stages
+                let ready = t.dependencies.iter().all(|dep| {
+                    let d = dep.trim();
+                    d.is_empty()
+                        || completed.contains(d)
+                        || !tasks.iter().any(|other| other.id.trim() == d)
+                });
+                if ready {
+                    current_stage.push(idx);
+                } else {
+                    next_remaining.push(idx);
+                }
+            }
+
+            if current_stage.is_empty() {
+                // Cycle or deadlock fallback: execute remaining in one stage
+                current_stage = next_remaining;
+                remaining = Vec::new();
+            } else {
+                for &idx in &current_stage {
+                    completed.insert(tasks[idx].id.trim().to_string());
+                }
+                remaining = next_remaining;
+            }
+
+            stages.push(current_stage);
+        }
+
+        stages
+    }
+
+    /// Phase 5 (develop) DAG runner: partitions tasks into stages by dependency,
+    /// runs each stage concurrently, and passes upstream summaries and context
+    /// downstream so workers can see what previous workers have built.
     async fn run_phase_5_workers(
         &self,
         plan: &PlanDoc,
         repair_context: Option<String>,
     ) -> Vec<TaskOutcome> {
-        let mut worker_futures = Vec::new();
-        for (idx, t) in plan.tasks.iter().enumerate() {
-            let mut task_text = format!(
-                "任务: {}\n目标: {}\n接口: {}\n依赖: {:?}\n要求: {}\n\n只做这一件事, 不要碰其他 worker 的文件。完成后用一句话汇报。",
-                t.title, t.objective, t.interfaces, t.dependencies, t.requirements,
-            );
-            if let Some(ctx) = &repair_context {
-                task_text.push_str("\n\n# 修复循环反馈 (event 000113)\n");
-                task_text.push_str(ctx);
-            }
-            // v0.4.22 (event 000118, fix 3): tag every worker
-            // event with a stable per-task id (`t{idx}`) so the
-            // frontend can render N worker cards. Without this
-            // all events collapse into a single `agent:worker`
-            // key and the UI shows one card regardless of how
-            // many tasks the planner produced.
-            let task_id = Some(format!("t{idx}"));
-            worker_futures.push(self.run_agent_with_task_id(AgentRunSpec {
-                role: Role::Worker,
-                task: task_text,
-                context: None,
-            }, task_id));
+        let stages = Self::partition_tasks_into_stages(&plan.tasks);
+        let mut all_results: Vec<Option<TaskOutcome>> =
+            (0..plan.tasks.len()).map(|_| None).collect();
+        let mut upstream_context: Vec<String> = Vec::new();
+
+        if !plan.architecture.is_empty() {
+            upstream_context.push(format!("系统整体架构:\n{}", plan.architecture));
         }
-        futures::future::join_all(worker_futures).await
+
+        for (stage_idx, stage) in stages.iter().enumerate() {
+            if self.cancel_token.is_cancelled() {
+                break;
+            }
+
+            let mut stage_futures = Vec::new();
+            for &idx in stage {
+                let t = &plan.tasks[idx];
+                let mut task_text = format!(
+                    "任务: {}\n目标: {}\n接口: {}\n依赖: {:?}\n要求: {}\n\n只做这一件事, 不要碰其他 worker 的文件。完成后用一句话汇报。",
+                    t.title, t.objective, t.interfaces, t.dependencies, t.requirements,
+                );
+                if let Some(ctx) = &repair_context {
+                    task_text.push_str("\n\n# 修复循环反馈\n");
+                    task_text.push_str(ctx);
+                }
+
+                let task_context = if !upstream_context.is_empty() {
+                    Some(format!(
+                        "上游任务产出与上下文 (阶段 {}/{}):\n{}",
+                        stage_idx + 1,
+                        stages.len(),
+                        upstream_context.join("\n\n")
+                    ))
+                } else {
+                    None
+                };
+
+                let task_id = Some(format!("t{idx}"));
+                let fut = self.run_agent_with_task_id(
+                    AgentRunSpec {
+                        role: Role::Worker,
+                        task: task_text,
+                        context: task_context,
+                    },
+                    task_id,
+                );
+                stage_futures.push((idx, fut));
+            }
+
+            // Run tasks in this stage concurrently
+            let stage_tasks: Vec<_> = stage_futures
+                .into_iter()
+                .map(|(idx, fut)| async move {
+                    let res = fut.await;
+                    (idx, res)
+                })
+                .collect();
+
+            let stage_results = futures::future::join_all(stage_tasks).await;
+            for (idx, outcome) in stage_results {
+                let detail = outcome.summary.as_deref().unwrap_or_else(|| {
+                    if outcome.text.len() > 300 {
+                        &outcome.text[..300]
+                    } else {
+                        &outcome.text
+                    }
+                });
+                let summary_line = format!(
+                    "- [{}] {}: {}",
+                    plan.tasks[idx].title, outcome.status, detail
+                );
+                upstream_context.push(summary_line);
+                all_results[idx] = Some(outcome);
+            }
+        }
+
+        all_results.into_iter().flatten().collect()
     }
 
-    /// v0.4.22 (event 000113): Phase 6 (final review) runner
-    /// extracted from `run` for the same reason as
-    /// `run_phase_5_workers`. The repair loop calls this with
-    /// the freshly re-built `worker_results`.
+    /// Phase 6 (final review) runner: provides reviewers with comprehensive
+    /// summaries and details from all workers rather than tiny 120-char snippets.
     async fn run_phase_6_final_review(
         &self,
         plan: &PlanDoc,
         worker_results: &[TaskOutcome],
     ) -> (TaskOutcome, TaskOutcome) {
-        let workers_summary: Vec<String> = worker_results.iter().enumerate().map(|(i, w)| {
-            let title = plan.tasks.get(i).map(|t| t.title.clone()).unwrap_or_default();
-            format!("[{}] {} ({}): {}\n  -> {}",
-                title, w.role_display, w.status,
-                w.text.chars().take(120).collect::<String>(),
-                w.summary.clone().unwrap_or_default(),
-            )
-        }).collect();
-        let review_ctx = workers_summary.join("\n\n");
+        let workers_summary: Vec<String> = worker_results
+            .iter()
+            .enumerate()
+            .map(|(i, w)| {
+                let title = plan
+                    .tasks
+                    .get(i)
+                    .map(|t| t.title.clone())
+                    .unwrap_or_default();
+                format!(
+                    "[{}] {} ({}):\n产出总结: {}\n详细输出: {}",
+                    title,
+                    w.role_display,
+                    w.status,
+                    w.summary.clone().unwrap_or_default(),
+                    w.text.chars().take(800).collect::<String>(),
+                )
+            })
+            .collect();
+        let review_ctx = workers_summary.join("\n\n---\n\n");
         tokio::join!(
             self.run_agent(AgentRunSpec {
                 role: Role::BugHunter,
-                task: "评审上面所有 worker 的产出 (找 bug / runtime 风险)。给出: PASS / REPAIR / REWRITE。".into(),
+                task: "评审上面所有 worker 的产出 (找 bug / runtime 风险 / 编译或接口不一致)。给出: PASS / REPAIR / REWRITE 之一, 并列举具体问题。".into(),
                 context: Some(review_ctx.clone()),
             }),
             self.run_agent(AgentRunSpec {
                 role: Role::Reviewer,
-                task: "评审上面所有 worker 的产出 (架构 / 维护性)。给出: PASS / REPAIR / REWRITE。".into(),
+                task: "评审上面所有 worker 的产出 (架构 / 维护性 / 代码完整度)。给出: PASS / REPAIR / REWRITE 之一, 并列举具体问题。".into(),
                 context: Some(review_ctx),
             }),
         )
@@ -556,7 +732,8 @@ impl Orchestrator {
             Ok(_) => {
                 warn!(target: "orchestrator", role = %role_id, "no candidates resolved; default_model missing or empty");
                 return TaskOutcome {
-                    role_id, role_display,
+                    role_id,
+                    role_display,
                     status: "FAILED: no candidates resolved".into(),
                     summary: None,
                     text: String::new(),
@@ -567,7 +744,8 @@ impl Orchestrator {
             Err(e) => {
                 warn!(target: "orchestrator", role = %role_id, error = %e, "resolve_role failed");
                 return TaskOutcome {
-                    role_id, role_display,
+                    role_id,
+                    role_display,
                     status: format!("FAILED: resolve: {e}"),
                     summary: None,
                     text: String::new(),
@@ -598,6 +776,16 @@ impl Orchestrator {
                     cand.model_id.clone(),
                     cand.api_key.to_string(),
                 )),
+                "anthropic" | "anthropic-compatible" => {
+                    let mut p = agent_core::provider::anthropic::AnthropicProvider::new(
+                        cand.model_id.clone(),
+                        cand.api_key.to_string(),
+                    );
+                    if !cand.base_url.is_empty() && cand.base_url != "https://api.anthropic.com" {
+                        p.base_url = Some(cand.base_url.clone());
+                    }
+                    Arc::new(p)
+                }
                 _ => Arc::new(agent_core::provider::openai::OpenAiProvider::compat(
                     cand.base_url.clone(),
                     cand.model_id.clone(),
@@ -605,7 +793,7 @@ impl Orchestrator {
                 )),
             };
             let agent = agent_core::Agent::new(
-                spec.role.clone(),
+                spec.role,
                 provider,
                 self.state.tools.clone(),
                 self.state.workspace_snapshot(),
@@ -617,7 +805,15 @@ impl Orchestrator {
                 spec.task.clone()
             };
 
-            let outcome = self.drive_single_agent(agent, task, role_id.clone(), role_display.clone(), task_id.clone()).await;
+            let outcome = self
+                .drive_single_agent(
+                    agent,
+                    task,
+                    role_id.clone(),
+                    role_display.clone(),
+                    task_id.clone(),
+                )
+                .await;
             // If the outcome looks like a retriable failure, log
             // it and try the next candidate. "DONE" / "ABORTED"
             // (user-cancelled) / "TIMEOUT" (5-min wall clock) are
@@ -686,7 +882,8 @@ impl Orchestrator {
         }
         // All candidates exhausted — return the last failure.
         last_outcome.unwrap_or_else(|| TaskOutcome {
-            role_id, role_display,
+            role_id,
+            role_display,
             status: "FAILED: all candidates exhausted".into(),
             summary: None,
             text: String::new(),
@@ -704,18 +901,11 @@ impl Orchestrator {
     /// error only if the primary can't be resolved; the
     /// fallback is best-effort (skip entries with a missing
     /// preset or no API key, with a warn log).
-    async fn build_candidates(
-        &self,
-        role_id: &str,
-    ) -> Result<Vec<ResolvedCandidate>, String> {
-        let primary = crate::handlers::resolve_role_for_orchestrator(
-            &self.state, role_id,
-        ).await?;
+    async fn build_candidates(&self, role_id: &str) -> Result<Vec<ResolvedCandidate>, String> {
+        let primary = crate::handlers::resolve_role_for_orchestrator(&self.state, role_id).await?;
         let mut out = vec![ResolvedCandidate::from_resolved(&primary)];
         for fb in &primary.fallback_chain {
-            match crate::handlers::resolve_role_for_orchestrator(
-                &self.state, role_id,
-            ).await {
+            match crate::handlers::resolve_role_for_orchestrator(&self.state, role_id).await {
                 Ok(_) => {
                     // resolve_role_for_orchestrator always
                     // returns the primary; for fallback we need
@@ -744,30 +934,27 @@ impl Orchestrator {
 
     /// Resolve a single "<provider>:<model>" string into a
     /// candidate (uses the preset's base_url + secret_name).
-    async fn resolve_fallback_string(
-        &self,
-        fb: &str,
-    ) -> Result<ResolvedCandidate, String> {
+    async fn resolve_fallback_string(&self, fb: &str) -> Result<ResolvedCandidate, String> {
         let (provider_short, model_id) = match fb.split_once(':') {
             Some((p, m)) => (p.to_string(), m.to_string()),
-            None => return Err(format!("fallback '{fb}' must be in '<provider>:<model>' form")),
+            None => {
+                return Err(format!(
+                    "fallback '{fb}' must be in '<provider>:<model>' form"
+                ))
+            }
         };
         let preset = crate::providers::get(&provider_short)
             .ok_or_else(|| format!("unknown provider preset '{provider_short}'"))?;
-        let api_key: zeroize::Zeroizing<String> = match self
-            .state
-            .secrets
-            .reveal(&preset.secret_name)
-            .await
-        {
-            Ok(z) if !z.is_empty() => z,
-            _ => return Err(format!("no API key for {}", preset.secret_name)),
-        };
+        let api_key: zeroize::Zeroizing<String> =
+            match self.state.secrets.reveal(preset.secret_name).await {
+                Ok(z) if !z.is_empty() => z,
+                _ => return Err(format!("no API key for {}", preset.secret_name)),
+            };
         Ok(ResolvedCandidate {
             provider_short,
             model_id,
             base_url: preset.base_url.to_string(),
-api_kind: preset.kind.to_string(),
+            api_kind: preset.kind.to_string(),
             secret_name: preset.secret_name.to_string(),
             api_key,
         })
@@ -781,6 +968,7 @@ api_kind: preset.kind.to_string(),
 ///   - Terminal: agent emitted Done{...}, loop returned
 ///   - Cancelled: cancel_token fired, loop returned early
 ///   - Exhausted: rx channel closed without Done (rare)
+///
 /// The outer `tokio::time::timeout` reports Err on the
 /// 5-min ceiling — distinct from the three above.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -795,69 +983,67 @@ impl Orchestrator {
     /// the original `run_agent` body so the fallback loop can
     /// call it multiple times).
     async fn drive_single_agent(
-    &self,
-    agent: agent_core::Agent,
-    task: String,
-    role_id: String,
-    role_display: String,
-    task_id: Option<String>,
+        &self,
+        agent: agent_core::Agent,
+        task: String,
+        role_id: String,
+        role_display: String,
+        task_id: Option<String>,
     ) -> TaskOutcome {
-    let start = Instant::now();
-    // v0.4.22 (event 000118, fix 7): race the in-flight
-    // agent against the orchestrator's external cancel
-    // token (fired by POST /api/workflow/cancel from the
-    // Stop button). When the user clicks Stop, this future
-    // resolves immediately with `cancelled=true` and we
-    // synthesize a Done{ABORTED} event so the run returns
-    // in ~1s instead of waiting for the 5-min timeout.
-    let cancel_token = self.cancel_token.clone();
-    // v0.4.26 (event 000119): extract metadata before `task` and
-    // `task_id` are moved into `run_with_task_id` — we use them
-    // in the "agent run started" log line below.
-    let task_len = task.len();
-    let task_id_str = task_id.as_deref().unwrap_or("").to_string();
-    let mut rx = agent.run_with_task_id(task, task_id);
-    let mut text = String::new();
-    let mut last_status = "UNKNOWN".to_string();
-    let mut summary: Option<String> = None;
-    // v0.4.22 (event 000118, fix 5): per-phase TextDelta
-    // counter so debugging "ChatZone transcript 空" is a
-    // one-line log read instead of re-running the whole
-    // workflow. The chairman's fix5 report cited phase 8
-    // (chief 5-second delivery) as the smoke case — this
-    // shows how many text_deltas actually streamed.
-    let mut delta_count: u32 = 0;
-    let mut last_delta_len: u32 = 0;
-    // v0.4.26 (event 000119): per-role detail counters — the
-    // chairman wants detailed per-role logs, so we record
-    // how many tool calls, deltas, and final text lands in
-    // each role's file. Cheap (u32 increments) and helps
-    // diagnose "did this agent actually do anything?" without
-    // re-running the workflow.
-    let mut tool_started_count: u32 = 0;
-    let mut tool_finished_count: u32 = 0;
-    // v0.4.26 (event 000119): session-level start line — goes
-    // to the agent's own log file so the chairman can grep
-    // `chief.log` for "agent run started" and jump to the
-    // trace. Captures role + task_id + task length so we can
-    // spot runaway prompts.
-    role_info!(
-        self,
-        &role_id,
-        wf_id = %self.wf_id,
-        role = %role_id,
-        role_display = %role_display,
-        task_id = %task_id_str,
-        task_len,
-        "v0.4.26 (event 000119): agent run started"
-    );
-    // 5-minute per-agent ceiling so a runaway critic doesn't
-    // block the orchestrator forever. Per-task budget is
-    // enforced at the run_task handler; per-agent is new in
-    // event 000068 because critics + workers run unattended.
-    let outcome = tokio::time::timeout(
-        Duration::from_secs(300),
-        async {
+        let start = Instant::now();
+        // v0.4.22 (event 000118, fix 7): race the in-flight
+        // agent against the orchestrator's external cancel
+        // token (fired by POST /api/workflow/cancel from the
+        // Stop button). When the user clicks Stop, this future
+        // resolves immediately with `cancelled=true` and we
+        // synthesize a Done{ABORTED} event so the run returns
+        // in ~1s instead of waiting for the 5-min timeout.
+        let cancel_token = self.cancel_token.clone();
+        // v0.4.26 (event 000119): extract metadata before `task` and
+        // `task_id` are moved into `run_with_task_id` — we use them
+        // in the "agent run started" log line below.
+        let task_len = task.len();
+        let task_id_str = task_id.as_deref().unwrap_or("").to_string();
+        let mut rx = agent.run_with_task_id(task, task_id);
+        let mut text = String::new();
+        let mut last_status = "UNKNOWN".to_string();
+        let mut summary: Option<String> = None;
+        // v0.4.22 (event 000118, fix 5): per-phase TextDelta
+        // counter so debugging "ChatZone transcript 空" is a
+        // one-line log read instead of re-running the whole
+        // workflow. The chairman's fix5 report cited phase 8
+        // (chief 5-second delivery) as the smoke case — this
+        // shows how many text_deltas actually streamed.
+        let mut delta_count: u32 = 0;
+        let mut last_delta_len: u32 = 0;
+        // v0.4.26 (event 000119): per-role detail counters — the
+        // chairman wants detailed per-role logs, so we record
+        // how many tool calls, deltas, and final text lands in
+        // each role's file. Cheap (u32 increments) and helps
+        // diagnose "did this agent actually do anything?" without
+        // re-running the workflow.
+        let mut tool_started_count: u32 = 0;
+        let mut tool_finished_count: u32 = 0;
+        // v0.4.26 (event 000119): session-level start line — goes
+        // to the agent's own log file so the chairman can grep
+        // `chief.log` for "agent run started" and jump to the
+        // trace. Captures role + task_id + task length so we can
+        // spot runaway prompts.
+        role_info!(
+            self,
+            &role_id,
+            wf_id = %self.wf_id,
+            role = %role_id,
+            role_display = %role_display,
+            task_id = %task_id_str,
+            task_len,
+            "v0.4.26 (event 000119): agent run started"
+        );
+        // 5-minute per-agent ceiling so a runaway critic doesn't
+        // block the orchestrator forever. Per-task budget is
+        // enforced at the run_task handler; per-agent is new in
+        // event 000068 because critics + workers run unattended.
+        let outcome = tokio::time::timeout(Duration::from_secs(300), async {
             loop {
                 // tokio::select! races the rx channel, the
                 // 5-min outer timeout, and the cancel
@@ -992,94 +1178,99 @@ impl Orchestrator {
                     }
                 }
             }
-        },
-    ).await;
+        })
+        .await;
 
-    let timed_out = matches!(outcome, Err(_));
-    let cancelled = matches!(outcome, Ok(OutcomeShape::Cancelled));
+        let timed_out = outcome.is_err();
+        let cancelled = matches!(outcome, Ok(OutcomeShape::Cancelled));
 
-    let status = if cancelled {
-        "ABORTED".to_string()
-    } else if timed_out && !(last_status == "DONE"
-        || last_status.starts_with("FAILED")
-        || last_status.starts_with("ABORTED")) {
-        let _ = self.events.send(AgentEvent::Done {
-            wf_id: self.wf_id.clone(),
-            status: format!("TIMEOUT (300s)"),
-            summary: Some(format!("agent {role_display} exceeded 300s")),
-        });
-        "TIMEOUT (300s)".into()
-    } else {
-        last_status
-    };
+        let status = if cancelled {
+            "ABORTED".to_string()
+        } else if timed_out
+            && !(last_status == "DONE"
+                || last_status.starts_with("FAILED")
+                || last_status.starts_with("ABORTED"))
+        {
+            let _ = self.events.send(AgentEvent::Done {
+                wf_id: self.wf_id.clone(),
+                status: "TIMEOUT (300s)".to_string(),
+                summary: Some(format!("agent {role_display} exceeded 300s")),
+            });
+            "TIMEOUT (300s)".into()
+        } else {
+            last_status
+        };
 
-    // v0.4.26 (event 000119): per-role terminal summary line,
-    // written to the agent's own log file with the final
-    // status + every counter we tracked. The chairman can grep
-    // `chief.log` for "agent run finished" and see the full
-    // picture (deltas, tool calls, final text length, total
-    // runtime) without reading system.log.
-    let started = start.elapsed();
-    role_info!(
-        self,
-        &role_id,
-        wf_id = %self.wf_id,
-        role = %role_id,
-        role_display = %role_display,
-        status = %status,
-        text_len = text.len(),
-        delta_count,
-        tool_started_count,
-        tool_finished_count,
-        elapsed_ms = started.as_millis() as u64,
-        summary_len = summary.as_deref().map(str::len).unwrap_or(0),
-        summary_preview = %summary
-            .as_deref()
-            .unwrap_or("")
-            .chars()
-            .take(120)
-            .collect::<String>(),
-        "v0.4.26 (event 000119): agent run finished (per-role summary)"
-    );
+        // v0.4.26 (event 000119): per-role terminal summary line,
+        // written to the agent's own log file with the final
+        // status + every counter we tracked. The chairman can grep
+        // `chief.log` for "agent run finished" and see the full
+        // picture (deltas, tool calls, final text length, total
+        // runtime) without reading system.log.
+        let started = start.elapsed();
+        role_info!(
+            self,
+            &role_id,
+            wf_id = %self.wf_id,
+            role = %role_id,
+            role_display = %role_display,
+            status = %status,
+            text_len = text.len(),
+            delta_count,
+            tool_started_count,
+            tool_finished_count,
+            elapsed_ms = started.as_millis() as u64,
+            summary_len = summary.as_deref().map(str::len).unwrap_or(0),
+            summary_preview = %summary
+                .as_deref()
+                .unwrap_or("")
+                .chars()
+                .take(120)
+                .collect::<String>(),
+            "v0.4.26 (event 000119): agent run finished (per-role summary)"
+        );
 
-    // v0.4.22 (event 000115): only BugHunter + Reviewer are
-    // expected to emit a verdict block. Chief / Planner /
-    // Worker / Reporter leave this None — the orchestrator
-    // only consults structured_verdict on critic outcomes
-    // (event 000112 emit + final terminal status mapping),
-    // and a non-critic with a verdict block is treated as
-    // advisory prose.
-    //
-    // We match on `role_id` (a `String` propagated up from
-    // `run_agent`) rather than `Role` because this fn
-    // `drive_single_agent` only receives the id — re-binding
-    // the Role would mean re-deciding a routing choice
-    // already made by `run_agent`'s caller. The id set is
-    // stable (see `Role::id` in agent-core/src/prompt).
-    let is_critic = role_id == "agent:critic:a" || role_id == "agent:critic:b";
-    let structured_verdict = if is_critic {
-        Some(
-            parse_verdict_from_text(&TaskOutcome {
-                role_id: role_id.clone(),
-                role_display: role_display.clone(),
-                status: status.clone(),
-                summary: summary.clone(),
-                text: text.clone(),
-                elapsed_ms: 0,
-                structured_verdict: None,
-            })
-            .1,
-        )
-    } else {
-        None
-    };
+        // v0.4.22 (event 000115): only BugHunter + Reviewer are
+        // expected to emit a verdict block. Chief / Planner /
+        // Worker / Reporter leave this None — the orchestrator
+        // only consults structured_verdict on critic outcomes
+        // (event 000112 emit + final terminal status mapping),
+        // and a non-critic with a verdict block is treated as
+        // advisory prose.
+        //
+        // We match on `role_id` (a `String` propagated up from
+        // `run_agent`) rather than `Role` because this fn
+        // `drive_single_agent` only receives the id — re-binding
+        // the Role would mean re-deciding a routing choice
+        // already made by `run_agent`'s caller. The id set is
+        // stable (see `Role::id` in agent-core/src/prompt).
+        let is_critic = role_id == "agent:critic:a" || role_id == "agent:critic:b";
+        let structured_verdict = if is_critic {
+            Some(
+                parse_verdict_from_text(&TaskOutcome {
+                    role_id: role_id.clone(),
+                    role_display: role_display.clone(),
+                    status: status.clone(),
+                    summary: summary.clone(),
+                    text: text.clone(),
+                    elapsed_ms: 0,
+                    structured_verdict: None,
+                })
+                .1,
+            )
+        } else {
+            None
+        };
 
-    TaskOutcome {
-        role_id, role_display,
-        status, summary,
-        text, elapsed_ms: start.elapsed().as_millis() as u64,
-        structured_verdict,
-    }
+        TaskOutcome {
+            role_id,
+            role_display,
+            status,
+            summary,
+            text,
+            elapsed_ms: start.elapsed().as_millis() as u64,
+            structured_verdict,
+        }
     }
 
     /// Run the full 8-phase workflow. Returns the final summary
@@ -1098,7 +1289,8 @@ impl Orchestrator {
             ),
             context: None,
         }).await;
-        self.persist_task_row(&chief_clarify, "1-requirement", 0).await;
+        self.persist_task_row(&chief_clarify, "1-requirement", 0)
+            .await;
         phase_idx = 1;
         self.emit_phase(Some(PHASES[0]), PHASES[phase_idx]).await;
 
@@ -1129,7 +1321,8 @@ impl Orchestrator {
             ),
             context: None,
         }).await;
-        self.persist_task_row(&plan_round_a, "2-plan-A-summary", 0).await;
+        self.persist_task_row(&plan_round_a, "2-plan-A-summary", 0)
+            .await;
         let mut plan = PlanDoc::from_chief_text(&plan_round_a.text, &self.user_request);
 
         let plan_round_b = self.run_agent(AgentRunSpec {
@@ -1140,7 +1333,8 @@ impl Orchestrator {
             ),
             context: None,
         }).await;
-        self.persist_task_row(&plan_round_b, "2-plan-B-backend", 0).await;
+        self.persist_task_row(&plan_round_b, "2-plan-B-backend", 0)
+            .await;
         let plan_b = PlanDoc::from_chief_text(&plan_round_b.text, &self.user_request);
         plan.merge(&plan_b);
 
@@ -1152,14 +1346,23 @@ impl Orchestrator {
             ),
             context: None,
         }).await;
-        self.persist_task_row(&plan_round_c, "2-plan-C-frontend", 0).await;
+        self.persist_task_row(&plan_round_c, "2-plan-C-frontend", 0)
+            .await;
         let plan_c = PlanDoc::from_chief_text(&plan_round_c.text, &self.user_request);
         plan.merge(&plan_c);
+
+        // If specific tasks were successfully extracted, drop any fallback placeholder from Round A
+        if plan.tasks.iter().any(|t| t.id != "w_fallback_0") {
+            plan.tasks.retain(|t| t.id != "w_fallback_0");
+        }
 
         // ── Phase 3: plan review (parallel) ──────────────
         phase_idx = 2;
         self.emit_phase(Some(PHASES[1]), PHASES[phase_idx]).await;
-        let plan_ctx = format!("需要评审的 PlanDoc:\n```json\n{}\n```", serde_json::to_string_pretty(&plan).unwrap_or_default());
+        let plan_ctx = format!(
+            "需要评审的 PlanDoc:\n```json\n{}\n```",
+            serde_json::to_string_pretty(&plan).unwrap_or_default()
+        );
         let (critic_a, critic_b) = tokio::join!(
             self.run_agent(AgentRunSpec {
                 role: Role::BugHunter,
@@ -1172,8 +1375,10 @@ impl Orchestrator {
                 context: Some(plan_ctx),
             }),
         );
-        self.persist_task_row(&critic_a, "3-plan-review-criticA", 0).await;
-        self.persist_task_row(&critic_b, "3-plan-review-criticB", 0).await;
+        self.persist_task_row(&critic_a, "3-plan-review-criticA", 0)
+            .await;
+        self.persist_task_row(&critic_b, "3-plan-review-criticB", 0)
+            .await;
         // v0.4.22 (event 000112): publish each critic's verdict
         // as an AgentEvent::ReviewerVerdict so the webview can
         // render the real verdict (front-end also uses the
@@ -1201,13 +1406,30 @@ impl Orchestrator {
         }).await;
         self.persist_task_row(&dispatch, "4-dispatch", 0).await;
 
+        // Parse any modified plan or tasks from Chief's dispatch response
+        let updated_plan = PlanDoc::from_chief_text(&dispatch.text, &self.user_request);
+        if !updated_plan.tasks.is_empty() && updated_plan.tasks[0].id != "w_fallback_0" {
+            plan.tasks = updated_plan.tasks;
+            if !updated_plan.summary.is_empty() {
+                plan.summary = updated_plan.summary;
+            }
+            if !updated_plan.architecture.is_empty() {
+                plan.architecture = updated_plan.architecture;
+            }
+        }
+
         // ── Phase 5: develop (workers in parallel) ─────────
         phase_idx = 4;
         self.emit_phase(Some(PHASES[3]), PHASES[phase_idx]).await;
         let mut worker_results = self.run_phase_5_workers(&plan, None).await;
         for (i, w) in worker_results.iter().enumerate() {
-            let title = plan.tasks.get(i).map(|t| t.title.clone()).unwrap_or_default();
-            self.persist_task_row(w, &format!("5-develop-{}", title), 0).await;
+            let title = plan
+                .tasks
+                .get(i)
+                .map(|t| t.title.clone())
+                .unwrap_or_default();
+            self.persist_task_row(w, &format!("5-develop-{}", title), 0)
+                .await;
         }
 
         // ── Phase 6 + 7: final review + repair loop ────────
@@ -1225,8 +1447,18 @@ impl Orchestrator {
         let mut loop_count: u32 = 0;
         let (final_a, final_b) = loop {
             let (a, b) = self.run_phase_6_final_review(&plan, &worker_results).await;
-            self.persist_task_row(&a, &format!("6-final-review-criticA-loop{loop_count}"), loop_count + 1).await;
-            self.persist_task_row(&b, &format!("6-final-review-criticB-loop{loop_count}"), loop_count + 1).await;
+            self.persist_task_row(
+                &a,
+                &format!("6-final-review-criticA-loop{loop_count}"),
+                loop_count + 1,
+            )
+            .await;
+            self.persist_task_row(
+                &b,
+                &format!("6-final-review-criticB-loop{loop_count}"),
+                loop_count + 1,
+            )
+            .await;
             // v0.4.22 (event 000112): publish final-review
             // verdicts so the webview's ReviewerCard updates
             // for every loop, not just the first.
@@ -1234,8 +1466,13 @@ impl Orchestrator {
             self.emit_reviewer_verdict("final-review", &b);
             let verdict_a = critic_verdict(&a);
             let verdict_b = critic_verdict(&b);
+            if self.cancel_token.is_cancelled() || a.status == "ABORTED" || b.status == "ABORTED" {
+                break (a, b);
+            }
             if !should_repair_decision(&verdict_a, &verdict_b, loop_count, self.max_repair_loops) {
-                if loop_count >= self.max_repair_loops && !(verdict_a == "PASS" && verdict_b == "PASS") {
+                if loop_count >= self.max_repair_loops
+                    && !(verdict_a == "PASS" && verdict_b == "PASS")
+                {
                     warn!(
                         target: "orchestrator",
                         wf_id = %self.wf_id,
@@ -1264,37 +1501,66 @@ impl Orchestrator {
                 ),
                 context: None,
             }).await;
-            self.persist_task_row(&repair_decision, &format!("7-repair-loop{}", loop_count + 1), loop_count + 1).await;
+            self.persist_task_row(
+                &repair_decision,
+                &format!("7-repair-loop{}", loop_count + 1),
+                loop_count + 1,
+            )
+            .await;
             // v0.4.22 (event 000113): emit a dedicated event so
             // the webview can show "修复循环 2/3" instead of
             // guessing from repeated 5-develop rows.
+            let issues_a_list = a
+                .structured_verdict
+                .clone()
+                .map(|v| v.issues)
+                .unwrap_or_default();
+            let issues_b_list = b
+                .structured_verdict
+                .clone()
+                .map(|v| v.issues)
+                .unwrap_or_default();
             let _ = self.events.send(AgentEvent::RepairLoop {
                 wf_id: self.wf_id.clone(),
                 loop_index: loop_count + 1,
                 max_loops: self.max_repair_loops,
                 verdict_a: verdict_a.clone(),
                 verdict_b: verdict_b.clone(),
-                issues_a: a.structured_verdict.clone()
-                    .map(|v| v.issues)
-                    .unwrap_or_default(),
-                issues_b: b.structured_verdict.clone()
-                    .map(|v| v.issues)
-                    .unwrap_or_default(),
+                issues_a: issues_a_list.clone(),
+                issues_b: issues_b_list.clone(),
             });
-            // Rebuild worker prompts with the critic feedback
+            // Rebuild worker prompts with the detailed critic feedback
             // appended, then re-run Phase 5. The next loop
             // iteration's Phase 6 will see the new outputs.
-            worker_results = self.run_phase_5_workers(
-                &plan,
-                Some(format!(
-                    "Critic A verdict ({}): {}\nCritic B verdict ({}): {}\nFix the issues above. Re-run your task.",
-                    a.role_display, verdict_a,
-                    b.role_display, verdict_b,
-                )),
-            ).await;
+            let issues_a_str = if issues_a_list.is_empty() {
+                a.text.chars().take(500).collect::<String>()
+            } else {
+                format!("- {}", issues_a_list.join("\n- "))
+            };
+            let issues_b_str = if issues_b_list.is_empty() {
+                b.text.chars().take(500).collect::<String>()
+            } else {
+                format!("- {}", issues_b_list.join("\n- "))
+            };
+            let repair_ctx = format!(
+                "Critic A ({}) 裁决: {}\n审查发现缺陷:\n{}\n\nCritic B ({}) 裁决: {}\n架构问题与建议:\n{}\n\n主理修复决策: {}\n\n请针对上述问题修复文件与代码。",
+                a.role_display, verdict_a, issues_a_str,
+                b.role_display, verdict_b, issues_b_str,
+                repair_decision.text.chars().take(200).collect::<String>(),
+            );
+            worker_results = self.run_phase_5_workers(&plan, Some(repair_ctx)).await;
             for (i, w) in worker_results.iter().enumerate() {
-                let title = plan.tasks.get(i).map(|t| t.title.clone()).unwrap_or_default();
-                self.persist_task_row(w, &format!("5-develop-loop{}-{}", loop_count + 1, title), loop_count + 1).await;
+                let title = plan
+                    .tasks
+                    .get(i)
+                    .map(|t| t.title.clone())
+                    .unwrap_or_default();
+                self.persist_task_row(
+                    w,
+                    &format!("5-develop-loop{}-{}", loop_count + 1, title),
+                    loop_count + 1,
+                )
+                .await;
             }
             loop_count += 1;
             // Re-emit Phase 6 transition so the webview's
@@ -1342,20 +1608,15 @@ impl Orchestrator {
         // the more-severe verdict when the two disagree.
         // v0.4.22 (event 000114): extracted to pure
         // `terminal_done_status` for unit testing.
-        let terminal_status = terminal_done_status(
-            &verdict_a,
-            &verdict_b,
-            &final_a.role_id,
-            &final_b.role_id,
-        );
+        let terminal_status =
+            terminal_done_status(&verdict_a, &verdict_b, &final_a.role_id, &final_b.role_id);
         // Diagnostic line the chairman sees at the top of the
         // delivery summary — explicit so a "FAILED" outcome
         // doesn't leave the user guessing which reviewer
         // raised the concern.
         let final_review_line = format!(
             "[Final Review] Critic A ({}): {}. Critic B ({}): {}.\n",
-            final_a.role_id, verdict_a,
-            final_b.role_id, verdict_b,
+            final_a.role_id, verdict_a, final_b.role_id, verdict_b,
         );
 
         // v0.4.22 (event 000114): prepend the [Final Review]
@@ -1398,9 +1659,11 @@ impl Orchestrator {
         // v0.4.22 (event 000114): the status column now follows
         // the verdict-derived terminal status (was hard-coded
         // "DONE" pre-event).
-        let _ = self.state.repo.update_workflow_state(
-            &self.wf_id, &terminal_status_for_done, "8-delivery",
-        );
+        let _ = self
+            .state
+            .repo
+            .update_workflow_state(&self.wf_id, &terminal_status_for_done, "8-delivery")
+            .await;
         // Per the chairman's manual test (event 000080 log):
         // three workflows all returned summary_len: 0 —
         // the LLM was timing out or returning empty bodies
@@ -1437,12 +1700,7 @@ impl Orchestrator {
     /// rows from the initial Phase 5 / 6 / 7 / 8 pass, and
     /// the 1-based loop index for any re-run triggered by a
     /// REPAIR / REWRITE verdict.
-    async fn persist_task_row(
-        &self,
-        outcome: &TaskOutcome,
-        phase_title: &str,
-        repair_count: u32,
-    ) {
+    async fn persist_task_row(&self, outcome: &TaskOutcome, phase_title: &str, repair_count: u32) {
         let task_id = format!("t_{}_{}", self.wf_id, rand_suffix());
         let now = chrono::Utc::now().timestamp();
         let title = if phase_title.len() > 60 {
@@ -1450,39 +1708,39 @@ impl Orchestrator {
         } else {
             phase_title.to_string()
         };
-        let result = self.events.send(AgentEvent::Done {
-            wf_id: self.wf_id.clone(),
-            status: outcome.status.clone(),
-            summary: outcome.summary.clone(),
-        });
-        let _ = result;
         // Make sure the workflows row exists before the tasks
         // INSERT — tasks.wf_id has a FK to workflows.id and
         // FK enforcement is on per-connection in storage.
-        let _ = self.state.repo.ensure_workflow_row(
-            &self.wf_id, &format!("[{}] {}", phase_title, outcome.role_id), &outcome.status,
-        ).await;
-        let _ = self.state.repo.create_task(&storage::Task {
-            id: task_id,
-            wf_id: self.wf_id.clone(),
-            parent_id: None,
-            title,
-            status: outcome.status.to_lowercase(),
-            assigned_to: Some(outcome.role_id.clone()),
-            model: None, // resolved model id is opaque from this layer
-            repair_count: repair_count as i64,
-            input_tokens: 0,
-            output_tokens: 0,
-            cost_usd: None,
-            files_modified: None,
-            started_at: Some(now),
-            finished_at: Some(now + outcome.elapsed_ms as i64 / 1000),
-            result: Some(if outcome.text.is_empty() {
-                outcome.summary.clone().unwrap_or_default()
-            } else {
-                outcome.text.chars().take(2000).collect::<String>()
-            }),
-        }).await;
+        let _ = self
+            .state
+            .repo
+            .ensure_workflow_row(&self.wf_id, &self.user_request, &outcome.status)
+            .await;
+        let _ = self
+            .state
+            .repo
+            .create_task(&storage::Task {
+                id: task_id,
+                wf_id: self.wf_id.clone(),
+                parent_id: None,
+                title,
+                status: outcome.status.to_lowercase(),
+                assigned_to: Some(outcome.role_id.clone()),
+                model: None, // resolved model id is opaque from this layer
+                repair_count: repair_count as i64,
+                input_tokens: 0,
+                output_tokens: 0,
+                cost_usd: None,
+                files_modified: None,
+                started_at: Some(now),
+                finished_at: Some(now + outcome.elapsed_ms as i64 / 1000),
+                result: Some(if outcome.text.is_empty() {
+                    outcome.summary.clone().unwrap_or_default()
+                } else {
+                    outcome.text.chars().take(2000).collect::<String>()
+                }),
+            })
+            .await;
     }
 }
 
@@ -1601,9 +1859,7 @@ fn extract_fenced_verdict_block(text: &str) -> Option<ReviewerVerdictJson> {
         .map(|i| after_fence + i + 1)?;
     // Find the closing ``` (start of line, optionally indented).
     let body_start = after_fence;
-    let body_end_rel = text[body_start..]
-        .find("```")
-        .map(|i| body_start + i)?;
+    let body_end_rel = text[body_start..].find("```").map(|i| body_start + i)?;
     let body = text[body_start..body_end_rel].trim();
     serde_json::from_str::<ReviewerVerdictJson>(body).ok()
 }
@@ -1629,7 +1885,7 @@ fn first_sentence(text: &str, summary: &Option<String>) -> String {
     let trimmed = text.trim();
     if !trimmed.is_empty() {
         trimmed
-            .split(|c: char| c == '\n' || c == '。')
+            .split(['\n', '。'])
             .next()
             .unwrap_or("")
             .chars()
@@ -1707,7 +1963,10 @@ pub fn terminal_done_status(
 /// enough for the dashboard's per-row rendering.
 fn rand_suffix() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
-    let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
     // 8 hex chars from the nanosecond tail.
     format!("{:08x}", (nanos as u64) & 0xFFFFFFFF)
 }
@@ -1731,10 +1990,93 @@ fn map_phase_name(name: &str) -> String {
 
 // Silence unused import warnings on platforms that drop them.
 #[allow(dead_code)]
-fn _json_silence(v: Value) -> Value { json!(v) }
+fn _json_silence(v: Value) -> Value {
+    json!(v)
+}
 
 // Bridge for the orchestrator's resolve_role call. Defined in
 // handlers.rs to keep storage access local.
 mod storage {
     pub use storage::*;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_from_chief_text_with_think_tags() {
+        let text = "<think>Let me reason about the architecture... {not json}</think>\n```json\n{\n  \"summary\": \"Web app\",\n  \"architecture\": \"React + Rust\",\n  \"tasks\": [\n    {\n      \"id\": \"w_api\",\n      \"title\": \"Build API\",\n      \"objective\": \"Implement HTTP routes\",\n      \"interfaces\": \"\",\n      \"dependencies\": [],\n      \"requirements\": \"\"\n    }\n  ]\n}\n```";
+        let plan = PlanDoc::from_chief_text(text, "Build app");
+        assert_eq!(plan.summary, "Web app");
+        assert_eq!(plan.tasks.len(), 1);
+        assert_eq!(plan.tasks[0].id, "w_api");
+    }
+
+    #[test]
+    fn test_from_chief_text_with_tasks_only_json() {
+        // In Round B & C, prompt tells LLM to only output tasks without summary/architecture
+        let text = "Here are the tasks:\n```json\n{\n  \"tasks\": [\n    {\n      \"id\": \"w_db\",\n      \"title\": \"Database schema\",\n      \"objective\": \"Setup SQLite\",\n      \"interfaces\": \"\",\n      \"dependencies\": [],\n      \"requirements\": \"\"\n    }\n  ]\n}\n```";
+        let plan = PlanDoc::from_chief_text(text, "Build app");
+        assert_eq!(plan.tasks.len(), 1);
+        assert_eq!(plan.tasks[0].id, "w_db");
+    }
+
+    #[test]
+    fn test_from_chief_text_with_bare_array() {
+        let text = "[\n  {\n    \"id\": \"w_ui\",\n    \"title\": \"UI Component\",\n    \"objective\": \"Design buttons\",\n    \"interfaces\": \"\",\n    \"dependencies\": [],\n    \"requirements\": \"\"\n  }\n]";
+        let plan = PlanDoc::from_chief_text(text, "Build app");
+        assert_eq!(plan.tasks.len(), 1);
+        assert_eq!(plan.tasks[0].id, "w_ui");
+    }
+
+    #[test]
+    fn test_partition_tasks_into_stages_dag() {
+        let tasks = vec![
+            WorkerTask {
+                id: "w_db".into(),
+                title: "Database".into(),
+                objective: "DB".into(),
+                interfaces: "".into(),
+                dependencies: vec![],
+                requirements: "".into(),
+                label: "Database".into(),
+            },
+            WorkerTask {
+                id: "w_api".into(),
+                title: "API".into(),
+                objective: "API".into(),
+                interfaces: "".into(),
+                dependencies: vec!["w_db".into()],
+                requirements: "".into(),
+                label: "Backend".into(),
+            },
+            WorkerTask {
+                id: "w_ui".into(),
+                title: "UI".into(),
+                objective: "UI".into(),
+                interfaces: "".into(),
+                dependencies: vec!["w_api".into()],
+                requirements: "".into(),
+                label: "Frontend".into(),
+            },
+            WorkerTask {
+                id: "w_docs".into(),
+                title: "Docs".into(),
+                objective: "Docs".into(),
+                interfaces: "".into(),
+                dependencies: vec![],
+                requirements: "".into(),
+                label: "Documentation".into(),
+            },
+        ];
+
+        let stages = Orchestrator::partition_tasks_into_stages(&tasks);
+        // Stage 0 should contain w_db and w_docs (indices 0 and 3)
+        assert_eq!(stages[0], vec![0, 3]);
+        // Stage 1 should contain w_api (index 1)
+        assert_eq!(stages[1], vec![1]);
+        // Stage 2 should contain w_ui (index 2)
+        assert_eq!(stages[2], vec![2]);
+    }
 }

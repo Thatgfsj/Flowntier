@@ -3,13 +3,13 @@
  * No HTTP, no CSP, no port issues.
  */
 
-import { invoke } from '@tauri-apps/api/core';
+import { invoke } from "@tauri-apps/api/core";
 
 // ── Health ───────────────────────────────────────────────────────
 
 export async function checkHealth(): Promise<boolean> {
   try {
-    return await invoke<boolean>('health_check');
+    return await invoke<boolean>("health_check");
   } catch {
     return false;
   }
@@ -32,7 +32,7 @@ export interface SecretInfo {
 }
 
 export async function listSecrets(): Promise<SecretInfo[]> {
-  return invoke<SecretInfo[]>('list_secrets');
+  return invoke<SecretInfo[]>("list_secrets");
 }
 
 export interface SaveSecretResult {
@@ -41,19 +41,19 @@ export interface SaveSecretResult {
 }
 
 export async function saveSecret(name: string, value: string): Promise<SaveSecretResult> {
-  return invoke<SaveSecretResult>('save_secret', { name, value });
+  return invoke<SaveSecretResult>("save_secret", { name, value });
 }
 
 export async function deleteSecret(name: string): Promise<void> {
-  return invoke('delete_secret', { name });
+  return invoke("delete_secret", { name });
 }
 
 export async function revealSecret(name: string): Promise<string> {
-  return invoke<string>('reveal_secret', { name });
+  return invoke<string>("reveal_secret", { name });
 }
 
 export async function seedSecrets(): Promise<string[]> {
-  return invoke<string[]>('seed_secrets');
+  return invoke<string[]>("seed_secrets");
 }
 
 // ── Providers ────────────────────────────────────────────────────
@@ -85,11 +85,11 @@ export interface ProviderInfo {
 }
 
 export async function listProviders(): Promise<{ providers: ProviderInfo[] }> {
-  return invoke('list_providers');
+  return invoke("list_providers");
 }
 
 export async function toggleProvider(id: string, enabled: boolean): Promise<void> {
-  return invoke('toggle_provider', { id, enabled });
+  return invoke("toggle_provider", { id, enabled });
 }
 
 // ── Router ───────────────────────────────────────────────────────
@@ -101,11 +101,13 @@ export interface RoleInfo {
 }
 
 export async function listRouterRoles(): Promise<{ roles: RoleInfo[] }> {
-  return invoke('list_router_roles');
+  return invoke("list_router_roles");
 }
 
-export async function listRouterModels(): Promise<{ models: { provider: string; provider_display: string; model: string; display_name: string }[] }> {
-  return invoke('list_router_models');
+export async function listRouterModels(): Promise<{
+  models: { provider: string; provider_display: string; model: string; display_name: string }[];
+}> {
+  return invoke("list_router_models");
 }
 
 // v0.4.19: resolve a role's default_model + keyring into a single
@@ -132,7 +134,7 @@ export interface RoleResolveStatus {
   quota_status?: QuotaStatusEntry;
 }
 export async function getRoleResolveStatus(role: string): Promise<RoleResolveStatus> {
-  return invoke<RoleResolveStatus>('get_role_resolve_status', { role });
+  return invoke<RoleResolveStatus>("get_role_resolve_status", { role });
 }
 
 // ── v0.4.20 quota tracker ─────────────────────────────────────────
@@ -162,7 +164,7 @@ export interface QuotaStatusResponse {
 
 /** GET /api/quota/status. Returns all quota_failures rows. */
 export async function getQuotaStatus(): Promise<QuotaStatusResponse> {
-  return invoke<QuotaStatusResponse>('get_quota_status');
+  return invoke<QuotaStatusResponse>("get_quota_status");
 }
 
 /** POST /api/quota/reset. Clears one (role, model) row. */
@@ -170,7 +172,7 @@ export async function resetQuota(
   role: string,
   model_id?: string,
 ): Promise<{ ok: boolean; cleared_rows?: number; error?: string }> {
-  return invoke('reset_quota', { role, model_id });
+  return invoke("reset_quota", { role, model_id });
 }
 
 /**
@@ -178,15 +180,13 @@ export async function resetQuota(
  * the resolve endpoint (saves a round-trip when the caller already
  * needs the resolve result).
  */
-export async function getRoleQuotaStatus(
-  role: string,
-): Promise<QuotaStatusEntry | null> {
+export async function getRoleQuotaStatus(role: string): Promise<QuotaStatusEntry | null> {
   const r = await getRoleResolveStatus(role);
   return r.quota_status ?? null;
 }
 
 export async function updateRouterRoles(roles: RoleInfo[]): Promise<void> {
-  return invoke('update_router_roles', { roles });
+  return invoke("update_router_roles", { roles });
 }
 
 // ── Plugins ──────────────────────────────────────────────────────
@@ -198,11 +198,11 @@ export interface PluginDescriptor {
 }
 
 export async function listPlugins(): Promise<PluginDescriptor[]> {
-  return invoke('list_plugins');
+  return invoke("list_plugins");
 }
 
 export async function invokePlugin(name: string, args: Record<string, unknown>): Promise<unknown> {
-  return invoke('invoke_plugin', { name, args });
+  return invoke("invoke_plugin", { name, args });
 }
 
 export interface ProviderModel {
@@ -214,7 +214,7 @@ export interface ProviderModel {
   context_length?: number | null;
   /** Reasoning effort. low=fast+cheap, medium=balanced,
    *  high=deep+expensive. Default 'medium'. */
-  thinking_strength?: 'low' | 'medium' | 'high';
+  thinking_strength?: "low" | "medium" | "high";
 }
 
 // v0.4.17: pipe-server now returns HTTP 200 with `{ok:false, error:...}`
@@ -237,24 +237,24 @@ export interface FetchedModelsResult {
 }
 
 export async function fetchProviderModels(id: string): Promise<FetchedModelsResult> {
-  return invoke<FetchedModelsResult>('fetch_provider_models', { id });
+  return invoke<FetchedModelsResult>("fetch_provider_models", { id });
 }
 
 export interface CustomProviderSpec {
   id: string;
   display_name: string;
-  kind: 'anthropic' | 'openai' | 'openai_compat';
+  kind: "anthropic" | "openai" | "openai_compat";
   base_url: string;
   api_key_env: string;
   models: ProviderModel[];
 }
 
 export async function addCustomProvider(spec: CustomProviderSpec): Promise<ProviderInfo> {
-  return invoke<ProviderInfo>('add_custom_provider', { ...spec });
+  return invoke<ProviderInfo>("add_custom_provider", { ...spec });
 }
 
 export async function removeCustomProvider(id: string): Promise<{ ok: boolean }> {
-  return invoke<{ ok: boolean }>('remove_custom_provider', { id });
+  return invoke<{ ok: boolean }>("remove_custom_provider", { id });
 }
 
 // ── event 000110 (fix D1): disable / enable a model ──────────
@@ -271,7 +271,7 @@ export async function disableProviderModel(
   model_id: string,
 ): Promise<{ disabled: boolean; provider_id: string; model_id: string }> {
   return invoke<{ disabled: boolean; provider_id: string; model_id: string }>(
-    'disable_provider_model',
+    "disable_provider_model",
     { provider_id, model_id },
   );
 }
@@ -281,7 +281,7 @@ export async function enableProviderModel(
   model_id: string,
 ): Promise<{ enabled: boolean; was_disabled: boolean; provider_id: string; model_id: string }> {
   return invoke<{ enabled: boolean; was_disabled: boolean; provider_id: string; model_id: string }>(
-    'enable_provider_model',
+    "enable_provider_model",
     { provider_id, model_id },
   );
 }
@@ -290,9 +290,11 @@ export async function enableProviderModel(
 //   this on mount so Settings → Providers reflects persisted
 //   truth. Response shape matches the storage layer directly:
 //   { models: [{ provider_id, model_id }] }
-export async function listDisabledModels(): Promise<{ models: Array<{ provider_id: string; model_id: string }> }> {
+export async function listDisabledModels(): Promise<{
+  models: Array<{ provider_id: string; model_id: string }>;
+}> {
   return invoke<{ models: Array<{ provider_id: string; model_id: string }> }>(
-    'list_disabled_models',
+    "list_disabled_models",
   );
 }
 
@@ -307,26 +309,23 @@ export type ModelOverridePatch = {
   provider_id: string;
   model_id: string;
   context_length?: number | null;
-  thinking_strength?: 'low' | 'medium' | 'high' | null;
+  thinking_strength?: "low" | "medium" | "high" | null;
 };
 
 export async function setModelOverride(
   patch: ModelOverridePatch,
 ): Promise<{ ok: boolean; provider_id: string; model: string }> {
   const { provider_id, model_id, context_length, thinking_strength } = patch;
-  return invoke<{ ok: boolean; provider_id: string; model: string }>(
-    'set_model_override',
-    {
-      providerId: provider_id,
-      modelId: model_id,
-      // Tauri's invoke expects JS-side camelCase OR snake_case
-      // depending on how the Rust handler is named. Our Rust
-      // fn uses snake_case params so the IPC layer maps
-      // automatically; we send both via the patch shape.
-      contextLength: context_length === undefined ? undefined : context_length,
-      thinkingStrength: thinking_strength === undefined ? undefined : thinking_strength,
-    },
-  );
+  return invoke<{ ok: boolean; provider_id: string; model: string }>("set_model_override", {
+    providerId: provider_id,
+    modelId: model_id,
+    // Tauri's invoke expects JS-side camelCase OR snake_case
+    // depending on how the Rust handler is named. Our Rust
+    // fn uses snake_case params so the IPC layer maps
+    // automatically; we send both via the patch shape.
+    contextLength: context_length === undefined ? undefined : context_length,
+    thinkingStrength: thinking_strength === undefined ? undefined : thinking_strength,
+  });
 }
 
 export async function clearModelOverride(
@@ -334,7 +333,7 @@ export async function clearModelOverride(
   model_id: string,
 ): Promise<{ ok: boolean; removed: boolean; provider_id: string; model: string }> {
   return invoke<{ ok: boolean; removed: boolean; provider_id: string; model: string }>(
-    'clear_model_override',
+    "clear_model_override",
     { providerId: provider_id, modelId: model_id },
   );
 }
@@ -342,13 +341,13 @@ export async function clearModelOverride(
 // ── Workflow ─────────────────────────────────────────────────────
 
 export async function startWorkflow(text: string): Promise<{ id: string }> {
-  return invoke('start_workflow_cmd', { text });
+  return invoke("start_workflow_cmd", { text });
 }
 
 export async function getWorkflowPlan(id: string): Promise<Record<string, unknown>> {
   // This still goes through HTTP internally (Rust → Python)
   // But the frontend only sees invoke()
-  return invoke('get_workflow', { id });
+  return invoke("get_workflow", { id });
 }
 
 // v0.4.22 (event 000118, fix 6): single-agent chat run.
@@ -357,7 +356,7 @@ export async function getWorkflowPlan(id: string): Promise<Record<string, unknow
 // The orchestrator workflow remains available via
 // `run_workflow_cmd` above.
 export interface ChatTurnMessage {
-  role: 'user' | 'assistant' | 'system' | 'tool';
+  role: "user" | "assistant" | "system" | "tool";
   content: string;
   /** Tool-call payload (assistant role only). Unused for chat-mode
    *  today but kept so a future replay could re-inject tool_calls. */
@@ -371,7 +370,7 @@ export async function runAgentTask(args: {
   role?: string;
   chat_history?: ChatTurnMessage[];
 }): Promise<unknown> {
-  return invoke('run_agent_task', { body: args });
+  return invoke("run_agent_task", { body: args });
 }
 
 // v0.4.22 (event 000118, fix 7): stop a running workflow.
@@ -380,7 +379,7 @@ export async function runAgentTask(args: {
 // internally wraps it into the {wf_id} body the pipe-server
 // expects at /api/workflow/cancel.
 export async function cancelWorkflow(wfId: string): Promise<void> {
-  await invoke('cancel_workflow', { id: wfId });
+  await invoke("cancel_workflow", { id: wfId });
 }
 
 // ── KV (Phase 4 onboarding state) ───────────────────────────────
@@ -391,22 +390,22 @@ export async function cancelWorkflow(wfId: string): Promise<void> {
 
 export async function kvGet<T = unknown>(key: string): Promise<T | null> {
   try {
-    const r = await invoke<{ k: string; v: T | null }>('kv_get', { key });
+    const r = await invoke<{ k: string; v: T | null }>("kv_get", { key });
     return r.v;
   } catch (e) {
-    console.warn('[api] kvGet failed:', key, e);
+    console.warn("[api] kvGet failed:", key, e);
     return null;
   }
 }
 
 export async function kvSet<T = unknown>(key: string, value: T): Promise<void> {
-  await invoke('kv_set', { key, value });
+  await invoke("kv_set", { key, value });
 }
 
 export async function resetOnboarding(): Promise<void> {
   // Set first_run=true so the Welcome screen re-appears on the
   // next launch. The user re-triggers via Settings → About.
-  await kvSet('first_run', 'true');
+  await kvSet("first_run", "true");
 }
 
 // ── Sample workflow (Phase 4 onboarding) ───────────────────────
@@ -420,7 +419,7 @@ export interface SampleWorkflow {
 }
 
 export async function loadSampleWorkflow(): Promise<SampleWorkflow> {
-  return invoke('load_sample_workflow');
+  return invoke("load_sample_workflow");
 }
 
 // ── Helpers ──────────────────────────────────────────────────────
@@ -443,7 +442,7 @@ export interface WorkspaceInfo {
 }
 
 export async function getRuntimeWorkspace(): Promise<WorkspaceInfo> {
-  return invoke<WorkspaceInfo>('get_runtime_workspace');
+  return invoke<WorkspaceInfo>("get_runtime_workspace");
 }
 
 export interface FileTreeEntry {
@@ -467,7 +466,7 @@ export interface FileTreeResponse {
 export async function getWorkspaceTree(
   body: { path?: string; depth?: number; max_entries?: number } = {},
 ): Promise<FileTreeResponse> {
-  return invoke<FileTreeResponse>('get_workspace_tree', { body });
+  return invoke<FileTreeResponse>("get_workspace_tree", { body });
 }
 
 export async function setRuntimeWorkspace(path: string): Promise<{ ok: boolean; root: string }> {
@@ -477,7 +476,7 @@ export async function setRuntimeWorkspace(path: string): Promise<{ ok: boolean; 
   // event 000066 patch in lib.rs:1280). Returns the absolute
   // .nwt path; for just-the-root the caller can call
   // getRuntimeWorkspace().
-  const nwt = await invoke<string>('set_workdir_with_nwt', { path });
+  const nwt = await invoke<string>("set_workdir_with_nwt", { path });
   return { ok: true, root: nwt };
 }
 
@@ -485,7 +484,7 @@ export async function setRuntimeWorkspace(path: string): Promise<{ ok: boolean; 
 
 export interface ErrorRecord {
   at: number;
-  severity: 'error' | 'warn' | 'info';
+  severity: "error" | "warn" | "info";
   source: string;
   summary: string;
   detail?: string | null;
@@ -498,7 +497,7 @@ export interface RecentErrorsResponse {
 }
 
 export async function getRecentErrors(limit = 10): Promise<RecentErrorsResponse> {
-  return invoke<RecentErrorsResponse>('get_recent_errors', { body: { limit } });
+  return invoke<RecentErrorsResponse>("get_recent_errors", { body: { limit } });
 }
 
 // ── v0.4.22 (event 000069): workflow async + status poll ────
@@ -509,13 +508,13 @@ export async function getRecentErrors(limit = 10): Promise<RecentErrorsResponse>
 export interface WorkflowStatus {
   ok: boolean;
   wf_id: string;
-  status: string;   // 'running' | 'done' | 'failed' | 'aborted' | 'unknown'
-  phase: string;    // 'requirement' | 'plan' | 'plan-review' | ... | 'done'
+  status: string; // 'running' | 'done' | 'failed' | 'aborted' | 'unknown'
+  phase: string; // 'requirement' | 'plan' | 'plan-review' | ... | 'done'
   summary: string | null;
   tasks_done: number;
   tasks_total: number;
 }
 
 export async function getWorkflowStatus(wfId: string): Promise<WorkflowStatus> {
-  return invoke<WorkflowStatus>('get_workflow_status', { body: { wf_id: wfId } });
+  return invoke<WorkflowStatus>("get_workflow_status", { body: { wf_id: wfId } });
 }

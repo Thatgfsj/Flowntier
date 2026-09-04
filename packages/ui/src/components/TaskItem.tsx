@@ -64,7 +64,7 @@ export function TaskItem({
   return (
     <div
       className={cn(
-        'flex items-center gap-3 rounded-md border border-border bg-surface-1 p-2 text-sm',
+        'flex items-center gap-3 rounded-xl border border-white/8 bg-surface-2/90 p-2.5 text-sm shadow-sm transition-all hover:border-white/15',
         className,
       )}
     >

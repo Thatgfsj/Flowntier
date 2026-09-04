@@ -75,8 +75,7 @@ fn data_dir_migration_renames_legacy_aco_dir() {
     let legacy = sandbox.path().join("aco");
     std::fs::create_dir_all(&legacy).expect("mkdir aco");
     let sentinel = "user-data.json";
-    std::fs::write(legacy.join(sentinel), b"{\"theme\":\"dark\"}")
-        .expect("write sentinel");
+    std::fs::write(legacy.join(sentinel), b"{\"theme\":\"dark\"}").expect("write sentinel");
 
     // The new code should rename `aco/` → `flowntier/`. We
     // simulate that here — production code does the same std::fs::rename
@@ -136,11 +135,8 @@ async fn db_migration_0002_renames_aco_toml_to_flowntier_toml() {
     {
         use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
         use std::str::FromStr;
-        let opts = SqliteConnectOptions::from_str(&format!(
-            "sqlite://{}",
-            db_path.display()
-        ))
-        .expect("parse url");
+        let opts = SqliteConnectOptions::from_str(&format!("sqlite://{}", db_path.display()))
+            .expect("parse url");
         let pool = SqlitePoolOptions::new()
             .max_connections(1)
             .connect_with(opts)
@@ -160,7 +156,9 @@ async fn db_migration_0002_renames_aco_toml_to_flowntier_toml() {
     }
 
     // Step 4: open again with v0.3.0 code; sqlx applies 0002.
-    let repo = Repository::open(&db_path).await.expect("open with v0.3.0 (runs 0002)");
+    let repo = Repository::open(&db_path)
+        .await
+        .expect("open with v0.3.0 (runs 0002)");
 
     // Step 5: verify the column is renamed and the row survived.
     let verify = sqlx::SqlitePool::connect(&format!("sqlite://{}", db_path.display()))
@@ -200,7 +198,10 @@ async fn db_migration_0002_renames_aco_toml_to_flowntier_toml() {
             .fetch_one(&verify)
             .await
             .expect("count v2");
-    assert_eq!(v2_count, 1, "_sqlx_migrations should have 0002 marked as applied");
+    assert_eq!(
+        v2_count, 1,
+        "_sqlx_migrations should have 0002 marked as applied"
+    );
 
     let _ = repo.pool();
 }
@@ -219,7 +220,10 @@ async fn repository_open_creates_flowntier_dir_if_missing() {
         "sandbox precondition: parent should not exist"
     );
     let repo = Repository::open(&db_path).await.expect("open fresh");
-    assert!(db_path.parent().unwrap().exists(), "parent must exist after open");
+    assert!(
+        db_path.parent().unwrap().exists(),
+        "parent must exist after open"
+    );
     assert!(db_path.exists(), "db file must exist after open");
     let _ = repo.pool();
 }

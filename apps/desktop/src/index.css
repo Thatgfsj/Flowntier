@@ -25,52 +25,51 @@
    ════════════════════════════════════════════════════════════════ */
 
 @theme {
-  /* ── Surface ramp (8 levels, monotonic luminance) ─────────── */
-  --color-surface-0: #06080D;   /* body / canvas — deepest   */
-  --color-surface-1: #0F141C;   /* primary panel             */
-  --color-surface-2: #1A2230;   /* card / elevated panel     */
-  --color-surface-3: #25303F;   /* hover, selected card      */
-  --color-surface-4: #2F3B4D;   /* focus ring, strong hover  */
+  /* ── Surface ramp (Modern Obsidian palette) ───────────────── */
+  --color-surface-0: #08090c; /* body / canvas — deepest   */
+  --color-surface-1: #0d1017; /* primary panel / sidebar   */
+  --color-surface-2: #131722; /* card / elevated panel     */
+  --color-surface-3: #1a202e; /* hover, selected card      */
+  --color-surface-4: #232b3e; /* focus ring, strong hover  */
 
-  /* ── Border ramp (always lighter than surface) ────────────── */
-  --color-border-subtle: #1F2A38;
-  --color-border:        #3A4658;
-  --color-border-strong: #556480;
+  /* ── Border ramp (Refined hairline & subtle translucent) ──── */
+  --color-border-subtle: #161c27;
+  --color-border: #232b3a;
+  --color-border-strong: #333e54;
 
-  /* ── Text (≥4.5:1 vs surface-1) ───────────────────────────── */
-  /* The class names in this codebase use the double "text-text-"
-     prefix because Tailwind v4 auto-prefixes every @theme color
-     var with the utility prefix it belongs to. We honor that
-     naming so the existing 362 token usages just keep working. */
-  --color-text-primary:   #F2F5FA; /* L≈0.93, vs s1 ≈13:1     */
-  --color-text-secondary: #B6BFCC; /* L≈0.71, vs s1 ≈6.5:1    */
-  --color-text-tertiary:  #7A8493; /* L≈0.50, vs s1 ≈3.7:1    */
-  --color-text-disabled:  #4F5867; /* L≈0.32                   */
-  --color-text-error:     #FF5C6C;
-  --color-text-success:   #3DDC97;
-  --color-text-accent:    #FFD24A;
+  /* ── Text (High readability, WCAG AA compliant) ───────────── */
+  --color-text-primary: #f8fafc; /* Crisp primary text       */
+  --color-text-secondary: #94a3b8; /* Slate-400 secondary      */
+  --color-text-tertiary: #8b9cb3; /* Slate-400+ tertiary (AA) */
+  --color-text-disabled: #475569; /* Slate-600 disabled       */
+  --color-text-error: #f43f5e; /* Rose-500                 */
+  --color-text-success: #10b981; /* Emerald-500              */
+  --color-text-accent: #f59e0b; /* Amber-500                */
 
-  /* ── Head roles (bright, hue-distinct) ────────────────────── */
-  --color-chief:    #5B9CFF;  /* 亮蓝 — coordinator         */
-  --color-critic-a: #FF7A85;  /* 亮红 — 找茬                 */
-  --color-critic-b: #B493FF;  /* 亮紫 — 架构审查             */
+  /* ── Core aliases for Tailwind v4 utility classes ─────────── */
+  --color-primary: #f8fafc;
+  --color-accent: #f59e0b;
+  --color-error: #f43f5e;
 
-  /* ── Workers (4 distinct hues, all medium-bright) ─────────── */
-  --color-worker-1: #4DD0B5;  /* 亮青绿                     */
-  --color-worker-2: #FFB347;  /* 亮橙                       */
-  --color-worker-3: #8AE063;  /* 亮草绿                     */
-  --color-worker-4: #E879F9;  /* 亮品红                     */
+  /* ── Head roles (Vibrant modern accents) ──────────────────── */
+  --color-chief: #3b82f6; /* 亮蓝 — coordinator         */
+  --color-critic-a: #f43f5e; /* 霓虹红 — 找茬               */
+  --color-critic-b: #8b5cf6; /* 灵动紫 — 架构审查           */
+
+  /* ── Workers (4 distinct modern hues) ─────────────────────── */
+  --color-worker-1: #14b8a6; /* 亮青绿                     */
+  --color-worker-2: #f59e0b; /* 亮橙                       */
+  --color-worker-3: #10b981; /* 亮草绿                     */
+  --color-worker-4: #d946ef; /* 亮品红                     */
 
   /* ── Status (workflow phase) ─────────────────────────────── */
-  --color-status-pending: #6B7787;
-  --color-status-active:  #FFD24A;  /* 鲜亮黄 (与 chief 蓝区分) */
-  --color-status-done:    #3DDC97;
-  --color-status-failed:  #FF5C6C;
-  --color-status-warn:    #FFA94D;
-  --color-status-error:   #FF5C6C;
-  /* Back-compat alias: the codebase has a `status-fail` and a
-     `status-failed` spelling. */
-  --color-status-fail:    #FF5C6C;
+  --color-status-pending: #64748b;
+  --color-status-active: #f59e0b; /* 鲜亮琥珀 (与 chief 蓝区分) */
+  --color-status-done: #10b981; /* 翡翠绿                     */
+  --color-status-failed: #f43f5e;
+  --color-status-warn: #f59e0b;
+  --color-status-error: #f43f5e;
+  --color-status-fail: #f43f5e;
 
   /* ── Type ─────────────────────────────────────────────────── */
   --font-sans: "Inter", system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
@@ -102,27 +101,26 @@ body {
 /* ── Focus ring ────────────────────────────────────────────── */
 
 :where(button, a, [tabindex], input, select, textarea):focus-visible {
-  outline: 2px solid var(--color-status-active);
+  outline: 2px solid var(--color-chief);
   outline-offset: 2px;
-  border-radius: 4px;
+  border-radius: 6px;
 }
 
-/* ── Scrollbar (Webkit) — match the new surface ramp ───────── */
+/* ── Scrollbar (Modern slim translucent pill) ──────────────── */
 
 ::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: 6px;
+  height: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: var(--color-surface-0);
+  background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--color-surface-3);
-  border-radius: 6px;
-  border: 2px solid var(--color-surface-0);
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 9999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--color-surface-4);
+  background: rgba(255, 255, 255, 0.25);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -137,25 +135,45 @@ body {
 /* ── Polish 17: animated transitions ───────────────────────── */
 
 @keyframes flt-fade-in {
-  from { opacity: 0; transform: translateY(8px); }
-  to   { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 .flt-anim-in {
   animation: flt-fade-in 280ms ease-out both;
 }
 
 @keyframes flt-pulse {
-  0%, 100% { opacity: 1; }
-  50%      { opacity: 0.55; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
 }
 .flt-anim-pulse {
   animation: flt-pulse 1.6s ease-in-out infinite;
 }
 
 @keyframes flt-shake {
-  0%, 100% { transform: translateX(0); }
-  20%, 60% { transform: translateX(-6px); }
-  40%, 80% { transform: translateX(6px); }
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  20%,
+  60% {
+    transform: translateX(-6px);
+  }
+  40%,
+  80% {
+    transform: translateX(6px);
+  }
 }
 .flt-anim-shake {
   animation: flt-shake 380ms ease-in-out;
@@ -166,10 +184,38 @@ body {
 /* Each role gets a subtle box-shadow ring when it's the
    "active speaker" — the user spots who's talking without
    reading labels. Shadow tinted by the role's brand color. */
-.flt-glow-chief { box-shadow: 0 0 0 1px var(--color-chief), 0 0 14px -2px var(--color-chief); }
-.flt-glow-critic-a { box-shadow: 0 0 0 1px var(--color-critic-a), 0 0 14px -2px var(--color-critic-a); }
-.flt-glow-critic-b { box-shadow: 0 0 0 1px var(--color-critic-b), 0 0 14px -2px var(--color-critic-b); }
-.flt-glow-worker-1 { box-shadow: 0 0 0 1px var(--color-worker-1), 0 0 10px -3px var(--color-worker-1); }
-.flt-glow-worker-2 { box-shadow: 0 0 0 1px var(--color-worker-2), 0 0 10px -3px var(--color-worker-2); }
-.flt-glow-worker-3 { box-shadow: 0 0 0 1px var(--color-worker-3), 0 0 10px -3px var(--color-worker-3); }
-.flt-glow-worker-4 { box-shadow: 0 0 0 1px var(--color-worker-4), 0 0 10px -3px var(--color-worker-4); }
+.flt-glow-chief {
+  box-shadow:
+    0 0 0 1px var(--color-chief),
+    0 0 14px -2px var(--color-chief);
+}
+.flt-glow-critic-a {
+  box-shadow:
+    0 0 0 1px var(--color-critic-a),
+    0 0 14px -2px var(--color-critic-a);
+}
+.flt-glow-critic-b {
+  box-shadow:
+    0 0 0 1px var(--color-critic-b),
+    0 0 14px -2px var(--color-critic-b);
+}
+.flt-glow-worker-1 {
+  box-shadow:
+    0 0 0 1px var(--color-worker-1),
+    0 0 10px -3px var(--color-worker-1);
+}
+.flt-glow-worker-2 {
+  box-shadow:
+    0 0 0 1px var(--color-worker-2),
+    0 0 10px -3px var(--color-worker-2);
+}
+.flt-glow-worker-3 {
+  box-shadow:
+    0 0 0 1px var(--color-worker-3),
+    0 0 10px -3px var(--color-worker-3);
+}
+.flt-glow-worker-4 {
+  box-shadow:
+    0 0 0 1px var(--color-worker-4),
+    0 0 10px -3px var(--color-worker-4);
+}

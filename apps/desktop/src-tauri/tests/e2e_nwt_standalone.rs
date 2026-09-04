@@ -43,8 +43,7 @@ fn init_nwt_fs(root: &std::path::Path) -> Result<String, String> {
     let nwt_dir = root.join(".nwt");
     std::fs::create_dir_all(nwt_dir.join("timeline"))
         .map_err(|e| format!("mkdir timeline: {e}"))?;
-    std::fs::create_dir_all(nwt_dir.join("indices"))
-        .map_err(|e| format!("mkdir indices: {e}"))?;
+    std::fs::create_dir_all(nwt_dir.join("indices")).map_err(|e| format!("mkdir indices: {e}"))?;
     let meta = nwt_dir.join("metadata.json");
     if !meta.exists() {
         std::fs::write(&meta, b"{\"placeholder\":true}\n")
@@ -61,12 +60,7 @@ fn init_nwt_fs(root: &std::path::Path) -> Result<String, String> {
 fn redact_secrets(line: &str) -> String {
     let mut out = line.to_string();
 
-    fn replace_token(
-        s: &str,
-        prefix: &str,
-        replacement: &str,
-        include_prefix: bool,
-    ) -> String {
+    fn replace_token(s: &str, prefix: &str, replacement: &str, include_prefix: bool) -> String {
         let mut out = String::with_capacity(s.len());
         let bytes = s.as_bytes();
         let prefix_bytes = prefix.as_bytes();
@@ -77,9 +71,7 @@ fn redact_secrets(line: &str) -> String {
                 let after_start = i + plen;
                 let mut j = after_start;
                 while j < bytes.len()
-                    && (bytes[j].is_ascii_alphanumeric()
-                        || bytes[j] == b'_'
-                        || bytes[j] == b'-')
+                    && (bytes[j].is_ascii_alphanumeric() || bytes[j] == b'_' || bytes[j] == b'-')
                 {
                     j += 1;
                 }
@@ -112,9 +104,7 @@ fn redact_secrets(line: &str) -> String {
             if &bytes[i..i + plen] == prefix_bytes {
                 let mut j = i + plen;
                 while j < bytes.len()
-                    && (bytes[j].is_ascii_alphanumeric()
-                        || bytes[j] == b'_'
-                        || bytes[j] == b'-')
+                    && (bytes[j].is_ascii_alphanumeric() || bytes[j] == b'_' || bytes[j] == b'-')
                 {
                     j += 1;
                 }
@@ -188,8 +178,11 @@ fn redact_secrets(line: &str) -> String {
             while v < bytes.len() {
                 let b = bytes[v];
                 if b.is_ascii_whitespace()
-                    || b == b',' || b == b'}' || b == b']'
-                    || b == b'"' || b == b'\''
+                    || b == b','
+                    || b == b'}'
+                    || b == b']'
+                    || b == b'"'
+                    || b == b'\''
                 {
                     break;
                 }
@@ -211,7 +204,10 @@ fn redact_secrets(line: &str) -> String {
 
 fn unix_secs_to_iso8601(t: std::time::SystemTime) -> String {
     use std::time::UNIX_EPOCH;
-    let secs = t.duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let secs = t
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
     let (year, month, day) = civil_from_days((secs / 86_400) as i64);
     let time_of_day = (secs % 86_400) as u32;
     let hour = time_of_day / 3600;
@@ -293,14 +289,17 @@ fn e2e_medium_workdir_roundtrip() {
     std::fs::write(
         &wd_file,
         serde_json::to_vec_pretty(&serde_json::json!({"workdir": workdir})).unwrap(),
-    ).unwrap();
+    )
+    .unwrap();
 
     let raw = std::fs::read_to_string(&wd_file).unwrap();
     let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
     assert_eq!(v["workdir"].as_str().unwrap(), workdir);
 
     let nwt_path = init_nwt_fs(tmp.path()).unwrap();
-    assert!(std::path::Path::new(&nwt_path).join("metadata.json").exists());
+    assert!(std::path::Path::new(&nwt_path)
+        .join("metadata.json")
+        .exists());
 }
 
 #[test]
@@ -331,7 +330,8 @@ fn e2e_hard_six_events_in_timeline() {
         std::fs::write(
             timeline.join(format!("{id}.json")),
             serde_json::to_vec_pretty(&event).unwrap(),
-        ).unwrap();
+        )
+        .unwrap();
     }
 
     let new_id = "000006";
@@ -344,9 +344,11 @@ fn e2e_hard_six_events_in_timeline() {
     std::fs::write(
         timeline.join(format!("{new_id}.json")),
         serde_json::to_vec_pretty(&event).unwrap(),
-    ).unwrap();
+    )
+    .unwrap();
 
-    let entries: Vec<_> = std::fs::read_dir(&timeline).unwrap()
+    let entries: Vec<_> = std::fs::read_dir(&timeline)
+        .unwrap()
         .filter_map(|e| e.ok())
         .collect();
     assert_eq!(entries.len(), 6);
@@ -372,19 +374,28 @@ fn e2e_hard_max_id_scan() {
         std::fs::write(
             timeline.join(format!("{id}.json")),
             serde_json::to_vec_pretty(&event).unwrap(),
-        ).unwrap();
+        )
+        .unwrap();
     }
 
     let mut max = 0;
     for entry in std::fs::read_dir(&timeline).unwrap().flatten() {
         let name = entry.file_name();
         let Some(name) = name.to_str() else { continue };
-        if !name.ends_with(".json") { continue; }
+        if !name.ends_with(".json") {
+            continue;
+        }
         let stem = &name[..name.len() - 5];
-        if stem.len() != 6 { continue; }
-        if !stem.bytes().all(|b| b.is_ascii_digit()) { continue; }
+        if stem.len() != 6 {
+            continue;
+        }
+        if !stem.bytes().all(|b| b.is_ascii_digit()) {
+            continue;
+        }
         let n: u32 = stem.parse().unwrap();
-        if n > max { max = n; }
+        if n > max {
+            max = n;
+        }
     }
     assert_eq!(max, 42, "should find 000042 as max");
 }
@@ -432,7 +443,10 @@ fn e2e_boundary_search_log_special_chars() {
     for needle in needles {
         let matches = log_line.contains(needle);
         if needle == "\n" {
-            assert!(!matches, "newline needle must not match log line: {needle:?}");
+            assert!(
+                !matches,
+                "newline needle must not match log line: {needle:?}"
+            );
         } else {
             assert!(matches, "needle {needle:?} should match log line");
         }
@@ -479,8 +493,10 @@ fn e2e_boundary_search_log_unicode_needle() {
 fn e2e_boundary_redact_bearer_token() {
     let line = "2026-06-27 ERROR GET /v1/chat 401 Authorization: Bearer sk-supersecret123";
     let r = redact_secrets(line);
-    assert!(!r.contains("sk-supersecret123"),
-        "bearer token must be redacted, got: {r}");
+    assert!(
+        !r.contains("sk-supersecret123"),
+        "bearer token must be redacted, got: {r}"
+    );
     assert!(r.contains("Bearer <redacted>"));
 }
 
@@ -488,8 +504,10 @@ fn e2e_boundary_redact_bearer_token() {
 fn e2e_boundary_redact_sk_prefix() {
     let line = "loaded OPENAI_API_KEY=sk-abc123def456ghi789jkl012mno";
     let r = redact_secrets(line);
-    assert!(!r.contains("sk-abc123def456ghi789jkl012mno"),
-        "sk- prefix must be redacted, got: {r}");
+    assert!(
+        !r.contains("sk-abc123def456ghi789jkl012mno"),
+        "sk- prefix must be redacted, got: {r}"
+    );
     assert!(r.contains("sk-<redacted>"));
 }
 
@@ -499,11 +517,15 @@ fn e2e_boundary_redact_env_api_key() {
     let r = redact_secrets(line);
     // The KEY= pattern should redact the value. After redaction
     // the raw sk-abc value must not appear.
-    assert!(!r.contains("sk-abc123def456"),
-        "env API key value must be redacted, got: {r}");
+    assert!(
+        !r.contains("sk-abc123def456"),
+        "env API key value must be redacted, got: {r}"
+    );
     // And the prefix should remain redacted too (Pattern 2).
-    assert!(!r.contains("sk-ant-xyz"),
-        "anthropic key must be redacted, got: {r}");
+    assert!(
+        !r.contains("sk-ant-xyz"),
+        "anthropic key must be redacted, got: {r}"
+    );
 }
 
 #[test]
@@ -517,8 +539,10 @@ fn e2e_boundary_redact_preserves_non_secrets() {
 fn e2e_boundary_redact_stripe_style() {
     let line = "stripe key: sk_live_abcdef1234567890XYZ";
     let r = redact_secrets(line);
-    assert!(!r.contains("abcdef1234567890XYZ"),
-        "stripe live key body must be redacted, got: {r}");
+    assert!(
+        !r.contains("abcdef1234567890XYZ"),
+        "stripe live key body must be redacted, got: {r}"
+    );
     assert!(r.contains("sk_live_<redacted>"));
 }
 
@@ -526,10 +550,14 @@ fn e2e_boundary_redact_stripe_style() {
 fn e2e_boundary_redact_password_kv() {
     let line = "DB_PASSWORD=hunter2 REDIS_PASSWORD=secret123";
     let r = redact_secrets(line);
-    assert!(!r.contains("hunter2"),
-        "DB_PASSWORD value must be redacted, got: {r}");
-    assert!(!r.contains("secret123"),
-        "REDIS_PASSWORD value must be redacted, got: {r}");
+    assert!(
+        !r.contains("hunter2"),
+        "DB_PASSWORD value must be redacted, got: {r}"
+    );
+    assert!(
+        !r.contains("secret123"),
+        "REDIS_PASSWORD value must be redacted, got: {r}"
+    );
 }
 
 #[test]
@@ -540,21 +568,29 @@ fn e2e_boundary_search_log_panic_files_excluded() {
     std::fs::write(
         log_dir.join("flowntier.log.2026-06-27"),
         "FE-needle in real log\n",
-    ).unwrap();
+    )
+    .unwrap();
     std::fs::write(
         log_dir.join("panic-20260627-120000.log"),
         "FE-needle in panic dump\n",
-    ).unwrap();
+    )
+    .unwrap();
 
     let mut found = 0;
     for entry in std::fs::read_dir(&log_dir).unwrap().flatten() {
         let name = entry.file_name();
         let Some(name) = name.to_str() else { continue };
-        if !name.starts_with("flowntier.log") { continue; }
-        if name.starts_with("panic-") { continue; }
+        if !name.starts_with("flowntier.log") {
+            continue;
+        }
+        if name.starts_with("panic-") {
+            continue;
+        }
         let text = std::fs::read_to_string(entry.path()).unwrap();
         for line in text.lines() {
-            if line.contains("FE-needle") { found += 1; }
+            if line.contains("FE-needle") {
+                found += 1;
+            }
         }
     }
     assert_eq!(found, 1, "should only match real log, not panic dump");
@@ -572,8 +608,10 @@ fn e2e_boundary_metadata_json_written_once() {
     std::fs::write(&meta, "{\"placeholder\":false,\"manual_edit\":true}\n").unwrap();
     init_nwt_fs(tmp.path()).unwrap();
     let after = std::fs::read_to_string(&meta).unwrap();
-    assert_eq!(after, "{\"placeholder\":false,\"manual_edit\":true}\n",
-        "second init must not overwrite existing metadata.json");
+    assert_eq!(
+        after, "{\"placeholder\":false,\"manual_edit\":true}\n",
+        "second init must not overwrite existing metadata.json"
+    );
 }
 
 #[test]
@@ -589,8 +627,10 @@ fn e2e_boundary_nested_nwt_in_nwt() {
     assert!(nwt.join("timeline").is_dir());
     assert!(nwt.join("indices").is_dir());
     // And it should NOT have created .nwt/.nwt/
-    assert!(!project.join(".nwt").join(".nwt").exists(),
-        "must not create nested .nwt/.nwt/");
+    assert!(
+        !project.join(".nwt").join(".nwt").exists(),
+        "must not create nested .nwt/.nwt/"
+    );
 }
 
 // ── BUG-016: set_workdir + nwt_init atomicity ───────────
@@ -602,7 +642,10 @@ fn set_workdir_with_nwt(
     workdir_path: &std::path::Path,
 ) -> Result<String, String> {
     if !workdir_path.exists() {
-        return Err(format!("workdir does not exist: {}", workdir_path.display()));
+        return Err(format!(
+            "workdir does not exist: {}",
+            workdir_path.display()
+        ));
     }
     if !workdir_path.is_dir() {
         return Err(format!(
@@ -613,8 +656,7 @@ fn set_workdir_with_nwt(
     let nwt_dir = workdir_path.join(".nwt");
     std::fs::create_dir_all(nwt_dir.join("timeline"))
         .map_err(|e| format!("mkdir timeline: {e}"))?;
-    std::fs::create_dir_all(nwt_dir.join("indices"))
-        .map_err(|e| format!("mkdir indices: {e}"))?;
+    std::fs::create_dir_all(nwt_dir.join("indices")).map_err(|e| format!("mkdir indices: {e}"))?;
     let meta = nwt_dir.join("metadata.json");
     if !meta.exists() {
         let project_name = workdir_path
@@ -627,31 +669,25 @@ fn set_workdir_with_nwt(
             "schema_version": 1,
             "format": "nwt/0.1",
         });
-        let bytes = serde_json::to_vec_pretty(&payload)
-            .map_err(|e| format!("serialize: {e}"))?;
-        std::fs::write(&meta, bytes)
-            .map_err(|e| format!("write metadata: {e}"))?;
+        let bytes = serde_json::to_vec_pretty(&payload).map_err(|e| format!("serialize: {e}"))?;
+        std::fs::write(&meta, bytes).map_err(|e| format!("write metadata: {e}"))?;
     }
     let tags_idx = nwt_dir.join("indices").join("tags.json");
     if !tags_idx.exists() {
-        std::fs::write(&tags_idx, b"{}\n")
-            .map_err(|e| format!("write tags: {e}"))?;
+        std::fs::write(&tags_idx, b"{}\n").map_err(|e| format!("write tags: {e}"))?;
     }
     let files_idx = nwt_dir.join("indices").join("files.json");
     if !files_idx.exists() {
-        std::fs::write(&files_idx, b"{}\n")
-            .map_err(|e| format!("write files: {e}"))?;
+        std::fs::write(&files_idx, b"{}\n").map_err(|e| format!("write files: {e}"))?;
     }
     // Only NOW persist workdir.json (atomic via tmp+rename).
     let wd_file = data_dir.join("workdir.json");
     let payload = serde_json::json!({ "workdir": workdir_path.to_string_lossy() });
-    let bytes = serde_json::to_vec_pretty(&payload)
-        .map_err(|e| format!("serialize workdir: {e}"))?;
+    let bytes =
+        serde_json::to_vec_pretty(&payload).map_err(|e| format!("serialize workdir: {e}"))?;
     let tmp = wd_file.with_extension("json.tmp");
-    std::fs::write(&tmp, &bytes)
-        .map_err(|e| format!("write tmp: {e}"))?;
-    std::fs::rename(&tmp, &wd_file)
-        .map_err(|e| format!("rename: {e}"))?;
+    std::fs::write(&tmp, &bytes).map_err(|e| format!("write tmp: {e}"))?;
+    std::fs::rename(&tmp, &wd_file).map_err(|e| format!("rename: {e}"))?;
     Ok(nwt_dir.to_string_lossy().into_owned())
 }
 
@@ -666,7 +702,9 @@ fn e2e_hard_atomic_success() {
 
     let nwt = set_workdir_with_nwt(&data_dir, &project).expect("should succeed");
     assert!(std::path::Path::new(&nwt).join("metadata.json").exists());
-    assert!(std::path::Path::new(&data_dir).join("workdir.json").exists());
+    assert!(std::path::Path::new(&data_dir)
+        .join("workdir.json")
+        .exists());
 }
 
 #[test]
@@ -679,8 +717,12 @@ fn e2e_hard_atomic_rejects_nonexistent_workdir() {
 
     let result = set_workdir_with_nwt(&data_dir, &project);
     assert!(result.is_err());
-    assert!(!std::path::Path::new(&data_dir).join("workdir.json").exists(),
-        "workdir.json must NOT be written when validation fails");
+    assert!(
+        !std::path::Path::new(&data_dir)
+            .join("workdir.json")
+            .exists(),
+        "workdir.json must NOT be written when validation fails"
+    );
 }
 
 #[test]
@@ -694,10 +736,16 @@ fn e2e_hard_atomic_rejects_file_as_workdir() {
 
     let result = set_workdir_with_nwt(&data_dir, &project_file);
     assert!(result.is_err());
-    assert!(!std::path::Path::new(&data_dir).join("workdir.json").exists(),
-        "workdir.json must NOT be written when path is a file");
-    assert!(!project_file.with_extension("docx.nwt").exists(),
-        "no .nwt/ should be created next to a file path");
+    assert!(
+        !std::path::Path::new(&data_dir)
+            .join("workdir.json")
+            .exists(),
+        "workdir.json must NOT be written when path is a file"
+    );
+    assert!(
+        !project_file.with_extension("docx.nwt").exists(),
+        "no .nwt/ should be created next to a file path"
+    );
 }
 
 #[test]
@@ -710,26 +758,27 @@ fn e2e_hard_atomic_idempotent() {
     std::fs::create_dir_all(&data_dir).unwrap();
 
     set_workdir_with_nwt(&data_dir, &project).unwrap();
-    let meta_first = std::fs::read_to_string(
-        project.join(".nwt").join("metadata.json")
-    ).unwrap();
+    let meta_first = std::fs::read_to_string(project.join(".nwt").join("metadata.json")).unwrap();
 
     // Manual edit to metadata.json (e.g. user changed project_name)
     std::fs::write(
         project.join(".nwt").join("metadata.json"),
-        r#"{"project_name":"edited","custom_field":true}"#
-    ).unwrap();
+        r#"{"project_name":"edited","custom_field":true}"#,
+    )
+    .unwrap();
 
     // Second call must not overwrite the manual edit.
     set_workdir_with_nwt(&data_dir, &project).unwrap();
-    let meta_second = std::fs::read_to_string(
-        project.join(".nwt").join("metadata.json")
-    ).unwrap();
-    assert_eq!(meta_second, r#"{"project_name":"edited","custom_field":true}"#,
-        "second init must not overwrite manual metadata edit");
+    let meta_second = std::fs::read_to_string(project.join(".nwt").join("metadata.json")).unwrap();
+    assert_eq!(
+        meta_second, r#"{"project_name":"edited","custom_field":true}"#,
+        "second init must not overwrite manual metadata edit"
+    );
     // And first init's content is no longer present.
-    assert!(!meta_second.contains("flowntier-project"),
-        "second init must not reset project_name to default");
+    assert!(
+        !meta_second.contains("flowntier-project"),
+        "second init must not reset project_name to default"
+    );
     // Suppress unused warning
     let _ = meta_first;
 }
@@ -756,8 +805,12 @@ fn search_log_streaming(
         .filter_map(|e| {
             let p = e.path();
             let name = p.file_name()?.to_str()?;
-            if !name.starts_with("flowntier.log") { return None; }
-            if name.starts_with("panic-") { return None; }
+            if !name.starts_with("flowntier.log") {
+                return None;
+            }
+            if name.starts_with("panic-") {
+                return None;
+            }
             let meta = e.metadata().ok()?;
             Some((p, meta.len()))
         })
@@ -771,7 +824,9 @@ fn search_log_streaming(
             truncated = true;
             continue;
         }
-        let Ok(file) = std::fs::File::open(&path) else { continue };
+        let Ok(file) = std::fs::File::open(&path) else {
+            continue;
+        };
         let mut reader = std::io::BufReader::with_capacity(64 * 1024, file);
         let mut bytes_read: u64 = 0;
         let mut line = String::new();
@@ -787,7 +842,7 @@ fn search_log_streaming(
                 truncated = true;
                 break;
             }
-            let trimmed = line.trim_end_matches(|c| c == '\n' || c == '\r');
+            let trimmed = line.trim_end_matches(['\n', '\r']);
             let line_for_match = if trimmed.len() > max_line_bytes {
                 let mut s = String::with_capacity(max_line_bytes + 16);
                 s.push_str(&trimmed[..max_line_bytes]);
@@ -853,8 +908,8 @@ fn e2e_hard_streaming_skips_oversize_file() {
 
     let (matches, _scanned, truncated) = search_log_streaming(
         &log_dir,
-        "FE-needle",  // not in content
-        512 * 1024,    // 512 KiB cap (smaller than the file)
+        "FE-needle", // not in content
+        512 * 1024,  // 512 KiB cap (smaller than the file)
         8 * 1024,
     );
     assert!(truncated, "oversize file must flag truncated");
@@ -895,12 +950,8 @@ fn e2e_hard_streaming_empty_log_dir_returns_empty() {
     std::fs::create_dir_all(&log_dir).unwrap();
     // (empty — no files yet)
 
-    let (matches, scanned, truncated) = search_log_streaming(
-        &log_dir,
-        "FE-needle",
-        64 * 1024 * 1024,
-        8 * 1024,
-    );
+    let (matches, scanned, truncated) =
+        search_log_streaming(&log_dir, "FE-needle", 64 * 1024 * 1024, 8 * 1024);
     assert_eq!(matches.len(), 0);
     assert_eq!(scanned, 0);
     assert!(!truncated);
@@ -921,12 +972,8 @@ fn e2e_hard_streaming_concurrent_safe_count() {
     content.push_str("2026-06-27 ERROR FE-only-match\n");
     std::fs::write(&log_path, &content).unwrap();
 
-    let (matches, scanned, _truncated) = search_log_streaming(
-        &log_dir,
-        "FE-only-match",
-        64 * 1024 * 1024,
-        8 * 1024,
-    );
+    let (matches, scanned, _truncated) =
+        search_log_streaming(&log_dir, "FE-only-match", 64 * 1024 * 1024, 8 * 1024);
     assert_eq!(matches.len(), 1);
     assert_eq!(scanned, 1001, "should have counted all 1001 lines");
 }
@@ -943,24 +990,22 @@ fn e2e_boundary_search_log_includes_panic_when_opted_in() {
     std::fs::write(
         log_dir.join("flowntier.log.2026-06-27"),
         "FE-needle in real log\n",
-    ).unwrap();
+    )
+    .unwrap();
     std::fs::write(
         log_dir.join("panic-20260627-120000.log"),
         "FE-needle in panic dump\n",
-    ).unwrap();
+    )
+    .unwrap();
 
     // Default: panic excluded.
-    let (matches, _, _) = search_log_streaming(
-        &log_dir,
-        "FE-needle",
-        64 * 1024 * 1024,
-        8 * 1024,
-    );
+    let (matches, _, _) = search_log_streaming(&log_dir, "FE-needle", 64 * 1024 * 1024, 8 * 1024);
     assert_eq!(matches.len(), 1, "default excludes panic");
 
     // Opt-in: include panic.
     // We simulate the opt-in path by listing both kinds.
-    let all_files: Vec<_> = std::fs::read_dir(&log_dir).unwrap()
+    let all_files: Vec<_> = std::fs::read_dir(&log_dir)
+        .unwrap()
         .filter_map(|e| e.ok())
         .collect();
     let mut both_matches = Vec::new();
@@ -1017,7 +1062,6 @@ fn e2e_workdir_metadata_payload(project_name: &str) -> serde_json::Value {
 }
 
 #[test]
-#[test]
 fn e2e_boundary_metadata_schema_consistent_created_at() {
     // BUG-052 fix (event 000023): metadata.json now uses
     // `"created_at"` key across all implementations.
@@ -1030,13 +1074,15 @@ fn e2e_boundary_metadata_schema_consistent_created_at() {
     let payload = e2e_workdir_metadata_payload("my-project");
     let meta_path = project.join(".nwt").join("metadata.json");
     std::fs::create_dir_all(meta_path.parent().unwrap()).unwrap();
-    std::fs::write(&meta_path,
-        serde_json::to_vec_pretty(&payload).unwrap()).unwrap();
+    std::fs::write(&meta_path, serde_json::to_vec_pretty(&payload).unwrap()).unwrap();
 
     let raw = std::fs::read_to_string(&meta_path).unwrap();
     let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
     assert_eq!(v["project_name"].as_str().unwrap(), "my-project");
-    assert!(v["created_at"].is_string(), "created_at key required (BUG-052)");
+    assert!(
+        v["created_at"].is_string(),
+        "created_at key required (BUG-052)"
+    );
     assert_eq!(v["schema_version"].as_i64().unwrap(), 1);
 }
 
@@ -1045,7 +1091,10 @@ fn e2e_boundary_metadata_schema_consistent_created_at() {
 /// without a live runtime, but the file-format invariant is what
 /// matters: pipe-server reads this file to discover the agent's
 /// NWT root.
-fn write_nwt_root_sentinel(data_dir: &std::path::Path, nwt_dir: &std::path::Path) -> std::io::Result<()> {
+fn write_nwt_root_sentinel(
+    data_dir: &std::path::Path,
+    nwt_dir: &std::path::Path,
+) -> std::io::Result<()> {
     use std::io::Write;
     let payload = serde_json::json!({
         "nwt_root": nwt_dir.to_string_lossy(),

@@ -16,8 +16,8 @@
  * which is wired in Phase 1.4 of the v0.4-delivery plan.
  */
 
-import { check, type Update } from '@tauri-apps/plugin-updater';
-import { ask, message } from '@tauri-apps/plugin-dialog';
+import { check, type Update } from "@tauri-apps/plugin-updater";
+import { ask, message } from "@tauri-apps/plugin-dialog";
 
 export interface UpdateBanner {
   /** Update is available, version strictly greater than current. */
@@ -52,7 +52,7 @@ export async function checkForUpdate(): Promise<UpdateBanner> {
   } catch (err) {
     // Most common: no network, GitHub rate-limited, signature
     // mismatch. Log and let the UI show "could not check".
-    console.warn('[flowntier] update check failed:', err);
+    console.warn("[flowntier] update check failed:", err);
     return { available: false, error: true };
   }
 }
@@ -66,10 +66,10 @@ export async function installUpdate(update: Update): Promise<void> {
   const yes = await ask(
     `Flowntier ${update.version} is ready to install. The app will restart.\n\nProceed?`,
     {
-      title: 'Update available',
-      kind: 'info',
-      okLabel: 'Install and restart',
-      cancelLabel: 'Later',
+      title: "Update available",
+      kind: "info",
+      okLabel: "Install and restart",
+      cancelLabel: "Later",
     },
   );
   if (!yes) return;
@@ -81,7 +81,7 @@ export async function installUpdate(update: Update): Promise<void> {
   } catch (err) {
     await message(
       `Update failed to install: ${String(err)}\n\nPlease download manually from GitHub Releases.`,
-      { title: 'Update failed', kind: 'error' },
+      { title: "Update failed", kind: "error" },
     );
     throw err;
   }

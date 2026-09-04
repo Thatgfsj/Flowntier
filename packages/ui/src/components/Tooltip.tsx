@@ -27,7 +27,7 @@ export function Tooltip({
   children,
   content,
   side = 'right',
-  delayMs = 200,
+  delayMs = 500,
   className,
 }: TooltipProps) {
   return (

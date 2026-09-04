@@ -44,7 +44,7 @@ use std::sync::Arc;
 
 use agent_core::AgentEvent;
 use serde_json::Value;
-use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
+use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::broadcast;
 use tracing::{error, info, warn};
@@ -247,10 +247,12 @@ async fn serve_http_connection(
                 return write_401(&mut stream, "FLOWNTIER_HTTP_BRIDGE_TOKEN not configured").await;
             }
             Some(token) => {
-                let auth = headers.get("authorization")
+                let auth = headers
+                    .get("authorization")
                     .map(|s| s.as_str())
                     .unwrap_or("");
-                let supplied = auth.strip_prefix("Bearer ")
+                let supplied = auth
+                    .strip_prefix("Bearer ")
                     .or_else(|| auth.strip_prefix("bearer "))
                     .unwrap_or("");
                 if !ct_eq(supplied.as_bytes(), token.as_bytes()) {
@@ -425,20 +427,12 @@ async fn write_cors_preflight(w: &mut TcpStream) -> std::io::Result<()> {
     w.flush().await
 }
 
-async fn write_json(
-    w: &mut TcpStream,
-    status: u16,
-    body: &Value,
-) -> std::io::Result<()> {
+async fn write_json(w: &mut TcpStream, status: u16, body: &Value) -> std::io::Result<()> {
     let bytes = serde_json::to_vec(body).unwrap_or_else(|_| b"{}".to_vec());
     write_json_bytes(w, status, &bytes).await
 }
 
-async fn write_json_bytes(
-    w: &mut TcpStream,
-    status: u16,
-    body: &[u8],
-) -> std::io::Result<()> {
+async fn write_json_bytes(w: &mut TcpStream, status: u16, body: &[u8]) -> std::io::Result<()> {
     let reason = match status {
         200 => "OK",
         204 => "No Content",
@@ -457,7 +451,10 @@ async fn write_json_bytes(
         body.len(),
     );
     let full = [header.as_bytes(), body].concat();
-    eprintln!("[bridge] write_json_bytes async write_all ({} bytes)", full.len());
+    eprintln!(
+        "[bridge] write_json_bytes async write_all ({} bytes)",
+        full.len()
+    );
     w.write_all(&full).await?;
     eprintln!("[bridge] write_json_bytes async write returned");
     // Force the kernel to flush + send FIN so the client
@@ -475,8 +472,7 @@ async fn write_json_bytes(
 /// Resolve the bind address from env. Lets chairman override for
 /// tests / multi-instance.
 pub fn bind_from_env() -> String {
-    std::env::var("FLOWNTIER_HTTP_BRIDGE")
-        .unwrap_or_else(|_| DEFAULT_BIND.to_string())
+    std::env::var("FLOWNTIER_HTTP_BRIDGE").unwrap_or_else(|_| DEFAULT_BIND.to_string())
 }
 
 /// v0.4.22 (event 000091 fix #34): shared-secret auth for the
@@ -511,5 +507,6 @@ fn ct_eq(a: &[u8], b: &[u8]) -> bool {
 /// Quick reachability check used by e2e tests: parse "host:port"
 /// and return both halves. Invalid → loopback default.
 pub fn parse_bind(s: &str) -> SocketAddr {
-    s.parse().unwrap_or_else(|_| "127.0.0.1:8765".parse().unwrap())
+    s.parse()
+        .unwrap_or_else(|_| "127.0.0.1:8765".parse().unwrap())
 }

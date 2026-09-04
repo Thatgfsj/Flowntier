@@ -20,9 +20,9 @@
  * later) but they can't skip step 3 (that's the "I accept the
  * app is open for real" button).
  */
-import { useEffect, useState } from 'react';
-import { useTranslation } from 'react-i18next';
-import { invoke } from '@tauri-apps/api/core';
+import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { invoke } from "@tauri-apps/api/core";
 
 interface WelcomeProps {
   onComplete: () => void;
@@ -52,9 +52,9 @@ export function Welcome({ onComplete }: WelcomeProps) {
     let cancelled = false;
     void (async () => {
       try {
-        const resp = await invoke<{ providers: Array<{ id: string; display_name: string; has_secret: boolean }> }>(
-          'list_providers',
-        );
+        const resp = await invoke<{
+          providers: Array<{ id: string; display_name: string; has_secret: boolean }>;
+        }>("list_providers");
         if (!cancelled) {
           setProviders(resp.providers);
           const anyHasKey = resp.providers.some((p) => p.has_secret);
@@ -64,7 +64,7 @@ export function Welcome({ onComplete }: WelcomeProps) {
           }
         }
       } catch (e) {
-        console.warn('[Welcome] list_providers failed:', e);
+        console.warn("[Welcome] list_providers failed:", e);
       }
     })();
     return () => {
@@ -78,10 +78,10 @@ export function Welcome({ onComplete }: WelcomeProps) {
     let cancelled = false;
     void (async () => {
       try {
-        const wf = await invoke<SampleWorkflow>('load_sample_workflow');
+        const wf = await invoke<SampleWorkflow>("load_sample_workflow");
         if (!cancelled) setSample(wf);
       } catch (e) {
-        console.warn('[Welcome] load_sample_workflow failed:', e);
+        console.warn("[Welcome] load_sample_workflow failed:", e);
       }
     })();
     return () => {
@@ -94,7 +94,7 @@ export function Welcome({ onComplete }: WelcomeProps) {
     setSubmitting(true);
     setSubmitErr(null);
     try {
-      const resp = await invoke<{ id: string }>('start_workflow', {
+      const resp = await invoke<{ id: string }>("start_workflow", {
         request: { text: sample.user_request },
       });
       setSubmitOk(resp.id);
@@ -107,9 +107,9 @@ export function Welcome({ onComplete }: WelcomeProps) {
 
   const finish = async () => {
     try {
-      await invoke('first_run_complete');
+      await invoke("first_run_complete");
     } catch (e) {
-      console.warn('[Welcome] first_run_complete failed:', e);
+      console.warn("[Welcome] first_run_complete failed:", e);
     }
     onComplete();
   };
@@ -121,11 +121,11 @@ export function Welcome({ onComplete }: WelcomeProps) {
           finishing the in-between steps. Useful for power users who
           already know what they're doing. */}
       <div className="mb-8 flex w-full max-w-2xl items-center gap-2">
-        <ProgressDot active={step >= 1} label={t('welcome.progress.providers')} />
+        <ProgressDot active={step >= 1} label={t("welcome.progress.providers")} />
         <Connector />
-        <ProgressDot active={step >= 2} label={t('welcome.progress.sample')} />
+        <ProgressDot active={step >= 2} label={t("welcome.progress.sample")} />
         <Connector />
-        <ProgressDot active={step >= 3} label={t('welcome.progress.enter')} />
+        <ProgressDot active={step >= 3} label={t("welcome.progress.enter")} />
         <div className="flex-1" />
         {step < 3 && (
           <button
@@ -133,18 +133,14 @@ export function Welcome({ onComplete }: WelcomeProps) {
             onClick={() => setStep(3)}
             className="text-xs text-text-secondary underline hover:text-text-primary"
           >
-            {t('welcome.skipAll')}
+            {t("welcome.skipAll")}
           </button>
         )}
       </div>
 
       <div className="w-full max-w-2xl">
         {step === 1 && (
-          <Step1
-            providers={providers}
-            onSkip={() => setStep(2)}
-            onSaved={() => setStep(2)}
-          />
+          <Step1 providers={providers} onSkip={() => setStep(2)} onSaved={() => setStep(2)} />
         )}
         {step === 2 && (
           <Step2
@@ -173,20 +169,18 @@ function Step1(props: {
   const { t } = useTranslation();
   const noneSaved = props.providers.length > 0 && !props.providers.some((p) => p.has_secret);
   return (
-    <Card title={t('welcome.step1.title')} subtitle={t('welcome.step1.subtitle')}>
+    <Card title={t("welcome.step1.title")} subtitle={t("welcome.step1.subtitle")}>
       {props.providers.length === 0 ? (
-        <p className="text-sm text-text-secondary">{t('welcome.step1.providersEmpty')}</p>
+        <p className="text-sm text-text-secondary">{t("welcome.step1.providersEmpty")}</p>
       ) : noneSaved ? (
         <ProviderQuickAdd onSaved={props.onSaved} />
       ) : (
-        <p className="text-sm text-text-secondary">
-          {t('welcome.step1.anyConfigured')}
-        </p>
+        <p className="text-sm text-text-secondary">{t("welcome.step1.anyConfigured")}</p>
       )}
       <Footer
         onBack={undefined}
         onNext={props.onSkip}
-        nextLabel={t('welcome.step1.skipLabel')}
+        nextLabel={t("welcome.step1.skipLabel")}
         skipDisabled={props.providers.length === 0}
       />
     </Card>
@@ -197,14 +191,39 @@ function Step1(props: {
 // common presets; full list in Settings.tsx.
 function ProviderQuickAdd(props: { onSaved: () => void }) {
   const { t } = useTranslation();
-  const presets: Array<{ id: string; display_name: string; secret_name: string; base_url: string }> = [
-    { id: 'openai', display_name: 'OpenAI', secret_name: 'OPENAI_API_KEY', base_url: 'https://api.openai.com/v1' },
-    { id: 'anthropic', display_name: 'Anthropic', secret_name: 'ANTHROPIC_API_KEY', base_url: 'https://api.anthropic.com' },
-    { id: 'google', display_name: 'Google AI (Gemini)', secret_name: 'GOOGLE_API_KEY', base_url: 'https://generativelanguage.googleapis.com/v1beta/openai' },
-    { id: 'deepseek', display_name: 'DeepSeek', secret_name: 'DEEPSEEK_API_KEY', base_url: 'https://api.deepseek.com' },
+  const presets: Array<{
+    id: string;
+    display_name: string;
+    secret_name: string;
+    base_url: string;
+  }> = [
+    {
+      id: "openai",
+      display_name: "OpenAI",
+      secret_name: "OPENAI_API_KEY",
+      base_url: "https://api.openai.com/v1",
+    },
+    {
+      id: "anthropic",
+      display_name: "Anthropic",
+      secret_name: "ANTHROPIC_API_KEY",
+      base_url: "https://api.anthropic.com",
+    },
+    {
+      id: "google",
+      display_name: "Google AI (Gemini)",
+      secret_name: "GOOGLE_API_KEY",
+      base_url: "https://generativelanguage.googleapis.com/v1beta/openai",
+    },
+    {
+      id: "deepseek",
+      display_name: "DeepSeek",
+      secret_name: "DEEPSEEK_API_KEY",
+      base_url: "https://api.deepseek.com",
+    },
   ];
   const [picked, setPicked] = useState<(typeof presets)[number] | null>(null);
-  const [key, setKey] = useState('');
+  const [key, setKey] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -231,7 +250,7 @@ function ProviderQuickAdd(props: { onSaved: () => void }) {
     setBusy(true);
     setErr(null);
     try {
-      await invoke('save_secret', { name: picked.secret_name, value: key.trim() });
+      await invoke("save_secret", { name: picked.secret_name, value: key.trim() });
       props.onSaved();
     } catch (e) {
       setErr(String(e));
@@ -243,24 +262,24 @@ function ProviderQuickAdd(props: { onSaved: () => void }) {
   return (
     <div className="space-y-3">
       <div className="flex items-baseline gap-2 text-sm">
-        <span className="text-text-secondary">{t('welcome.providerQuickAdd.selected')}</span>
+        <span className="text-text-secondary">{t("welcome.providerQuickAdd.selected")}</span>
         <span className="font-medium text-text-primary">{picked.display_name}</span>
         <button
           type="button"
           onClick={() => {
             setPicked(null);
-            setKey('');
+            setKey("");
           }}
           className="text-xs text-text-secondary underline hover:text-text-primary"
         >
-          {t('welcome.providerQuickAdd.change')}
+          {t("welcome.providerQuickAdd.change")}
         </button>
       </div>
       <input
         type="password"
         value={key}
         onChange={(e) => setKey(e.target.value)}
-        placeholder={t('welcome.providerQuickAdd.pasteHere', { secretName: picked.secret_name })}
+        placeholder={t("welcome.providerQuickAdd.pasteHere", { secretName: picked.secret_name })}
         className="w-full rounded-md border border-border bg-surface-2 px-3 py-2 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-accent/50"
         autoFocus
       />
@@ -272,7 +291,9 @@ function ProviderQuickAdd(props: { onSaved: () => void }) {
           disabled={busy || !key.trim()}
           className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
         >
-          {busy ? t('welcome.providerQuickAdd.saving') : t('welcome.providerQuickAdd.saveAndContinue')}
+          {busy
+            ? t("welcome.providerQuickAdd.saving")
+            : t("welcome.providerQuickAdd.saveAndContinue")}
         </button>
       </div>
     </div>
@@ -292,9 +313,9 @@ function Step2(props: {
 }) {
   const { t } = useTranslation();
   return (
-    <Card title={t('welcome.step2.title')} subtitle={t('welcome.step2.subtitle')}>
+    <Card title={t("welcome.step2.title")} subtitle={t("welcome.step2.subtitle")}>
       {!props.sample ? (
-        <p className="text-sm text-text-secondary">{t('welcome.step2.loadingSample')}</p>
+        <p className="text-sm text-text-secondary">{t("welcome.step2.loadingSample")}</p>
       ) : (
         <>
           <div className="rounded-md border border-border bg-surface-2 p-3 text-sm">
@@ -304,7 +325,7 @@ function Step2(props: {
             </p>
             <details className="mt-3">
               <summary className="cursor-pointer text-xs text-text-secondary hover:text-text-primary">
-                {t('welcome.step2.viewTaskContent')}
+                {t("welcome.step2.viewTaskContent")}
               </summary>
               <pre className="mt-2 whitespace-pre-wrap text-xs text-text-secondary">
                 {props.sample.user_request}
@@ -313,12 +334,12 @@ function Step2(props: {
           </div>
           {props.submitOk && (
             <p className="mt-3 rounded-md border border-success bg-success/10 px-3 py-2 text-xs text-success">
-              {t('welcome.step2.submitted', { id: props.submitOk })}
+              {t("welcome.step2.submitted", { id: props.submitOk })}
             </p>
           )}
           {props.submitErr && (
             <p className="mt-3 rounded-md border border-error bg-error/10 px-3 py-2 text-xs text-error">
-              {t('welcome.step2.submitFailed', { error: props.submitErr })}
+              {t("welcome.step2.submitFailed", { error: props.submitErr })}
             </p>
           )}
         </>
@@ -326,10 +347,12 @@ function Step2(props: {
       <Footer
         onBack={props.onBack}
         onNext={props.onSubmit}
-        nextLabel={props.submitting ? t('welcome.step2.submitting') : t('welcome.step2.submitLabel')}
+        nextLabel={
+          props.submitting ? t("welcome.step2.submitting") : t("welcome.step2.submitLabel")
+        }
         nextDisabled={props.submitting || !!props.submitOk}
         onSkip={props.onSkip}
-        skipLabel={t('welcome.step2.skipLabel')}
+        skipLabel={t("welcome.step2.skipLabel")}
       />
     </Card>
   );
@@ -340,16 +363,16 @@ function Step2(props: {
 function Step3(props: { onEnter: () => void; onBack: () => void }) {
   const { t } = useTranslation();
   return (
-    <Card title={t('welcome.step3.title')} subtitle={t('welcome.step3.subtitle')}>
+    <Card title={t("welcome.step3.title")} subtitle={t("welcome.step3.subtitle")}>
       <ul className="space-y-2 text-sm text-text-primary">
-        <li>{t('welcome.step3.hint1')}</li>
-        <li>{t('welcome.step3.hint2')}</li>
-        <li>{t('welcome.step3.hint3')}</li>
+        <li>{t("welcome.step3.hint1")}</li>
+        <li>{t("welcome.step3.hint2")}</li>
+        <li>{t("welcome.step3.hint3")}</li>
       </ul>
       <Footer
         onBack={props.onBack}
         onNext={props.onEnter}
-        nextLabel={t('welcome.step3.confirmLabel')}
+        nextLabel={t("welcome.step3.confirmLabel")}
       />
     </Card>
   );
@@ -361,9 +384,7 @@ function Card(props: { title: string; subtitle?: string; children: React.ReactNo
   return (
     <div className="flt-anim-in rounded-lg border border-border bg-surface-1 p-6 shadow-sm">
       <h2 className="text-xl font-semibold text-text-primary">{props.title}</h2>
-      {props.subtitle && (
-        <p className="mt-1 text-sm text-text-secondary">{props.subtitle}</p>
-      )}
+      {props.subtitle && <p className="mt-1 text-sm text-text-secondary">{props.subtitle}</p>}
       <div className="mt-5">{props.children}</div>
     </div>
   );
@@ -384,10 +405,10 @@ function ProgressDot(props: { active: boolean; label: string }) {
         // was invisible. Use `bg-chief` (the brand color, well
         // defined) instead.
         className={`h-3 w-3 rounded-full transition-colors ${
-          props.active ? 'bg-chief flt-anim-pulse' : 'bg-border'
+          props.active ? "bg-chief flt-anim-pulse" : "bg-border"
         }`}
       />
-      <span className={`text-xs ${props.active ? 'text-text-primary' : 'text-text-secondary'}`}>
+      <span className={`text-xs ${props.active ? "text-text-primary" : "text-text-secondary"}`}>
         {props.label}
       </span>
     </div>
@@ -416,7 +437,7 @@ function Footer(props: {
           onClick={props.onBack}
           className="text-sm text-text-secondary hover:text-text-primary"
         >
-          {t('welcome.footer.back')}
+          {t("welcome.footer.back")}
         </button>
       ) : (
         <span />
@@ -429,7 +450,7 @@ function Footer(props: {
             disabled={props.skipDisabled}
             className="text-sm text-text-secondary hover:text-text-primary disabled:opacity-50"
           >
-            {props.skipLabel ?? t('welcome.footer.skip')}
+            {props.skipLabel ?? t("welcome.footer.skip")}
           </button>
         )}
         <button
