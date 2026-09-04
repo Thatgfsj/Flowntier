@@ -65,6 +65,9 @@ jobs:
   build-runtime:
     name: sidecar (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
     strategy:
       fail-fast: false
       matrix:
@@ -123,6 +126,9 @@ jobs:
     name: desktop (${{ matrix.os }})
     needs: build-runtime
     runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
     strategy:
       fail-fast: false
       matrix:
@@ -184,7 +190,7 @@ jobs:
       - name: Verify sidecar present
         run: |
           ls -la apps/desktop/src-tauri/binaries/
-          test -n "$(ls apps/desktop/src-tauri/binaries/flowntier-runtime-* 2>/dev/null)" \
+          test -n "$(ls apps/desktop/src-tauri/binaries/flowntier_runtime-* 2>/dev/null)" \
             || (echo "::error::Sidecar missing"; exit 1)
 
       - name: Install JS deps
@@ -197,16 +203,11 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          # Don't let tauri-action create its own release — the
-          # publish-release job below controls that.
+          projectPath: apps/desktop
           releaseDraft: true
           prerelease: false
-          tagName: ${{ github.ref_name }}
-          releaseName: 'Flowntier ${{ github.ref_name }}'
-          # Use the matrix target so each runner only builds for its
-          # own arch; the matrix.os × matrix.target join gives us
-          # windows+x64, linux+x64. macOS is out of scope for v0.4
-          # (deferred to v0.5 — see ROADMAP.md).
+          tagName: ${{ github.event.inputs.tag || github.ref_name }}
+          releaseName: 'Flowntier ${{ github.event.inputs.tag || github.ref_name }}'
           args: --target ${{ matrix.target }}
 
   # ──────────────────────────────────────────────────────────────
@@ -225,7 +226,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           draft: false
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          name: 'Flowntier ${{ github.event.inputs.tag || github.ref_name }}'
           generate_release_notes: true
-          files: |
-            target/**/*.json
-            target/**/*.sig

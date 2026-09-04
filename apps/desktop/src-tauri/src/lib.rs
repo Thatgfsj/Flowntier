@@ -8,15 +8,19 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::AtomicU64;
+#[cfg(windows)]
+use std::sync::atomic::Ordering;
 use std::sync::OnceLock;
 use std::time::Duration;
 
+#[cfg(windows)]
 use tauri::Emitter;
 use tauri::Manager;
 use tauri_core::logging::{self, LoggingGuard};
 use tauri_core::{AppState, NewWorkflowResponse};
 use tauri_plugin_shell::ShellExt;
+#[cfg(windows)]
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 #[cfg(windows)]
 use tokio::net::windows::named_pipe::ClientOptions;
@@ -195,6 +199,8 @@ async fn read_response_bytes(
 /// so the wipe half always no-op'd.
 #[cfg(target_os = "windows")]
 const SIDECAR_IMAGE: &str = "flowntier_runtime.exe";
+#[cfg(not(target_os = "windows"))]
+const SIDECAR_IMAGE: &str = "flowntier_runtime";
 
 /// event 000109: kill the sidecar if it's running. Returns the
 /// taskkill exit code so the caller can decide whether to log

@@ -59,7 +59,7 @@ const BUNDLE_OUT = path.join(
 function step(name, cmd, args, opts = {}) {
   console.log(`\n=== ${name} ===`);
   console.log(`$ ${cmd} ${args.join(' ')}`);
-  const r = spawnSync(cmd, args, { stdio: 'inherit', cwd: opts.cwd || ROOT, ...opts });
+  const r = spawnSync(cmd, args, { stdio: 'inherit', cwd: opts.cwd || ROOT, shell: true, ...opts });
   if (r.status !== 0) {
     console.error(`Step failed: ${name} (exit ${r.status})`);
     process.exit(r.status || 1);
@@ -122,9 +122,16 @@ function copySidecar() {
 copySidecar();
 
 // Phase 1: build everything except bundle.
+const pnpmCmd = (() => {
+  try {
+    const t = spawnSync('pnpm', ['--version'], { shell: true });
+    if (t.status === 0) return 'pnpm';
+  } catch {}
+  return 'npx -y pnpm';
+})();
 const phase1Args = ['exec', 'tauri', 'build', '--no-bundle'];
 if (TAURI_TARGET) phase1Args.push('--target', TAURI_TARGET);
-step('Phase 1: tauri build --no-bundle', 'pnpm', phase1Args, { cwd: TAURI_DIR });
+step('Phase 1: tauri build --no-bundle', pnpmCmd, phase1Args, { cwd: TAURI_DIR });
 
 // Phase 2: patch installer.nsi (write v3 taskkill belt + sidecar check + node check).
 step('Phase 2: patch-nsis.cjs', 'node', [path.join(__dirname, 'patch-nsis.cjs')]);
