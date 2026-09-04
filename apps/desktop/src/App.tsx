@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { check as checkUpdaterPlugin } from "@tauri-apps/plugin-updater";
 import { checkForUpdate, installUpdate, type UpdateBanner } from "./lib/updater";
-import { kvGet, kvSet } from "./lib/api.js";
+import { getRoleResolveStatus, kvGet, kvSet } from "./lib/api.js";
 import { Welcome } from "./components/Welcome";
 import { WorkdirSetup } from "./components/WorkdirSetup";
 import { PhaseTimeline, AgentCard, Card, type PhaseState } from "@flowntier/ui";
@@ -228,6 +228,7 @@ export function App() {
     const [chatOpen, setChatOpen] = useState(false);
     const [cancelling, setCancelling] = useState(false);
     const [cmd, setCmd] = useState("");
+    const [needsModelConfig, setNeedsModelConfig] = useState(false);
     const [updateBanner, setUpdateBanner] = useState<UpdateBanner>({ available: false });
     const [drift, setDrift] = useState<
       { detected: false } | { detected: true; sidecar: string; min_compatible: string }
@@ -325,6 +326,24 @@ export function App() {
       window.__flowntierCurrentWfId = currentWfId;
     }, [currentWfId]);
 
+    // Check if chief role has an active model/key configured
+    useEffect(() => {
+      let cancelled = false;
+      void (async () => {
+        try {
+          const res = await getRoleResolveStatus("agent:chief");
+          if (!cancelled) {
+            setNeedsModelConfig(!res.ok);
+          }
+        } catch {
+          // ignore
+        }
+      })();
+      return () => {
+        cancelled = true;
+      };
+    }, [settingsOpen]);
+
     // ── Polling ────────────────────────────────────────────────────
     const workflowSummary = useWorkflowState(currentWfId);
 
@@ -403,7 +422,22 @@ export function App() {
         }
       } catch (e) {
         console.warn("workflow failed", e);
-        dispatch({ type: "SET_WORKFLOW_ERROR", error: `工作流未能启动: ${e}` });
+        const errStr = String(e);
+        let userFacingError = errStr;
+        try {
+          const match = errStr.match(/HTTP \d+: ({.*})/);
+          if (match && match[1]) {
+            const parsed = JSON.parse(match[1]);
+            if (parsed.error) userFacingError = parsed.error;
+          }
+        } catch {}
+        if (
+          userFacingError.includes("未配置 AI 模型") ||
+          userFacingError.includes("role not configured")
+        ) {
+          setNeedsModelConfig(true);
+        }
+        dispatch({ type: "SET_WORKFLOW_ERROR", error: `工作流未能启动: ${userFacingError}` });
         dispatch({ type: "SET_BUSY", value: false });
         dispatch({ type: "SET_COMPLETED", value: true });
       }
@@ -412,6 +446,15 @@ export function App() {
     const handleSubmit = () => {
       if (state.completed) {
         dispatch({ type: "RESET" });
+        return;
+      }
+      if (needsModelConfig) {
+        setSettingsOpen(true);
+        dispatch({
+          type: "SET_WORKFLOW_ERROR",
+          error:
+            "尚未配置大模型或 API Key。请先在「设置 → 供应商与密钥」中填入 API Key 并为角色分配模型。",
+        });
         return;
       }
       const text = cmd.trim() || t("workflow.cmd.fallback");
@@ -443,6 +486,26 @@ export function App() {
               setDrift({ detected: false });
             }}
           />
+        )}
+        {needsModelConfig && (
+          <div
+            role="alert"
+            className="flex items-center justify-between border-b border-warning/40 bg-warning/15 px-4 py-2 text-xs text-primary"
+          >
+            <div className="flex items-center gap-2">
+              <span className="text-warning">⚠️</span>
+              <span className="font-semibold text-warning">未配置 AI 大模型或 API Key</span>
+              <span className="text-text-secondary">
+                当前尚未配置可用的大模型 API Key，Flowntier 无法执行智能体工作流。
+              </span>
+            </div>
+            <button
+              onClick={() => setSettingsOpen(true)}
+              className="rounded bg-warning/20 px-3 py-1 text-xs font-semibold text-warning hover:bg-warning/30 transition-colors"
+            >
+              前往配置
+            </button>
+          </div>
         )}
         <TopBar
           projectName="Flowntier"

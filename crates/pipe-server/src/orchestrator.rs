@@ -747,8 +747,8 @@ impl Orchestrator {
                     role_id,
                     role_display,
                     status: format!("FAILED: resolve: {e}"),
-                    summary: None,
-                    text: String::new(),
+                    summary: Some(format!("未配置模型或密钥: {e}")),
+                    text: format!("错误: 角色未配置模型或密钥 ({e})"),
                     elapsed_ms: 0,
                     structured_verdict: None,
                 };
@@ -1277,6 +1277,29 @@ impl Orchestrator {
     /// string the chairman sees.
     pub async fn run(mut self) -> String {
         info!(target: "orchestrator", wf_id = %self.wf_id, user_request_len = self.user_request.len(), "[TRACE] Orchestrator::run() ENTERED — starting 8-phase workflow");
+
+        // Pre-flight check: ensure chief role has a configured model and API key
+        if let Err(e) = self.build_candidates("agent:chief").await {
+            error!(target: "orchestrator", wf_id = %self.wf_id, error = %e, "Chief role not configured — aborting workflow immediately");
+            let error_msg = format!("未配置 AI 模型或 API Key：请前往「设置 → 供应商与密钥」配置 API Key 并分配模型。\n({e})");
+            let _ = self.events.send(AgentEvent::Done {
+                wf_id: self.wf_id.clone(),
+                status: "FAILED: role_not_configured".into(),
+                summary: Some(error_msg.clone()),
+            });
+            let _ = self
+                .state
+                .repo
+                .update_workflow_state(&self.wf_id, "FAILED: role_not_configured", "1-requirement")
+                .await;
+            let _ = self
+                .state
+                .repo
+                .set_workflow_summary(&self.wf_id, &error_msg)
+                .await;
+            return error_msg;
+        }
+
         let mut phase_idx = 0;
         self.emit_phase(None, PHASES[phase_idx]).await;
 
@@ -1466,7 +1489,15 @@ impl Orchestrator {
             self.emit_reviewer_verdict("final-review", &b);
             let verdict_a = critic_verdict(&a);
             let verdict_b = critic_verdict(&b);
-            if self.cancel_token.is_cancelled() || a.status == "ABORTED" || b.status == "ABORTED" {
+            let is_fatal_critic_failure = a.status.starts_with("FAILED: resolve")
+                || b.status.starts_with("FAILED: resolve")
+                || a.status.contains("auth_error")
+                || b.status.contains("auth_error");
+            if self.cancel_token.is_cancelled()
+                || a.status == "ABORTED"
+                || b.status == "ABORTED"
+                || is_fatal_critic_failure
+            {
                 break (a, b);
             }
             if !should_repair_decision(&verdict_a, &verdict_b, loop_count, self.max_repair_loops) {

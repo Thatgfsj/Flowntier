@@ -1334,6 +1334,15 @@ fn register_placeholder_handlers(d: &mut Dispatcher, state: Arc<ServerState>) {
                     "error": "'task' is empty",
                 })));
             }
+            // Pre-flight check: ensure chief role has a configured model and API key
+            if let Err(e) = resolve_role(&s, "agent:chief").await {
+                tracing::warn!(target: "pipe_server", error = %e, "[TRACE] /api/run_workflow: chief role not configured");
+                return Ok((400, json!({
+                    "ok": false,
+                    "error": format!("未配置 AI 模型或 API Key：请先在「设置 → 供应商与密钥」配置 API Key，并在「角色模型」中分配模型。\n({e})"),
+                    "hint": "open Settings → 角色 → 模型 分配 and pick a default_model",
+                })));
+            }
             tracing::info!(target: "pipe_server", task_len = task.len(), task_preview = %task.chars().take(80).collect::<String>(), "[TRACE] /api/run_workflow: creating Orchestrator");
             // v0.4.22 (event 000118, fix 7): build the cancel
             // token FIRST, then pass it to the Orchestrator so

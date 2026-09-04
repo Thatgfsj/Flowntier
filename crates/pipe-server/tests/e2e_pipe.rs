@@ -2664,3 +2664,32 @@ fn agent_event_repair_loop_serializes_to_kind_tag() {
         ),
     }
 }
+
+#[tokio::test]
+async fn run_workflow_rejects_unconfigured_chief_role() {
+    let (addr, handle) = spawn_server("run-workflow-unconfigured").await;
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+
+    // POST /api/run_workflow on a fresh server where agent:chief is unconfigured
+    let resp = client::connect_and_request(
+        &addr,
+        serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "POST",
+            "params": {
+                "path": "/api/run_workflow",
+                "body": { "task": "hello world" }
+            }
+        }),
+    )
+    .await;
+    assert_eq!(resp["result"]["status"].as_u64().unwrap_or(0), 400);
+    assert_eq!(resp["result"]["body"]["ok"], serde_json::json!(false));
+    let err_msg = resp["result"]["body"]["error"].as_str().unwrap_or("");
+    assert!(
+        err_msg.contains("未配置 AI 模型") || err_msg.contains("role not configured"),
+        "error message should indicate unconfigured model/role; got {err_msg}"
+    );
+    handle.abort();
+}
