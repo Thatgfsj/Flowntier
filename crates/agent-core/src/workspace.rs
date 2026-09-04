@@ -29,16 +29,16 @@ pub fn normalize_path(path: &Path) -> PathBuf {
             std::path::Component::ParentDir => {
                 out.pop();
             }
-            std::path::Component::Prefix(prefix) => {
+            std::path::Component::Prefix(_prefix) => {
                 #[cfg(windows)]
                 {
                     use std::path::Prefix;
-                    let norm = match prefix.kind() {
+                    let norm = match _prefix.kind() {
                         Prefix::Disk(d) | Prefix::VerbatimDisk(d) => {
                             let upper = (d as char).to_ascii_uppercase() as u8;
                             format!("{}:", upper as char)
                         }
-                        _ => prefix.as_os_str().to_string_lossy().into_owned(),
+                        _ => _prefix.as_os_str().to_string_lossy().into_owned(),
                     };
                     out.push(norm);
                 }

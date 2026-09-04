@@ -203,7 +203,7 @@ async fn drive_loop(
     // clarifying questions. Empty Vec → behaves like the old shape.
     let mut history: Vec<Message> = Vec::with_capacity(2 + chat_history.len());
     history.push(Message::system(derive_system(&agent_id, tools.schemas())));
-    history.extend(chat_history.into_iter());
+    history.extend(chat_history);
     history.push(Message::user(task.clone()));
 
     let tool_ctx = ToolContext {
