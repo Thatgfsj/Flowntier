@@ -184,9 +184,6 @@ impl Provider for OpenAiProvider {
                         let data = event.data;
                         tracing::debug!(data = %data.chars().take(120).collect::<String>(), "SSE data");
                         if data.trim() == "[DONE]" {
-                            yield Ok(StreamChunk::Done {
-                                reason: finish_reason.clone().unwrap_or_else(|| "stop".into()),
-                            });
                             break;
                         }
                         let chunk: ChatCompletionChunk = match serde_json::from_str(&data) {
@@ -210,13 +207,23 @@ impl Provider for OpenAiProvider {
                             }
                             for tc in choice.delta.tool_calls.unwrap_or_default() {
                                 let entry = partial_calls.entry(tc.index).or_insert_with(|| {
-                                    let id = tc.id.clone().unwrap_or_default();
-                                    let name = tc.function.as_ref().and_then(|f| f.name.clone()).unwrap_or_default();
-                                    PartialToolCall { id, name, args: String::new() }
+                                    PartialToolCall {
+                                        id: String::new(),
+                                        name: String::new(),
+                                        args: String::new(),
+                                    }
                                 });
-                                if let Some(id) = tc.id { entry.id = id; }
+                                if let Some(id) = tc.id {
+                                    if entry.id.is_empty() {
+                                        entry.id = id;
+                                    } else {
+                                        entry.id.push_str(&id);
+                                    }
+                                }
                                 if let Some(func) = tc.function {
-                                    if let Some(n) = func.name { entry.name = n; }
+                                    if let Some(n) = func.name {
+                                        entry.name.push_str(&n);
+                                    }
                                     if let Some(a) = func.arguments {
                                         entry.args.push_str(&a);
                                     }
@@ -227,7 +234,7 @@ impl Provider for OpenAiProvider {
                 }
             }
 
-            // Flush any accumulated tool calls.
+            // Flush any accumulated tool calls BEFORE yielding Done.
             // Sort by index for deterministic ordering.
             let mut indices: Vec<u32> = partial_calls.keys().copied().collect();
             indices.sort();
@@ -251,6 +258,10 @@ impl Provider for OpenAiProvider {
                     });
                 }
             }
+
+            yield Ok(StreamChunk::Done {
+                reason: finish_reason.unwrap_or_else(|| "stop".into()),
+            });
         };
 
         Ok(Box::pin(stream))

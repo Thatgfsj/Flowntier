@@ -13,10 +13,10 @@ use serde::{Deserialize, Serialize};
 /// normalizes disk letter casing, and resolves standard components.
 pub fn normalize_path(path: &Path) -> PathBuf {
     let s = path.to_string_lossy();
-    let stripped = if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
-        format!(r"\\{rest}")
-    } else if let Some(rest) = s.strip_prefix(r"\\?\") {
-        rest.to_string()
+    let stripped = if s.len() >= 8 && s[..8].eq_ignore_ascii_case(r"\\?\UNC\") {
+        format!(r"\\{}", &s[8..])
+    } else if s.len() >= 4 && s[..4].eq_ignore_ascii_case(r"\\?\") {
+        s[4..].to_string()
     } else {
         s.into_owned()
     };
@@ -143,6 +143,75 @@ impl Workspace {
                 _ => return false,
             }
         }
+    }
+
+    /// Verify that `path` is within the workspace, both lexically and physically
+    /// (resolving any symlinks / junction points).
+    /// If the path or its existing parent canonicalizes outside the workspace root,
+    /// returns an Err with a detailed security denial message.
+    pub fn verify_path(&self, path: &Path) -> Result<PathBuf, String> {
+        let abs = if path.is_absolute() {
+            normalize_path(path)
+        } else {
+            normalize_path(&self.root.join(path))
+        };
+
+        if !self.contains(&abs) {
+            return Err(format!(
+                "Path '{}' escapes workspace root '{}'",
+                abs.display(),
+                self.root.display()
+            ));
+        }
+
+        // If the path exists, canonicalize it and check if its canonical target is inside canonical root.
+        if abs.exists() {
+            if let (Ok(canon_target), Ok(canon_root)) =
+                (abs.canonicalize(), self.root.canonicalize())
+            {
+                let norm_target = normalize_path(&canon_target);
+                let norm_root = normalize_path(&canon_root);
+                let target_ws = Workspace {
+                    root: norm_root,
+                    name: self.name.clone(),
+                };
+                if !target_ws.contains(&norm_target) {
+                    return Err(format!(
+                        "Symlink / junction '{}' resolves outside workspace root to '{}'",
+                        abs.display(),
+                        norm_target.display()
+                    ));
+                }
+            }
+        } else {
+            // Check the nearest existing ancestor
+            let mut curr = abs.as_path();
+            while let Some(parent) = curr.parent() {
+                if parent.exists() {
+                    if let (Ok(canon_parent), Ok(canon_root)) =
+                        (parent.canonicalize(), self.root.canonicalize())
+                    {
+                        let norm_parent = normalize_path(&canon_parent);
+                        let norm_root = normalize_path(&canon_root);
+                        let target_ws = Workspace {
+                            root: norm_root,
+                            name: self.name.clone(),
+                        };
+                        if !target_ws.contains(&norm_parent) {
+                            return Err(format!(
+                                "Path ancestor '{}' resolves outside workspace root to '{}'",
+                                parent.display(),
+                                norm_parent.display()
+                            ));
+                        }
+                    }
+                    break;
+                }
+                curr = parent;
+            }
+        }
+
+        Ok(abs)
     }
 }
 

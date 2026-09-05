@@ -408,10 +408,8 @@ async fn events_bridge(app: tauri::AppHandle) {
     tracing::info!(target: "tauri_events", "[TRACE] events_bridge: starting — connecting to events pipe");
     let mut backoff_ms = 200u64;
     loop {
-        let open_res = tokio::task::spawn_blocking(move || {
-            ClientOptions::new().open(EVENTS_PIPE)
-        })
-        .await;
+        let open_res =
+            tokio::task::spawn_blocking(move || ClientOptions::new().open(EVENTS_PIPE)).await;
 
         match open_res {
             Ok(Ok(conn)) => {
@@ -437,7 +435,9 @@ async fn events_bridge(app: tauri::AppHandle) {
                 backoff_ms = (backoff_ms * 2).min(5_000);
             }
             Err(e) => {
-                eprintln!("[flowntier] events pipe spawn_blocking panic: {e}; retry in {backoff_ms}ms");
+                eprintln!(
+                    "[flowntier] events pipe spawn_blocking panic: {e}; retry in {backoff_ms}ms"
+                );
                 tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
                 backoff_ms = (backoff_ms * 2).min(5_000);
             }

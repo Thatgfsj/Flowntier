@@ -66,21 +66,61 @@ impl ContextManager {
         if total <= self.cfg.budget {
             return messages;
         }
-        let (system, mut rest): (Vec<_>, Vec<_>) =
+        let (system, rest): (Vec<_>, Vec<_>) =
             messages.into_iter().partition(|m| m.role == Role::System);
         let mut budget_left = self.cfg.budget.saturating_sub(Self::count(&system));
-        // Keep the *tail* (most recent context is most useful).
-        rest.reverse();
-        let mut kept_rev = Vec::new();
+
+        // Group `rest` into atomic message blocks.
+        // An assistant message with tool_calls and all subsequent tool messages
+        // form a single atomic block that must never be severed.
+        let mut blocks: Vec<Vec<Message>> = Vec::new();
+        let mut current_block: Vec<Message> = Vec::new();
+
         for m in rest {
-            let c = Self::count_message(&m);
-            if budget_left >= c {
-                budget_left -= c;
-                kept_rev.push(m);
+            if m.role == Role::Tool {
+                // Tool result belongs to the preceding Assistant block
+                current_block.push(m);
+            } else {
+                if !current_block.is_empty() {
+                    blocks.push(current_block);
+                    current_block = Vec::new();
+                }
+                current_block.push(m);
             }
         }
-        kept_rev.reverse();
-        system.into_iter().chain(kept_rev).collect()
+        if !current_block.is_empty() {
+            blocks.push(current_block);
+        }
+
+        // Keep blocks from the tail (most recent context is most useful).
+        blocks.reverse();
+        let mut kept_blocks_rev = Vec::new();
+        for block in blocks {
+            let block_tokens: usize = block.iter().map(Self::count_message).sum();
+            if budget_left >= block_tokens {
+                budget_left -= block_tokens;
+                kept_blocks_rev.push(block);
+            } else if kept_blocks_rev.is_empty() {
+                // If even the very latest block is larger than budget_left,
+                // keep it anyway so we don't return an empty history.
+                kept_blocks_rev.push(block);
+                break;
+            } else {
+                // Cannot fit older blocks, stop
+                break;
+            }
+        }
+        kept_blocks_rev.reverse();
+        let mut flattened: Vec<Message> = kept_blocks_rev.into_iter().flatten().collect();
+
+        // Ensure the first non-system message is a User message if any message was kept.
+        if let Some(first) = flattened.first() {
+            if first.role != Role::User {
+                flattened.insert(0, Message::user("[Earlier context truncated]"));
+            }
+        }
+
+        system.into_iter().chain(flattened).collect()
     }
 
     /// Hard-limit check. Returns Err if the history exceeds the
@@ -100,6 +140,7 @@ impl ContextManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::message::ToolCall;
 
     #[test]
     fn count_increases_with_content() {
@@ -125,5 +166,36 @@ mod tests {
         assert_eq!(compacted[0].content, "you are concise");
         // The recent user message should survive; the bulk history may be dropped.
         assert!(compacted.iter().any(|x| x.content == "recent"));
+    }
+
+    #[test]
+    fn compact_preserves_atomic_tool_call_pairs() {
+        let cfg = ContextConfig {
+            budget: 30,
+            hard_limit: 200,
+        };
+        let m = ContextManager::new(cfg);
+        let msgs = vec![
+            Message::system("sys"),
+            Message::user("old question"),
+            Message::assistant(
+                "calling tool",
+                vec![ToolCall {
+                    id: "call_1".into(),
+                    name: "read".into(),
+                    args: serde_json::json!({ "path": "foo.txt" }),
+                }],
+            ),
+            Message::tool("call_1", "file content here"),
+        ];
+        let compacted = m.compact(msgs);
+        // The assistant and its tool message must both be present or both absent.
+        let has_assistant = compacted.iter().any(|x| x.role == Role::Assistant);
+        let has_tool = compacted.iter().any(|x| x.role == Role::Tool);
+        assert_eq!(has_assistant, has_tool);
+        // The first non-system message must be a user message
+        if compacted.len() > 1 {
+            assert_eq!(compacted[1].role, Role::User);
+        }
     }
 }

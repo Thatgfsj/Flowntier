@@ -2422,10 +2422,10 @@ fn terminal_done_status_translates_review_verdict_pair() {
         terminal_done_status("REWRITE", "REWRITE", "agent:critic:a", "agent:critic:b"),
         "FAILED: reviewer_REWRITE_agent:critic:a",
     );
-    // UNKNOWN / UNKNOWN → DONE (no actionable concern).
+    // Dual UNKNOWN → FAILED: reviewer_UNKNOWN_both_critics_unresponsive (critics unresponsive).
     assert_eq!(
         terminal_done_status("UNKNOWN", "UNKNOWN", "agent:critic:a", "agent:critic:b"),
-        "DONE",
+        "FAILED: reviewer_UNKNOWN_both_critics_unresponsive",
     );
     // Mixed UNKNOWN + PASS is still a DONE workflow.
     assert_eq!(

@@ -258,6 +258,23 @@ impl Repository {
         Ok(())
     }
 
+    /// Persist the workflow planning doc (JSON) so /api/workflow/{wf_id}/status
+    /// and get_workflow IPC command can return the structured plan.
+    pub async fn set_workflow_plan_doc(
+        &self,
+        id: &str,
+        plan_doc: &str,
+    ) -> Result<(), StorageError> {
+        let now = chrono::Utc::now().timestamp();
+        sqlx::query("UPDATE workflows SET plan_doc = ?, updated_at = ? WHERE id = ?")
+            .bind(plan_doc)
+            .bind(now)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
     /// Fetch a workflow by id.
     pub async fn get_workflow(&self, id: &str) -> Result<Option<Workflow>, StorageError> {
         let row: Option<WorkflowRow> = sqlx::query_as("SELECT * FROM workflows WHERE id = ?")

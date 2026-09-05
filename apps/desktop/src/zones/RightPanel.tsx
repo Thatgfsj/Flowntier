@@ -28,6 +28,7 @@ const STATE_LABEL: Record<string, string> = {
   PENDING: "待办",
   DISPATCHED: "已派发",
   IN_PROGRESS: "进行中",
+  RUNNING: "进行中",
   SUBMITTED: "已提交",
   UNDER_REVIEW: "评审中",
   REPAIR_REQUESTED: "需修复",
@@ -46,6 +47,7 @@ const STATE_ICONS: Record<string, string> = {
   PENDING: "○",
   DISPATCHED: "◐",
   IN_PROGRESS: "◑",
+  RUNNING: "◑",
   SUBMITTED: "◓",
   UNDER_REVIEW: "◔",
   REPAIR_REQUESTED: "⚠",
@@ -58,7 +60,9 @@ const STATE_ICONS: Record<string, string> = {
 };
 
 function toTaskState(s: string): TaskState {
-  return s as TaskState;
+  const upper = s?.toUpperCase() ?? "PENDING";
+  if (upper === "RUNNING") return "IN_PROGRESS" as TaskState;
+  return upper as TaskState;
 }
 
 /**
@@ -70,7 +74,10 @@ export function RightPanel({ tasks, events = [] }: RightPanelProps) {
   const [showConsole, setShowConsole] = useState(false);
 
   const total = tasks.length;
-  const done = tasks.filter((t) => t.state === "DONE").length;
+  const done = tasks.filter((t) => {
+    const u = t.state?.toUpperCase();
+    return u === "DONE" || u === "APPROVED";
+  }).length;
   const pct = total > 0 ? Math.round((done / total) * 100) : 0;
 
   const selected = selectedTask ? tasks.find((t) => t.id === selectedTask) : null;
@@ -114,7 +121,8 @@ export function RightPanel({ tasks, events = [] }: RightPanelProps) {
               </button>
               <div className="flex items-center justify-between px-1">
                 <span className="text-[10px] uppercase tracking-wide text-text-secondary">
-                  {STATE_ICONS[t.state] ?? "?"} {STATE_LABEL[t.state] ?? t.state}
+                  {STATE_ICONS[t.state?.toUpperCase()] ?? "?"}{" "}
+                  {STATE_LABEL[t.state?.toUpperCase()] ?? t.state}
                 </span>
                 {t.summary && (
                   <span className="max-w-[200px] truncate text-[10px] text-text-secondary">

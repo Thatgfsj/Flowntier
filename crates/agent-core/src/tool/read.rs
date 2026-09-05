@@ -55,10 +55,8 @@ impl Tool for ReadTool {
             .map(|n| n as usize);
 
         let abs = ctx.workspace.resolve(path);
-        if !ctx.workspace.contains(&abs) {
-            return Ok(ToolOutput::err(format!(
-                "refused: {path} is outside the workspace"
-            )));
+        if let Err(e) = ctx.workspace.verify_path(&abs) {
+            return Ok(ToolOutput::err(format!("refused: {e}")));
         }
         read(&abs, start_line, end_line).await
     }

@@ -234,7 +234,8 @@ export type WfAction =
   | { type: "SET_CHAT_OPEN"; value: boolean }
   | { type: "SET_UPDATE_BANNER"; value: { available: boolean } }
   | { type: "SET_DRIFT"; value: DriftState }
-  | { type: "SET_WORKFLOW_ERROR"; error: string | null };
+  | { type: "SET_WORKFLOW_ERROR"; error: string | null }
+  | { type: "SET_TASKS"; tasks: TaskRow[] };
 
 // ── Reducer ───────────────────────────────────────────────────────
 
@@ -335,6 +336,8 @@ export function workflowReducer(state: RootState, action: WfAction): RootState {
       return { ...state, drift: action.value };
     case "SET_WORKFLOW_ERROR":
       return { ...state, workflowError: action.error };
+    case "SET_TASKS":
+      return { ...state, tasks: action.tasks };
 
     case "EVENT": {
       return reduceEvent(state, action.event);
@@ -423,6 +426,10 @@ function reduceEvent(state: RootState, event: WfEvent): RootState {
       }
       const toName = to as PhaseName;
       phaseStates[toName] = "active";
+      for (let i = idx + 1; i < PHASES.length; i++) {
+        const name = PHASES[i]?.name;
+        if (name) phaseStates[name] = "pending";
+      }
       next = { ...next, activePhase: idx, phaseStates };
 
       const role = phaseToRole(to);
@@ -439,9 +446,19 @@ function reduceEvent(state: RootState, event: WfEvent): RootState {
     const loopIdx = event.loop_index ?? 1;
     const maxLoops = event.max_loops ?? 3;
     const label = `修复循环 ${loopIdx}/${maxLoops}: A(${event.verdict_a ?? "REPAIR"}), B(${event.verdict_b ?? "REPAIR"})`;
+    const phaseStates = { ...next.phaseStates };
+    for (let i = 0; i < 6; i++) {
+      const name = PHASES[i]?.name;
+      if (name) phaseStates[name] = "done";
+    }
+    const repairName = PHASES[6]?.name;
+    if (repairName) phaseStates[repairName] = "active";
+    const deliveryName = PHASES[7]?.name;
+    if (deliveryName) phaseStates[deliveryName] = "pending";
     next = {
       ...next,
-      activePhase: 5,
+      activePhase: 6,
+      phaseStates,
       milestones: [...next.milestones, label],
     };
   }

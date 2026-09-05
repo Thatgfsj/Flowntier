@@ -65,17 +65,34 @@ impl Provider for AnthropicProvider {
             .iter()
             .filter_map(|t| {
                 let func = t.get("function")?;
-                Some(serde_json::json!({
-                    "name": func.get("name")?,
-                    "description": func.get("description").unwrap_or(&serde_json::Value::Null),
-                    "input_schema": func.get("parameters").unwrap_or(&serde_json::json!({ "type": "object" }))
-                }))
+                let mut map = serde_json::Map::new();
+                map.insert("name".into(), func.get("name")?.clone());
+                if let Some(desc) = func.get("description").and_then(|d| d.as_str()) {
+                    if !desc.trim().is_empty() {
+                        map.insert(
+                            "description".into(),
+                            serde_json::Value::String(desc.to_string()),
+                        );
+                    }
+                }
+                let schema = func
+                    .get("parameters")
+                    .cloned()
+                    .unwrap_or_else(|| serde_json::json!({ "type": "object" }));
+                map.insert("input_schema".into(), schema);
+                Some(serde_json::Value::Object(map))
             })
             .collect();
 
+        let max_tokens = if self.model.contains("haiku") {
+            4096
+        } else {
+            8192
+        };
+
         let body = MessagesRequest {
             model: &self.model,
-            max_tokens: 8192,
+            max_tokens,
             system: &system,
             messages: &msgs,
             tools: &anthropic_tools,

@@ -381,6 +381,7 @@ export function App() {
         while (Date.now() < deadline) {
           await new Promise((r) => setTimeout(r, 2000));
           if (!stateRef.current.busy || stateRef.current.completed) break;
+          if (stateRef.current.currentWfId !== data.id) break;
           try {
             const wf = await invoke<Record<string, unknown>>("get_workflow", { id: data.id });
             const st = (wf?.status || wf?.state) as string | undefined;
@@ -649,63 +650,106 @@ export function App() {
                     ago={busy ? t("roster.chief.speaking") : t("roster.chief.idle")}
                   />
 
-                  <Card>
-                    <h3 className="mb-2 text-sm font-semibold">审核员 B — 架构审查</h3>
-                    {reviewVerdict ? (
-                      <ReviewVerdict
-                        verdict={reviewVerdict.verdict}
-                        verdictLabel={t(`reviewVerdict.verdict.${reviewVerdict.verdict}`)}
-                        // v0.4.22 (event 000112): display the real
-                        // confidence from the last reviewer_verdict
-                        // event (currently 0.0 placeholder). Falls
-                        // back to 1.00 when no critic has reported
-                        // yet and reviewVerdict was set by the
-                        // final-review binding path.
-                        confidenceLabel={t("reviewVerdict.confidence", {
-                          value: (() => {
-                            const last = [...reviewerVerdicts]
-                              .reverse()
-                              .find((r) => r.phase === "final-review");
-                            if (last && last.confidence > 0) {
-                              return last.confidence.toFixed(2);
-                            }
-                            return "1.00";
-                          })(),
-                        })}
-                        confidence={(() => {
-                          const last = [...reviewerVerdicts]
-                            .reverse()
-                            .find((r) => r.phase === "final-review");
-                          return last && last.confidence > 0 ? last.confidence : 1;
-                        })()}
-                        issues={
-                          // v0.4.22 (event 000112): the orchestrator
-                          // emits a list of plain strings (no severity),
-                          // but ReviewVerdict expects structured
-                          // ReviewIssue with severity. Mapping plain
-                          // → MAJOR strips semantics, so keep an
-                          // empty list until event 000115 (structured
-                          // JSON reviewer prompt) gives us severity.
-                          []
-                        }
-                        summary={reviewVerdict.summary}
-                      />
-                    ) : (
-                      <div className="flex flex-col gap-1 text-xs text-text-secondary">
-                        <div className="flex items-center gap-2">
-                          <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-text-tertiary" />
-                          <span>
-                            {t("centerPanel.reviewPending", { defaultValue: "等待审查员 B 评审…" })}
-                          </span>
-                        </div>
-                        <p className="mt-1 text-[11px] text-text-tertiary">
-                          {t("centerPanel.reviewPendingHint", {
-                            defaultValue: "完成 8 个交付阶段后会自动出评审意见；当前未生成。",
-                          })}
-                        </p>
-                      </div>
-                    )}
-                  </Card>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {/* Critic A */}
+                    {(() => {
+                      const lastA = [...reviewerVerdicts]
+                        .reverse()
+                        .find((r) => r.role === "agent:critic:a");
+                      return (
+                        <Card>
+                          <h3 className="mb-2 text-sm font-semibold">审核员 A — 缺陷审查</h3>
+                          {lastA ? (
+                            <ReviewVerdict
+                              verdict={
+                                lastA.verdict === "PASS" ||
+                                lastA.verdict === "REPAIR" ||
+                                lastA.verdict === "REWRITE"
+                                  ? lastA.verdict
+                                  : "REPAIR"
+                              }
+                              verdictLabel={t(`reviewVerdict.verdict.${lastA.verdict}`, {
+                                defaultValue: lastA.verdict,
+                              })}
+                              confidenceLabel={t("reviewVerdict.confidence", {
+                                value: lastA.confidence > 0 ? lastA.confidence.toFixed(2) : "--",
+                              })}
+                              confidence={lastA.confidence > 0 ? lastA.confidence : 0}
+                              issues={(lastA.issues ?? []).map((msg) => ({
+                                severity: "MAJOR" as const,
+                                message: msg,
+                              }))}
+                              summary={lastA.summary || "缺陷审查就绪"}
+                            />
+                          ) : (
+                            <div className="flex flex-col gap-1 text-xs text-text-secondary">
+                              <div className="flex items-center gap-2">
+                                <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-text-tertiary" />
+                                <span>等待审核员 A 评审…</span>
+                              </div>
+                            </div>
+                          )}
+                        </Card>
+                      );
+                    })()}
+
+                    {/* Critic B */}
+                    {(() => {
+                      const lastB = [...reviewerVerdicts]
+                        .reverse()
+                        .find((r) => r.role === "agent:critic:b" || !r.role);
+                      const displayVerdict = lastB?.verdict ?? reviewVerdict?.verdict;
+                      const displaySummary = lastB?.summary ?? reviewVerdict?.summary;
+                      const hasData = lastB || reviewVerdict;
+                      return (
+                        <Card>
+                          <h3 className="mb-2 text-sm font-semibold">审核员 B — 架构审查</h3>
+                          {hasData && displayVerdict ? (
+                            <ReviewVerdict
+                              verdict={
+                                displayVerdict === "PASS" ||
+                                displayVerdict === "REPAIR" ||
+                                displayVerdict === "REWRITE"
+                                  ? displayVerdict
+                                  : "REPAIR"
+                              }
+                              verdictLabel={t(`reviewVerdict.verdict.${displayVerdict}`, {
+                                defaultValue: displayVerdict,
+                              })}
+                              confidenceLabel={t("reviewVerdict.confidence", {
+                                value:
+                                  lastB && lastB.confidence > 0
+                                    ? lastB.confidence.toFixed(2)
+                                    : "--",
+                              })}
+                              confidence={lastB && lastB.confidence > 0 ? lastB.confidence : 0}
+                              issues={(lastB?.issues ?? []).map((msg) => ({
+                                severity: "MAJOR" as const,
+                                message: msg,
+                              }))}
+                              summary={displaySummary || "架构审查就绪"}
+                            />
+                          ) : (
+                            <div className="flex flex-col gap-1 text-xs text-text-secondary">
+                              <div className="flex items-center gap-2">
+                                <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-text-tertiary" />
+                                <span>
+                                  {t("centerPanel.reviewPending", {
+                                    defaultValue: "等待审核员 B 评审…",
+                                  })}
+                                </span>
+                              </div>
+                              <p className="mt-1 text-[11px] text-text-tertiary">
+                                {t("centerPanel.reviewPendingHint", {
+                                  defaultValue: "完成 8 个交付阶段后会自动出评审意见；当前未生成。",
+                                })}
+                              </p>
+                            </div>
+                          )}
+                        </Card>
+                      );
+                    })()}
+                  </div>
                 </>
               }
             />

@@ -95,24 +95,58 @@ pub const PHASES: [&str; 8] = [
 /// chief's LLM output is easy to JSON-parse.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct WorkerTask {
-    #[serde(default)]
+    #[serde(default, alias = "task_id", alias = "taskId", alias = "id")]
     pub id: String,
-    #[serde(default)]
+    #[serde(
+        default,
+        alias = "name",
+        alias = "task_name",
+        alias = "title",
+        alias = "标题",
+        alias = "任务名称"
+    )]
     pub title: String,
-    #[serde(default)]
+    #[serde(
+        default,
+        alias = "goal",
+        alias = "desc",
+        alias = "description",
+        alias = "objective",
+        alias = "目标",
+        alias = "任务目标"
+    )]
     pub objective: String,
-    #[serde(default)]
+    #[serde(default, alias = "interface", alias = "interfaces", alias = "接口")]
     pub interfaces: String,
-    #[serde(default)]
+    #[serde(
+        default,
+        alias = "depends_on",
+        alias = "deps",
+        alias = "dependencies",
+        alias = "依赖"
+    )]
     pub dependencies: Vec<String>,
-    #[serde(default)]
+    #[serde(
+        default,
+        alias = "requirement",
+        alias = "requirements",
+        alias = "要求",
+        alias = "需求"
+    )]
     pub requirements: String,
     /// Optional worker label (Backend / Frontend / Database /
     /// API / Testing / Documentation). When the chief picks one
     /// of these, the orchestrator still spawns a generic
     /// `agent:worker` agent but tags the task row + PhaseTimeline
     /// entry so the UI can group them.
-    #[serde(default)]
+    #[serde(
+        default,
+        alias = "role",
+        alias = "tag",
+        alias = "type",
+        alias = "label",
+        alias = "标签"
+    )]
     pub label: String,
 }
 
@@ -120,22 +154,43 @@ pub struct WorkerTask {
 /// critic reviews in Phase 3 + Phase 6.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PlanDoc {
-    #[serde(default)]
+    #[serde(
+        default,
+        alias = "overview",
+        alias = "desc",
+        alias = "summary",
+        alias = "概述",
+        alias = "总结"
+    )]
     pub summary: String,
-    #[serde(default)]
+    #[serde(
+        default,
+        alias = "arch",
+        alias = "design",
+        alias = "architecture",
+        alias = "架构",
+        alias = "架构设计"
+    )]
     pub architecture: String,
-    #[serde(default)]
+    #[serde(
+        default,
+        alias = "taskList",
+        alias = "task_list",
+        alias = "subtasks",
+        alias = "tasks",
+        alias = "任务",
+        alias = "任务列表"
+    )]
     pub tasks: Vec<WorkerTask>,
 }
 
 impl PlanDoc {
     /// Merge another PlanDoc into this one. The summary /
     /// architecture fields are kept from `self` (the first
-    /// round's authoritative text); tasks are appended, with
-    /// id-based dedup so a chief that re-uses an id in two
-    /// rounds doesn't create duplicate dispatch rows.
-    /// Empty summaries / architectures from the secondary
-    /// doc don't overwrite the primary doc's values.
+    /// round's authoritative text); tasks are appended.
+    /// If an id collides with an existing task, it is auto-suffixed
+    /// so subsequent round tasks (e.g. Frontend from Round C) are
+    /// never dropped.
     pub fn merge(&mut self, other: &PlanDoc) {
         if self.summary.is_empty() && !other.summary.is_empty() {
             self.summary = other.summary.clone();
@@ -143,12 +198,20 @@ impl PlanDoc {
         if self.architecture.is_empty() && !other.architecture.is_empty() {
             self.architecture = other.architecture.clone();
         }
-        let existing_ids: std::collections::HashSet<String> =
+        let mut existing_ids: std::collections::HashSet<String> =
             self.tasks.iter().map(|t| t.id.clone()).collect();
-        for t in &other.tasks {
-            if !existing_ids.contains(&t.id) {
-                self.tasks.push(t.clone());
+        for mut t in other.tasks.clone() {
+            if existing_ids.contains(&t.id) {
+                let mut suffix = 2;
+                let mut new_id = format!("{}_{}", t.id, suffix);
+                while existing_ids.contains(&new_id) {
+                    suffix += 1;
+                    new_id = format!("{}_{}", t.id, suffix);
+                }
+                t.id = new_id;
             }
+            existing_ids.insert(t.id.clone());
+            self.tasks.push(t);
         }
     }
 
@@ -164,7 +227,16 @@ impl PlanDoc {
             if let Some(end_rel) = text_owned[start..].find("</think>") {
                 text_owned.replace_range(start..start + end_rel + 8, "");
             } else {
-                text_owned.truncate(start);
+                // Unclosed <think>. Check if there is JSON after the opening tag
+                if let Some(json_start) = text_owned[start + 7..]
+                    .find("```json")
+                    .or_else(|| text_owned[start + 7..].find('{'))
+                    .or_else(|| text_owned[start + 7..].find('['))
+                {
+                    text_owned.replace_range(start..start + 7 + json_start, "");
+                } else {
+                    text_owned.truncate(start);
+                }
                 break;
             }
         }
@@ -844,11 +916,19 @@ impl Orchestrator {
                 || outcome.status.contains("invalid_key")
                 || outcome.status.contains("Authentication")
                 || outcome.status.contains("PermissionDenied");
-            let retriable = outcome.status.starts_with("FAILED")
+            let is_timeout = outcome.status.starts_with("TIMEOUT");
+
+            // Check if there are any subsequent candidates with a different secret
+            let next_candidates_have_different_key = candidates[idx + 1..]
+                .iter()
+                .any(|next_c| next_c.secret_name != cand.secret_name);
+
+            let retriable = (outcome.status.starts_with("FAILED") || is_timeout)
                 && !outcome.status.starts_with("FAILED: abort")
                 && !outcome.status.starts_with("FAILED: cancel")
-                && !is_auth_failure;
-            if is_auth_failure {
+                && (!is_auth_failure || next_candidates_have_different_key);
+
+            if is_auth_failure && !next_candidates_have_different_key {
                 error!(
                     target: "orchestrator",
                     wf_id = %self.wf_id,
@@ -856,7 +936,7 @@ impl Orchestrator {
                     provider = %cand.provider_short,
                     secret_name = %cand.secret_name,
                     base_url = %cand.base_url,
-                    "v0.4.28 (event 000121): auth failure — NOT retrying. \
+                    "v0.4.28 (event 000121): auth failure — no alternative key in candidates. \
                      fix in Settings → 供应商 (provider={}, secret={})",
                     cand.provider_short, cand.secret_name,
                 );
@@ -911,15 +991,6 @@ impl Orchestrator {
         let primary = crate::handlers::resolve_role_for_orchestrator(&self.state, role_id).await?;
         let mut out = vec![ResolvedCandidate::from_resolved(&primary)];
         for fb in &primary.fallback_chain {
-            match crate::handlers::resolve_role_for_orchestrator(&self.state, role_id).await {
-                Ok(_) => {
-                    // resolve_role_for_orchestrator always
-                    // returns the primary; for fallback we need
-                    // to resolve the override string directly.
-                    // See helper below.
-                }
-                Err(_) => continue,
-            }
             match self.resolve_fallback_string(fb).await {
                 Ok(c) => {
                     info!(
@@ -1384,6 +1455,13 @@ impl Orchestrator {
         if plan.tasks.iter().any(|t| t.id != "w_fallback_0") {
             plan.tasks.retain(|t| t.id != "w_fallback_0");
         }
+        if let Ok(json_str) = serde_json::to_string(&plan) {
+            let _ = self
+                .state
+                .repo
+                .set_workflow_plan_doc(&self.wf_id, &json_str)
+                .await;
+        }
 
         // ── Phase 3: plan review (parallel) ──────────────
         phase_idx = 2;
@@ -1400,14 +1478,12 @@ impl Orchestrator {
             }),
             self.run_agent(AgentRunSpec {
                 role: Role::Reviewer,
-                task: "评审上述 PlanDoc 的架构 / 可维护性 / 可读性。给出: PASS / REPAIR / REWRITE 之一, 加一句话理由。".into(),
+                task: "评审上述 PlanDoc 的架构合理性与完整性。给出: PASS / REPAIR / REWRITE 之一, 加一句话理由。".into(),
                 context: Some(plan_ctx),
             }),
         );
-        self.persist_task_row(&critic_a, "3-plan-review-criticA", 0)
-            .await;
-        self.persist_task_row(&critic_b, "3-plan-review-criticB", 0)
-            .await;
+        self.persist_task_row(&critic_a, "3-plan-review-A", 0).await;
+        self.persist_task_row(&critic_b, "3-plan-review-B", 0).await;
         // v0.4.22 (event 000112): publish each critic's verdict
         // as an AgentEvent::ReviewerVerdict so the webview can
         // render the real verdict (front-end also uses the
@@ -1428,10 +1504,9 @@ impl Orchestrator {
         let dispatch = self.run_agent(AgentRunSpec {
             role: Role::Chief,
             task: format!(
-                "PlanDoc 已经定了。Critic 评审: {}\n\n确认 worker 列表(原 PlanDoc 的 tasks 字段), 或修改后说'OK 派发'。如果 critic 给出 REPAIR/REWRITE, 改 plan 并说明原因。",
-                plan_review,
+                "根据两名审核员的意见:\n{plan_review}\n调整并最终确认任务列表。以 ```json 代码块输出确认后的 PlanDoc。"
             ),
-            context: Some(format!("PlanDoc: {}", serde_json::to_string_pretty(&plan).unwrap_or_default())),
+            context: Some(serde_json::to_string_pretty(&plan).unwrap_or_default()),
         }).await;
         self.persist_task_row(&dispatch, "4-dispatch", 0).await;
 
@@ -1445,6 +1520,13 @@ impl Orchestrator {
             if !updated_plan.architecture.is_empty() {
                 plan.architecture = updated_plan.architecture;
             }
+        }
+        if let Ok(json_str) = serde_json::to_string(&plan) {
+            let _ = self
+                .state
+                .repo
+                .set_workflow_plan_doc(&self.wf_id, &json_str)
+                .await;
         }
 
         // ── Phase 5: develop (workers in parallel) ─────────
@@ -1787,8 +1869,8 @@ impl Orchestrator {
                 output_tokens: 0,
                 cost_usd: None,
                 files_modified: None,
-                started_at: Some(now),
-                finished_at: Some(now + outcome.elapsed_ms as i64 / 1000),
+                started_at: Some(now.saturating_sub(outcome.elapsed_ms as i64 / 1000)),
+                finished_at: Some(now),
                 result: Some(if outcome.text.is_empty() {
                     outcome.summary.clone().unwrap_or_default()
                 } else {
@@ -1821,25 +1903,53 @@ fn verdict_of(o: &TaskOutcome) -> String {
 
 fn scan_text_verdict(raw: &str) -> Option<String> {
     let upper = raw.to_uppercase();
-    // 1. Highest severity: REWRITE / 重写
-    if upper.contains("REWRITE") || raw.contains("重写") || raw.contains("需重写") {
-        return Some("REWRITE".into());
-    }
-    // 2. Medium severity: REPAIR / 需修复 / 修复
-    if upper.contains("REPAIR") || raw.contains("需修复") || raw.contains("修复") {
-        return Some("REPAIR".into());
-    }
-    // 3. Negations for PASS: if it says "NOT PASS", "CANNOT PASS", "不通过", "未通过", treat as REPAIR
+
+    // 1. Explicit negations for PASS: "不通过", "未通过", "无法通过", "不能通过", "暂不通过", "未能通过", "未予通过", "NOT PASS", "CANNOT PASS", etc.
     if upper.contains("NOT PASS")
         || upper.contains("CANNOT PASS")
         || upper.contains("CAN NOT PASS")
+        || upper.contains("DOES NOT PASS")
         || raw.contains("不通过")
         || raw.contains("未通过")
+        || raw.contains("无法通过")
+        || raw.contains("不能通过")
+        || raw.contains("暂不通过")
+        || raw.contains("未能通过")
+        || raw.contains("未予通过")
     {
         return Some("REPAIR".into());
     }
-    // 4. PASS / 通过 with boundary checks (avoid password, bypass, compass)
-    if raw.contains("通过") {
+
+    // 2. Highest severity: REWRITE / 重写 (excluding "无需重写", "不用重写", "NO REWRITE")
+    let has_rewrite = (upper.contains("REWRITE")
+        && !upper.contains("NO REWRITE")
+        && !upper.contains("WITHOUT REWRITE"))
+        || (raw.contains("需重写")
+            || (raw.contains("重写") && !raw.contains("无需重写") && !raw.contains("不用重写")));
+    if has_rewrite {
+        return Some("REWRITE".into());
+    }
+
+    // 3. Medium severity: REPAIR / 需修复 / 修复 (excluding "无需修复", "不用修复", "无需修改", "已经修复", "修复完成")
+    let is_negative_repair = raw.contains("无需修复")
+        || raw.contains("不用修复")
+        || raw.contains("无需修改")
+        || raw.contains("不用修改")
+        || raw.contains("无需再修复")
+        || raw.contains("已经修复")
+        || raw.contains("修复完成")
+        || upper.contains("NO REPAIR")
+        || upper.contains("NO REPAIRS");
+
+    let has_repair = (upper.contains("REPAIR") && !is_negative_repair)
+        || raw.contains("需修复")
+        || (raw.contains("修复") && !is_negative_repair);
+    if has_repair {
+        return Some("REPAIR".into());
+    }
+
+    // 4. PASS / 通过 / 无需修复
+    if raw.contains("通过") || is_negative_repair {
         return Some("PASS".into());
     }
     for word in upper.split(|c: char| !c.is_alphabetic()) {
@@ -1999,7 +2109,9 @@ pub fn should_repair_decision(
     loop_count: u32,
     max_loops: u32,
 ) -> bool {
-    if verdict_a == "PASS" && verdict_b == "PASS" {
+    if (verdict_a == "PASS" && verdict_b == "PASS")
+        || (verdict_a == "UNKNOWN" && verdict_b == "UNKNOWN")
+    {
         return false;
     }
     loop_count < max_loops
@@ -2015,17 +2127,17 @@ pub(crate) fn verdict_severity_rank(v: &str) -> u8 {
 
 /// v0.4.22 (event 000114): turn the (verdict_a, verdict_b)
 /// pair into a final terminal `AgentEvent::Done.status` string.
-/// Both PASS or UNKNOWN (or any mix where neither side
-/// triggered a non-PASS verdict) → "DONE". Any REPAIR or
-/// REWRITE → "FAILED: reviewer_<reason>_<role_id>" attributing
-/// the failure to whichever critic had the higher severity,
-/// REWRITE winning ties. Pure function; covered by e2e tests.
+/// Both PASS → "DONE". Dual UNKNOWN → failure indicating critics
+/// unresponsive. Any REPAIR or REWRITE → "FAILED: reviewer_<reason>_<role_id>".
 pub fn terminal_done_status(
     verdict_a: &str,
     verdict_b: &str,
     role_a: &str,
     role_b: &str,
 ) -> String {
+    if verdict_a == "UNKNOWN" && verdict_b == "UNKNOWN" {
+        return "FAILED: reviewer_UNKNOWN_both_critics_unresponsive".to_string();
+    }
     let pick = if verdict_severity_rank(verdict_a) >= verdict_severity_rank(verdict_b) {
         (verdict_a, role_a)
     } else {
@@ -2162,7 +2274,8 @@ mod tests {
     #[test]
     fn test_worker_task_serde_defaults() {
         let json = r#"{"id": "w1", "title": "Task 1"}"#;
-        let task: WorkerTask = serde_json::from_str(json).expect("should deserialize with defaults");
+        let task: WorkerTask =
+            serde_json::from_str(json).expect("should deserialize with defaults");
         assert_eq!(task.id, "w1");
         assert_eq!(task.title, "Task 1");
         assert_eq!(task.objective, "");
@@ -2185,15 +2298,27 @@ mod tests {
         };
 
         // Word boundary check: password must not be PASS
-        assert_eq!(verdict_of(&make_outcome("Please enter your password")), "UNKNOWN");
+        assert_eq!(
+            verdict_of(&make_outcome("Please enter your password")),
+            "UNKNOWN"
+        );
         // Negation check: cannot pass must be REPAIR
-        assert_eq!(verdict_of(&make_outcome("The tests cannot pass yet")), "REPAIR");
+        assert_eq!(
+            verdict_of(&make_outcome("The tests cannot pass yet")),
+            "REPAIR"
+        );
         assert_eq!(verdict_of(&make_outcome("验收不通过，请修正")), "REPAIR");
         // Chinese checks
         assert_eq!(verdict_of(&make_outcome("代码编写完成，通过")), "PASS");
         assert_eq!(verdict_of(&make_outcome("发现死锁风险，需修复")), "REPAIR");
-        assert_eq!(verdict_of(&make_outcome("严重设计缺陷，必须重写")), "REWRITE");
+        assert_eq!(
+            verdict_of(&make_outcome("严重设计缺陷，必须重写")),
+            "REWRITE"
+        );
         // Severity precedence: REWRITE > REPAIR > PASS
-        assert_eq!(verdict_of(&make_outcome("虽然部分测试 PASS，但架构缺陷需要 REWRITE")), "REWRITE");
+        assert_eq!(
+            verdict_of(&make_outcome("虽然部分测试 PASS，但架构缺陷需要 REWRITE")),
+            "REWRITE"
+        );
     }
 }

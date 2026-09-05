@@ -52,10 +52,8 @@ impl Tool for WriteTool {
             .ok_or_else(|| ToolError::InvalidArgs("missing 'content'".into()))?;
 
         let abs = ctx.workspace.resolve(path);
-        if !ctx.workspace.contains(&abs) {
-            return Ok(ToolOutput::err(format!(
-                "refused: {path} is outside the workspace"
-            )));
+        if let Err(e) = ctx.workspace.verify_path(&abs) {
+            return Ok(ToolOutput::err(format!("refused: {e}")));
         }
 
         write_atomic(&abs, content).await?;

@@ -133,24 +133,50 @@ impl Tool for BashTool {
         cmd.current_dir(&ctx.workspace.root);
         cmd.kill_on_drop(true);
 
-        // Race the subprocess against (timeout, optional cancel).
-        // Whichever fires first wins; `cmd.output()` is dropped on
-        // cancel, which thanks to `kill_on_drop(true)` sends SIGKILL
-        // to the child.
-        let output_fut = cmd.output();
+        let child = cmd
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .map_err(ToolError::Io)?;
+        let child_pid = child.id();
+
+        let output_fut = child.wait_with_output();
         tokio::pin!(output_fut);
-        let output = if let Some(token) = &ctx.cancel {
+
+        let res = if let Some(token) = &ctx.cancel {
             tokio::select! {
                 biased;
                 _ = token.cancelled() => {
+                    #[cfg(windows)]
+                    if let Some(pid) = child_pid {
+                        let _ = std::process::Command::new("taskkill")
+                            .args(["/F", "/T", "/PID", &pid.to_string()])
+                            .output();
+                    }
                     return Ok(ToolOutput::err("cancelled by user"));
                 }
                 res = tokio::time::timeout(timeout, &mut output_fut) => res,
             }
         } else {
             tokio::time::timeout(timeout, &mut output_fut).await
-        }
-        .map_err(|_| ToolError::Other(format!("timed out after {}s", timeout.as_secs())))??;
+        };
+
+        let output = match res {
+            Ok(Ok(out)) => out,
+            Ok(Err(e)) => return Err(ToolError::Io(e)),
+            Err(_) => {
+                #[cfg(windows)]
+                if let Some(pid) = child_pid {
+                    let _ = std::process::Command::new("taskkill")
+                        .args(["/F", "/T", "/PID", &pid.to_string()])
+                        .output();
+                }
+                return Err(ToolError::Other(format!(
+                    "timed out after {}s",
+                    timeout.as_secs()
+                )));
+            }
+        };
 
         let mut buf = String::with_capacity(output.stdout.len() + output.stderr.len() + 64);
         if !output.stdout.is_empty() {
