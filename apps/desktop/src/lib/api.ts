@@ -518,3 +518,119 @@ export interface WorkflowStatus {
 export async function getWorkflowStatus(wfId: string): Promise<WorkflowStatus> {
   return invoke<WorkflowStatus>("get_workflow_status", { body: { wf_id: wfId } });
 }
+
+// ── v0.4.36: editor file access ─────────────────────────────────
+// Single-file read/write for the in-app editor. Both routes live
+// in the pipe-server and enforce workspace containment + a 2 MiB
+// cap. The mtime round-trip (read → hold → echo on save) is the
+// concurrent-modification guard: the server refuses a write whose
+// expected_mtime_ms no longer matches disk (conflict: true), so a
+// stale buffer can never silently clobber agent output.
+
+export interface WorkspaceFile {
+  ok: boolean;
+  path: string;
+  content: string;
+  /** File mtime in ms since epoch at read time. Echo this back
+   * on write; a mismatch → conflict. */
+  mtime_ms?: number | null;
+  size?: number;
+  error?: string;
+}
+
+export interface WorkspaceFileWriteResult {
+  ok: boolean;
+  path?: string;
+  mtime_ms?: number | null;
+  conflict?: boolean;
+  readonly?: boolean;
+  error?: string;
+}
+
+export async function getWorkspaceFile(path: string): Promise<WorkspaceFile> {
+  return invoke<WorkspaceFile>("get_workspace_file", { body: { path } });
+}
+
+export async function writeWorkspaceFile(args: {
+  path: string;
+  content: string;
+  expected_mtime_ms?: number | null;
+}): Promise<WorkspaceFileWriteResult> {
+  return invoke<WorkspaceFileWriteResult>("write_workspace_file", { body: args });
+}
+
+// ── v0.4.36: checkpoints ────────────────────────────────────────
+// Snapshots taken automatically before every worker run and on
+// demand. Restore is two-phase: preview (confirm=false) returns
+// the affected-file list; only confirm=true applies, and the UI
+// must ask the chairman before sending it.
+
+export interface CheckpointInfo {
+  id: string;
+  at: number;
+  label: string;
+  /** "git" (object-level snapshot, worktree untouched) | "copy". */
+  kind: string;
+  file_count: number;
+  files_truncated: boolean;
+}
+
+export async function createCheckpoint(label?: string): Promise<{
+  ok: boolean;
+  checkpoint?: CheckpointInfo;
+  error?: string;
+}> {
+  return invoke("create_checkpoint", { body: { label: label ?? "manual" } });
+}
+
+export async function listCheckpoints(): Promise<{
+  ok: boolean;
+  count: number;
+  rows: CheckpointInfo[];
+}> {
+  return invoke<{ ok: boolean; count: number; rows: CheckpointInfo[] }>("list_checkpoints");
+}
+
+export interface RestorePreview {
+  files: string[];
+  /** true = captured list, not a live diff (copy checkpoints). */
+  approximate: boolean;
+}
+
+export async function restoreCheckpoint(args: {
+  id: string;
+  confirm: boolean;
+}): Promise<
+  | { ok: true; applied: false; preview: RestorePreview }
+  | { ok: true; applied: true; files_restored: number }
+  | { ok: false; error: string }
+> {
+  return invoke("restore_checkpoint", { body: args });
+}
+
+// ── v0.4.36: MCP (Model Context Protocol) status ────────────────
+// The runtime connects each [mcp.servers.*] entry from the
+// workspace flowntier.toml in the background; this surfaces the
+// last scan. Settings/the editor strip use it for the status chip.
+
+export interface McpServerStatus {
+  name: string;
+  status: "ok" | "failed" | "disabled";
+  tools: number;
+  error?: string | null;
+}
+
+export interface McpStatusResponse {
+  ok: boolean;
+  /** "auto" | "readonly" — the active [permissions] mode. */
+  mode?: string;
+  servers?: McpServerStatus[];
+}
+
+export async function getMcpStatus(): Promise<McpStatusResponse> {
+  return invoke<McpStatusResponse>("get_mcp_status");
+}
+
+export async function rescanMcp(): Promise<{ ok: boolean }> {
+  return invoke<{ ok: boolean }>("rescan_mcp");
+}

@@ -6,6 +6,75 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.36] - 2026-09-19
+
+### Added
+
+* **MCP client (Model Context Protocol)** — `agent-core::mcp`
+  speaks the stdio transport (newline-delimited JSON-RPC:
+  `initialize` → `tools/list` → `tools/call`). Servers are
+  declared per-project in the workspace-root `flowntier.toml`
+  (`[mcp.servers.<name>]` with `command` / `args` / `env` /
+  `enabled`); tools land in the agent registry as
+  `mcp__<server>__<tool>`. Hardening from the design review:
+  handshakes run in the background with a per-server 3 s
+  timeout (a hung server can never delay the pipe listen loop),
+  stderr is drained from spawn (no pipe-buffer deadlock), and
+  kills take the whole process tree (`taskkill /T /F`, so
+  `npx.cmd` wrappers leave no orphaned node processes).
+  `POST /api/mcp/rescan` + `GET /api/mcp/status` expose the
+  live state; a workspace switch re-scans automatically.
+* **Project rule files** — `AGENTS.md`, `CLAUDE.md`,
+  `.agent/rules/*.md` and the flat `.agent/*.md` layout are
+  concatenated (24 KiB cap, char-boundary-safe truncation) into
+  every role's system prompt via `AgentConfig::rules`. Re-read
+  per run: an edit applies to the next task without a restart.
+* **Permission modes** — `[permissions] mode = "auto" |
+  "readonly"` in the workspace `flowntier.toml`. `readonly`
+  maps to `Capabilities::no_modify()`, strips write-class
+  builtins (`write` / `patch` / `bash` / `nwt_log`) from the
+  registry, and excludes MCP tools entirely — belt and braces,
+  with the mode reaching every tool execution through
+  `AgentConfig::capabilities` (was hard-coded `default()`).
+* **Checkpoints** — the orchestrator snapshots the workspace
+  before every worker run (`auto: before worker …` labels) and
+  users can create/list/restore via
+  `POST /api/checkpoint/{create,restore}` + `GET
+  /api/checkpoint/list`. Git workspaces get object-level
+  snapshots built from a *temporary* index
+  (`GIT_INDEX_FILE` + `write-tree` + `commit-tree`) — the
+  user's index, refs and worktree are never touched. Non-git
+  workspaces fall back to a bounded copy (200 MB budget,
+  `node_modules` / `target` / `.git` excluded). Restore is
+  two-phase: preview the affected files, confirm, then apply.
+* **In-app file editor** — CodeMirror 6 in the desktop shell:
+  click a file in the tree to open it (read-only by default,
+  explicit edit toggle), syntax highlighting for Rust / JS-TS /
+  JSON / Markdown / Python, Ctrl+S save guarded by an mtime
+  conflict check so a stale buffer can never clobber agent
+  output. Backed by new `GET` / `POST /api/workspace/file`
+  routes with the same workspace containment rules as the
+  tree walker.
+* **Persistent CheckpointsStrip** — a compact checkpoint bar
+  above the console area (visible even when the console has no
+  content), plus `GET /api/mcp/status` surfacing the active
+  permission mode and per-server MCP health.
+
+### Fixed
+
+* `tools/bump_version.sh` no longer fails on the desktop
+  shell's `version = { workspace = true }` inheritance: the
+  script now edits exactly the three manifests that carry a
+  literal version and *verifies* the inheritance instead of
+  trying to rewrite it.
+* `Tool::name` / `Tool::description` widened from
+  `&'static str` to `&str` and `ToolRegistry` keys to owned
+  `String`s — the prerequisite for runtime-generated tool
+  names (MCP) without leaking strings; built-ins are
+  untouched.
+
+## [Unreleased]
+
 ### Fixed
 * **NWT 000109 — Perfect fixes, not patches**: tear out the historical
   belt-and-braces workarounds and replace them with root-cause fixes:

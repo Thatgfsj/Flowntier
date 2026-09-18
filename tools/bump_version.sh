@@ -1,24 +1,29 @@
 #!/usr/bin/env bash
 #
-# bump_version.sh — atomic version bump across all 4 manifests.
+# bump_version.sh — atomic version bump across all versioned manifests.
 #
 # Usage:
 #   tools/bump_version.sh <new_version>
 #
 # Example:
-#   tools/bump_version.sh 0.4.1
+#   tools/bump_version.sh 0.4.36
 #
-# Updates:
-#   1. tauri.conf.json                         ("version": "X.Y.Z")
-#   2. apps/desktop/src-tauri/Cargo.toml       (version = "X.Y.Z")
-#   3. apps/desktop/package.json               ("version": "X.Y.Z")
-#   4. Cargo.toml [workspace.package]          (version = "X.Y.Z")
+# v0.4.36 note: the desktop shell crate inherits its version from
+# the workspace (`version = { workspace = true }` in
+# apps/desktop/src-tauri/Cargo.toml), so there are exactly THREE
+# manifests to edit and ONE to verify as inherited:
+#
+#   1. tauri.conf.json                         ("version": "X.Y.Z")  ← edited
+#   2. apps/desktop/package.json               ("version": "X.Y.Z")  ← edited
+#   3. Cargo.toml [workspace.package]          (version = "X.Y.Z")   ← edited
+#   4. apps/desktop/src-tauri/Cargo.toml       (workspace = true)    ← verified only
 #
 # Validates:
 #   * exactly one argument
 #   * argument matches semver regex
 #   * all 4 files exist
-#   * all 4 files currently match (no in-progress bump)
+#   * the 3 editable files currently match (no in-progress bump)
+#   * the src-tauri crate still declares workspace inheritance
 #
 # After running:
 #   * verify with `git diff --stat`
@@ -71,7 +76,16 @@ if [[ "$CURRENT" == "$NEW" ]]; then
     exit 1
 fi
 
-# Verify all 4 currently agree on $CURRENT
+# Verify the desktop crate still inherits its version from the
+# workspace (if someone inlines a literal version again, this
+# script must NOT silently leave it behind).
+if ! grep -Eq '^version[[:space:]]*=[[:space:]]*\{[[:space:]]*workspace[[:space:]]*=[[:space:]]*true' "$DESKTOP_CARGO"; then
+    echo "error: $DESKTOP_CARGO no longer declares 'version = { workspace = true }'." >&2
+    echo "  Either restore the inheritance or update this script to bump it directly." >&2
+    exit 1
+fi
+
+# Verify the 3 editable files currently agree on $CURRENT
 check_agrees() {
     local file="$1" pattern="$2" where="$3"
     local found
@@ -87,9 +101,6 @@ check_agrees() {
 check_agrees "$WORKSPACE_CARGO" \
     '^version[[:space:]]*=[[:space:]]*"([^"]+)"' \
     "$WORKSPACE_CARGO [workspace.package]"
-check_agrees "$DESKTOP_CARGO" \
-    '^version[[:space:]]*=[[:space:]]*"([^"]+)"' \
-    "$DESKTOP_CARGO [package]"
 check_agrees "$DESKTOP_PKG" \
     '"version":[[:space:]]*"([^"]+)"' \
     "$DESKTOP_PKG"
@@ -103,29 +114,18 @@ echo "Bumping version: $CURRENT → $NEW"
 sed -i.bak -E "s/\"version\":[[:space:]]*\"$CURRENT\"/\"version\": \"$NEW\"/" "$TAURI_CONF"
 rm -f "$TAURI_CONF.bak"
 
-# 2. apps/desktop/src-tauri/Cargo.toml (only the first match — the [package] one)
-# Use awk for in-place editing since sed -i is non-portable.
-awk -v cur="$CURRENT" -v new="$NEW" '
-    /^version[[:space:]]*=/ && !done {
-        gsub("\"" cur "\"", "\"" new "\"")
-        done = 1
-    }
-    { print }
-' "$DESKTOP_CARGO" > "$DESKTOP_CARGO.tmp" \
-    && mv "$DESKTOP_CARGO.tmp" "$DESKTOP_CARGO"
-
-# 3. apps/desktop/package.json
+# 2. apps/desktop/package.json
 sed -i.bak -E "s/\"version\":[[:space:]]*\"$CURRENT\"/\"version\": \"$NEW\"/" "$DESKTOP_PKG"
 rm -f "$DESKTOP_PKG.bak"
 
-# 4. Cargo.toml [workspace.package]
+# 3. Cargo.toml [workspace.package]
 sed -i.bak -E "s/^version[[:space:]]*=[[:space:]]*\"$CURRENT\"/version     = \"$NEW\"/" "$WORKSPACE_CARGO"
 rm -f "$WORKSPACE_CARGO.bak"
 
 echo ""
 echo "Done. Verify with:"
 echo "  git diff --stat"
-echo "  grep -E '\"version\"|^version' $TAURI_CONF $DESKTOP_CARGO $DESKTOP_PKG $WORKSPACE_CARGO"
+echo "  grep -E '\"version\"|^version' $TAURI_CONF $DESKTOP_PKG $WORKSPACE_CARGO"
 echo ""
 echo "Then:"
 echo "  cargo check --workspace"

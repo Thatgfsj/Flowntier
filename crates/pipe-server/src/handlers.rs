@@ -4,6 +4,7 @@
 //! client has something to talk to. New handlers are added as
 //! the Python routes get ported.
 
+use agent_core::mcp::McpServer;
 use agent_core::provider::openai::OpenAiProvider;
 use agent_core::tool::ToolRegistry;
 use agent_core::workspace::Workspace;
@@ -16,6 +17,8 @@ use zeroize::Zeroizing;
 
 use crate::dispatcher::Dispatcher;
 use crate::secrets::SecretStore;
+use crate::tools_registry;
+use crate::workspace_toml::PermissionMode;
 
 /// v0.4.21 (event 000066): one error surfaced by the pipe-server
 /// to the desktop TopBar red-dot badge. Kept in-memory only —
@@ -43,8 +46,21 @@ pub struct ErrorRecord {
 pub struct ServerState {
     /// Event bus that all event-pipe clients subscribe to.
     pub events: broadcast::Sender<AgentEvent>,
-    /// Default tool registry.
-    pub tools: Arc<ToolRegistry>,
+    /// Current tool registry. v0.4.36: wrapped in
+    /// `RwLock<Arc<…>>` so background MCP rebuilds can swap it
+    /// atomically — readers snapshot the Arc and are never
+    /// blocked mid-task (same pattern as `workspace` below).
+    pub tools: Arc<std::sync::RwLock<Arc<ToolRegistry>>>,
+    /// v0.4.36: live MCP server connections of the current
+    /// generation. Replaced wholesale on every rebuild; replaced
+    /// servers are shut down (process-tree kill).
+    pub mcp_servers: Arc<tokio::sync::Mutex<Vec<Arc<McpServer>>>>,
+    /// v0.4.36: last MCP scan outcome, for `GET /api/mcp/status`.
+    pub mcp_status: Arc<tokio::sync::Mutex<Vec<tools_registry::McpServerStatus>>>,
+    /// v0.4.36: active `[permissions] mode` for the current
+    /// workspace (read by run_task / orchestrator when building
+    /// each agent's config).
+    pub permission_mode: Arc<std::sync::RwLock<PermissionMode>>,
     /// v0.4.21 (event 000066): in-memory ring buffer of the
     /// 200 most-recent error records. Surfaces to the desktop
     /// TopBar via `GET /api/errors/recent`. Avoids hammering
@@ -150,11 +166,25 @@ impl ServerState {
         };
         let secrets = Arc::new(SecretStore::new(repo.clone(), data_dir));
 
-        Self {
+        // v0.4.36: seed the registry from the workspace config
+        // synchronously (cheap — builtins + permission filtering),
+        // then hand MCP handshakes to a background rebuild so a
+        // hung server can never delay the listen loop.
+        let ws_toml = crate::workspace_toml::WorkspaceToml::load(&workspace_root);
+        let mut initial = ToolRegistry::with_builtins();
+        if ws_toml.permissions.mode == PermissionMode::ReadOnly {
+            initial.retain_read_only();
+        }
+        let mode = ws_toml.permissions.mode;
+
+        let state = Self {
             events,
-            tools: Arc::new(ToolRegistry::with_builtins()),
+            tools: Arc::new(std::sync::RwLock::new(Arc::new(initial))),
+            mcp_servers: Arc::new(tokio::sync::Mutex::new(Vec::new())),
+            mcp_status: Arc::new(tokio::sync::Mutex::new(Vec::new())),
+            permission_mode: Arc::new(std::sync::RwLock::new(mode)),
             workspace: Arc::new(std::sync::RwLock::new(Workspace::new(
-                workspace_root,
+                workspace_root.clone(),
                 "flowntier",
             ))),
             errors: Arc::new(std::sync::Mutex::new(
@@ -164,6 +194,44 @@ impl ServerState {
             repo,
             dispatcher: Arc::new(std::sync::Mutex::new(None)),
             active_workflows: Arc::new(ActiveWorkflows::new()),
+        };
+
+        // v0.4.36: MCP handshakes run in the background — the pipe
+        // server must start listening even if every configured MCP
+        // server is offline (debate point C).
+        let for_rebuild = state.clone();
+        tokio::spawn(async move {
+            tools_registry::rebuild(&for_rebuild, "startup").await;
+        });
+
+        state
+    }
+
+    /// v0.4.36: snapshot the current tool registry. Cheap (Arc
+    /// clone), used everywhere an agent is built so a background
+    /// MCP rebuild can swap the registry atomically.
+    pub fn tools_snapshot(&self) -> Arc<ToolRegistry> {
+        self.tools.read().expect("tools rwlock poisoned").clone()
+    }
+
+    /// v0.4.36: current `[permissions] mode`.
+    pub fn permission(&self) -> PermissionMode {
+        *self
+            .permission_mode
+            .read()
+            .expect("permission rwlock poisoned")
+    }
+
+    /// v0.4.36: build the [`AgentConfig`] for a run in workspace
+    /// `ws`: capability set from the permission mode + project
+    /// rule files re-read per run (an `AGENTS.md` edit applies to
+    /// the next task without a restart).
+    pub fn agent_config(&self, ws: &Workspace) -> AgentConfig {
+        let caps = tools_registry::capabilities_for(self.permission());
+        AgentConfig {
+            capabilities: caps,
+            rules: agent_core::rules::load_project_rules(&ws.root),
+            ..AgentConfig::default()
         }
     }
 
@@ -175,6 +243,12 @@ impl ServerState {
     /// shell ensures this is called *before* the next
     /// `POST /api/run_task` lands, so in practice the swap is
     /// observed by every new task.
+    ///
+    /// v0.4.36: a workspace swap now also triggers a background
+    /// tool-registry rebuild (that project's `flowntier.toml`,
+    /// rule files, and permission mode take over; the previous
+    /// generation of MCP servers is shut down once the new
+    /// registry is live).
     pub fn set_workspace(&self, root: std::path::PathBuf) {
         let mut g = self.workspace.write().expect("workspace rwlock poisoned");
         *g = Workspace::new(root, "flowntier");
@@ -183,6 +257,11 @@ impl ServerState {
             "v0.4.21 (event 000066): workspace swapped to {}",
             g.root.display()
         );
+        drop(g);
+        let s = self.clone();
+        tokio::spawn(async move {
+            tools_registry::rebuild(&s, "workspace_set").await;
+        });
     }
 
     /// v0.4.21 (event 000066): snapshot the current workspace
@@ -673,6 +752,286 @@ pub fn register_all(d: &mut Dispatcher, state: ServerState) {
                     "count": entries.len(),
                 }),
             ))
+        })
+    });
+
+    // ── v0.4.36: GET /api/workspace/file ─────────────────────
+    // Body: { path: "<relative>" }. Returns one file's UTF-8
+    // content + mtime. This is the editor's read path; write goes
+    // through POST. Same workspace containment rules as /tree.
+    // 2 MiB cap keeps the JSON-RPC line protocol (1 MiB frames on
+    // the pipe, 5 MiB on the HTTP bridge) and the webview sane.
+    const FILE_API_MAX_BYTES: usize = 2 * 1024 * 1024;
+    let s_wsfile = state.clone();
+    d.register("GET", "/api/workspace/file", move |body| {
+        let s = s_wsfile.clone();
+        let rel = body
+            .get("path")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        Box::pin(async move {
+            if rel.is_empty() {
+                return Ok((400, json!({"ok": false, "error": "missing 'path'"})));
+            }
+            let ws = s.workspace_snapshot();
+            let candidate = ws.resolve(&rel);
+            if !ws.contains(&candidate) {
+                return Ok((403, json!({"ok": false, "error": "path escapes workspace"})));
+            }
+            let meta = match std::fs::metadata(&candidate) {
+                Ok(m) => m,
+                Err(e) => {
+                    return Ok((
+                        404,
+                        json!({"ok": false, "error": format!("stat failed: {e}")}),
+                    ))
+                }
+            };
+            if !meta.is_file() {
+                return Ok((400, json!({"ok": false, "error": "not a regular file"})));
+            }
+            if meta.len() as usize > FILE_API_MAX_BYTES {
+                return Ok((
+                    413,
+                    json!({
+                        "ok": false,
+                        "error": format!(
+                            "file larger than {} MiB is not editable in-app",
+                            FILE_API_MAX_BYTES / (1024 * 1024)
+                        ),
+                    }),
+                ));
+            }
+            match std::fs::read(&candidate) {
+                Ok(bytes) => match String::from_utf8(bytes) {
+                    Ok(text) => Ok((
+                        200,
+                        json!({
+                            "ok": true,
+                            "path": rel,
+                            "content": text,
+                            "mtime_ms": meta
+                                .modified()
+                                .ok()
+                                .and_then(|t| {
+                                    t.duration_since(std::time::UNIX_EPOCH).ok()
+                                })
+                                .map(|d| d.as_millis() as u64),
+                            "size": text.len(),
+                        }),
+                    )),
+                    Err(_) => Ok((
+                        415,
+                        json!({"ok": false, "error": "not valid UTF-8 (binary file)"}),
+                    )),
+                },
+                Err(e) => Ok((500, json!({"ok": false, "error": format!("read: {e}")}))),
+            }
+        })
+    });
+
+    // ── v0.4.36: POST /api/workspace/file ────────────────────
+    // Body: { path, content, expected_mtime_ms? }. Writes a file
+    // inside the workspace. When `expected_mtime_ms` is supplied
+    // and differs from the on-disk mtime, the write is refused
+    // with `conflict: true` — the editor uses this so a stale
+    // buffer never silently clobbers agent output (debate point 8).
+    // Refused entirely when the workspace is in readonly mode.
+    let s_wsfileput = state.clone();
+    d.register("POST", "/api/workspace/file", move |body| {
+        let s = s_wsfileput.clone();
+        let rel = body
+            .get("path")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let content = body
+            .get("content")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let expected_mtime_ms = body.get("expected_mtime_ms").and_then(|v| v.as_u64());
+        Box::pin(async move {
+            if rel.is_empty() {
+                return Ok((400, json!({"ok": false, "error": "missing 'path'"})));
+            }
+            if s.permission() == PermissionMode::ReadOnly {
+                return Ok((
+                    403,
+                    json!({
+                        "ok": false,
+                        "error": "workspace is in readonly mode",
+                        "readonly": true,
+                    }),
+                ));
+            }
+            if content.len() > FILE_API_MAX_BYTES {
+                return Ok((413, json!({"ok": false, "error": "content too large"})));
+            }
+            let ws = s.workspace_snapshot();
+            let candidate = ws.resolve(&rel);
+            if !ws.contains(&candidate) {
+                return Ok((403, json!({"ok": false, "error": "path escapes workspace"})));
+            }
+            if let Some(exp) = expected_mtime_ms {
+                let current = std::fs::metadata(&candidate)
+                    .ok()
+                    .and_then(|m| m.modified().ok())
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_millis() as u64);
+                if let Some(cur) = current {
+                    if cur != exp {
+                        return Ok((
+                            409,
+                            json!({
+                                "ok": false,
+                                "conflict": true,
+                                "error": "file changed on disk since it was opened",
+                                "mtime_ms": cur,
+                            }),
+                        ));
+                    }
+                }
+            }
+            if let Some(parent) = candidate.parent() {
+                if let Err(e) = std::fs::create_dir_all(parent) {
+                    return Ok((500, json!({"ok": false, "error": format!("mkdir: {e}")})));
+                }
+            }
+            match std::fs::write(&candidate, content.as_bytes()) {
+                Ok(()) => {
+                    let mtime_ms = std::fs::metadata(&candidate)
+                        .ok()
+                        .and_then(|m| m.modified().ok())
+                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                        .map(|d| d.as_millis() as u64);
+                    Ok((200, json!({"ok": true, "path": rel, "mtime_ms": mtime_ms})))
+                }
+                Err(e) => Ok((500, json!({"ok": false, "error": format!("write: {e}")}))),
+            }
+        })
+    });
+
+    // ── v0.4.36: POST /api/checkpoint/create ─────────────────
+    // Body: { label? }. Snapshot the workspace (git-first, copy
+    // fallback). Auto-checkpoints from the orchestrator use the
+    // same routine.
+    let s_ckpt_create = state.clone();
+    d.register("POST", "/api/checkpoint/create", move |body| {
+        let s = s_ckpt_create.clone();
+        let label = body
+            .get("label")
+            .and_then(|v| v.as_str())
+            .unwrap_or("manual")
+            .to_string();
+        Box::pin(async move {
+            let ws = s.workspace_snapshot();
+            match crate::checkpoint::create(&ws.root, &label).await {
+                Ok(m) => Ok((
+                    200,
+                    json!({"ok": true, "checkpoint": crate::checkpoint::manifest_json(&m)}),
+                )),
+                Err(e) => Ok((500, json!({"ok": false, "error": e.to_string()}))),
+            }
+        })
+    });
+
+    // ── v0.4.36: GET /api/checkpoint/list ────────────────────
+    let s_ckpt_list = state.clone();
+    d.register("GET", "/api/checkpoint/list", move |_body| {
+        let s = s_ckpt_list.clone();
+        Box::pin(async move {
+            let ws = s.workspace_snapshot();
+            let rows: Vec<Value> = crate::checkpoint::list(&ws.root)
+                .iter()
+                .map(crate::checkpoint::manifest_json)
+                .collect();
+            Ok((200, json!({"ok": true, "count": rows.len(), "rows": rows})))
+        })
+    });
+
+    // ── v0.4.36: POST /api/checkpoint/restore ────────────────
+    // Body: { id, confirm?: bool, label? }.
+    // confirm=false (default) → preview only: which files would
+    // change. confirm=true → apply. The two-phase shape exists
+    // because a silent restore over manual edits is data loss.
+    let s_ckpt_restore = state.clone();
+    d.register("POST", "/api/checkpoint/restore", move |body| {
+        let s = s_ckpt_restore.clone();
+        let id = body
+            .get("id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let confirm = body
+            .get("confirm")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        Box::pin(async move {
+            if s.permission() == PermissionMode::ReadOnly {
+                return Ok((
+                    403,
+                    json!({"ok": false, "error": "workspace is in readonly mode"}),
+                ));
+            }
+            let ws = s.workspace_snapshot();
+            match crate::checkpoint::restore_preview(&ws.root, &id).await {
+                Ok(preview) => {
+                    if !confirm {
+                        return Ok((
+                            200,
+                            json!({
+                                "ok": true,
+                                "preview": preview,
+                                "applied": false,
+                            }),
+                        ));
+                    }
+                    match crate::checkpoint::restore(&ws.root, &id, &preview).await {
+                        Ok(count) => Ok((
+                            200,
+                            json!({"ok": true, "applied": true, "files_restored": count}),
+                        )),
+                        Err(e) => Ok((500, json!({"ok": false, "error": e.to_string()}))),
+                    }
+                }
+                Err(e) => Ok((404, json!({"ok": false, "error": e.to_string()}))),
+            }
+        })
+    });
+
+    // ── v0.4.36: GET /api/mcp/status ─────────────────────────
+    // Last tool-registry scan: per-server status + the active
+    // permission mode. Purely observational.
+    let s_mcp_status = state.clone();
+    d.register("GET", "/api/mcp/status", move |_body| {
+        let s = s_mcp_status.clone();
+        Box::pin(async move {
+            let rows = s.mcp_status.lock().await.clone();
+            Ok((
+                200,
+                json!({
+                    "ok": true,
+                    "mode": s.permission(),
+                    "servers": rows,
+                }),
+            ))
+        })
+    });
+
+    // ── v0.4.36: POST /api/mcp/rescan ────────────────────────
+    // Kick a background registry rebuild (same path as startup and
+    // workspace-set). Returns immediately; poll /api/mcp/status.
+    let s_mcp_rescan = state.clone();
+    d.register("POST", "/api/mcp/rescan", move |_body| {
+        let s = s_mcp_rescan.clone();
+        Box::pin(async move {
+            let s2 = s.clone();
+            tokio::spawn(async move {
+                tools_registry::rebuild(&s2, "manual_rescan").await;
+            });
+            Ok((200, json!({"ok": true, "started": true})))
         })
     });
 
@@ -3217,9 +3576,11 @@ async fn run_task(body: Value, state: Arc<ServerState>) -> Result<(u16, Value), 
     let agent = Agent::new(
         role_enum,
         provider,
-        state.tools.clone(),
+        // v0.4.36: snapshot (background MCP rebuilds swap the Arc)
+        // + permission capabilities + project rules.
+        state.tools_snapshot(),
         state.workspace_snapshot(),
-        AgentConfig::default(),
+        state.agent_config(&state.workspace_snapshot()),
     );
 
     // ── Stream events to subscribers while running ────────────

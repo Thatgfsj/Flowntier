@@ -57,6 +57,13 @@ import {
 export interface FileTreeProps {
   /** Optional override; default = poll `/api/workspace/tree` every N ms. */
   pollMs?: number;
+  /**
+   * v0.4.36: optional "open this file in the editor" callback.
+   * When present, file rows render as buttons that invoke it;
+   * when absent, file rows stay inert spans (previous behavior).
+   * Directory rows are untouched either way.
+   */
+  onOpenFile?: ((path: string) => void) | undefined;
 }
 
 function fmtSize(n: number | undefined): string {
@@ -152,9 +159,14 @@ interface NodeProps {
   onNavigate: (path: string) => void;
   /** Set of paths the user has explicitly expanded. */
   expanded: Set<string>;
+  /**
+   * v0.4.36: present → file rows are clickable buttons that open
+   * the file in EditorPane. Absent → file rows stay plain spans.
+   */
+  onOpenFile?: ((path: string) => void) | undefined;
 }
 
-function Node({ entry, depth, onToggle, onNavigate, expanded }: NodeProps) {
+function Node({ entry, depth, onToggle, onNavigate, expanded, onOpenFile }: NodeProps) {
   const indent = { paddingLeft: `${depth * 12 + 8}px` };
   // entry.name / entry.path are guaranteed non-empty strings
   // because normalizeEntry ran at the IPC boundary. But
@@ -210,10 +222,36 @@ function Node({ entry, depth, onToggle, onNavigate, expanded }: NodeProps) {
                 onToggle={onToggle}
                 onNavigate={onNavigate}
                 expanded={expanded}
+                onOpenFile={onOpenFile}
               />
             ))}
           </div>
         )}
+      </div>
+    );
+  }
+  // v0.4.36: when the parent passed an `onOpenFile` callback, the
+  // file row becomes a button that opens the file in the editor
+  // pane (EditorPane). Size display is kept; hover styling added
+  // so the row reads as interactive. Directory behavior above is
+  // unchanged.
+  if (entry.is_file && onOpenFile) {
+    return (
+      <div
+        className="group flex w-full items-center gap-1 rounded px-1 py-0.5 text-left text-xs hover:bg-surface-3"
+        style={indent}
+        title={entry.path}
+      >
+        <button
+          type="button"
+          onClick={() => entry.path && onOpenFile(entry.path)}
+          className="flex flex-1 items-center gap-1 text-left"
+          aria-label={`打开 ${entry.name}`}
+        >
+          <span className="w-3 select-none text-text-secondary"> </span>
+          <span className="font-mono">📄 {entry.name}</span>
+        </button>
+        <span className="ml-auto text-text-secondary">{fmtSize(entry.size)}</span>
       </div>
     );
   }
@@ -230,7 +268,7 @@ function Node({ entry, depth, onToggle, onNavigate, expanded }: NodeProps) {
   );
 }
 
-export function FileTree({ pollMs = 5000 }: FileTreeProps) {
+export function FileTree({ pollMs = 5000, onOpenFile }: FileTreeProps) {
   const [root, setRoot] = useState<string>("");
   const [data, setData] = useState<FileTreeResponse>(normalizeResponse(null));
   const [error, setError] = useState<string | null>(null);
@@ -389,6 +427,7 @@ export function FileTree({ pollMs = 5000 }: FileTreeProps) {
             onToggle={onToggle}
             onNavigate={onNavigate}
             expanded={expanded}
+            onOpenFile={onOpenFile}
           />
         ))}
         {data.truncated && (

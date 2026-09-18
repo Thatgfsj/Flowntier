@@ -1887,6 +1887,63 @@ async fn get_log_file_path() -> Result<serde_json::Value, String> {
     pipe_request("GET", "/api/logs/get?tail=0", None).await
 }
 
+// ── v0.4.36: editor file access + checkpoints + MCP status ──────
+
+/// Read one workspace file for the in-app editor (EditorPane).
+/// Body: `{ path: string }`. The pipe-server enforces workspace
+/// containment + the 2 MiB cap and returns `{ ok, content,
+/// mtime_ms }` — the mtime is what the editor echoes back on save
+/// to detect concurrent modification.
+#[tauri::command]
+async fn get_workspace_file(body: serde_json::Value) -> Result<serde_json::Value, String> {
+    let p = body.get("path").and_then(|v| v.as_str()).unwrap_or("");
+    if p.is_empty() {
+        return Err("missing 'path'".into());
+    }
+    let path = format!("/api/workspace/file?path={}", url_encode(p));
+    pipe_request("GET", &path, None).await
+}
+
+/// Write one workspace file. Body: `{ path, content,
+/// expected_mtime_ms? }`. A stale `expected_mtime_ms` yields
+/// `{ ok:false, conflict:true }` instead of clobbering the file.
+#[tauri::command]
+async fn write_workspace_file(body: serde_json::Value) -> Result<serde_json::Value, String> {
+    pipe_request("POST", "/api/workspace/file", Some(body)).await
+}
+
+/// Create a checkpoint. Body: `{ label?: string }`.
+#[tauri::command]
+async fn create_checkpoint(body: serde_json::Value) -> Result<serde_json::Value, String> {
+    pipe_request("POST", "/api/checkpoint/create", Some(body)).await
+}
+
+/// List checkpoints, newest first.
+#[tauri::command]
+async fn list_checkpoints() -> Result<serde_json::Value, String> {
+    pipe_request("GET", "/api/checkpoint/list", None).await
+}
+
+/// Restore preview / apply. Body: `{ id, confirm?: bool }` —
+/// confirm=false returns the affected-file list, confirm=true
+/// applies (the UI must show the preview and ask first).
+#[tauri::command]
+async fn restore_checkpoint(body: serde_json::Value) -> Result<serde_json::Value, String> {
+    pipe_request("POST", "/api/checkpoint/restore", Some(body)).await
+}
+
+/// Last MCP scan: per-server status + active permission mode.
+#[tauri::command]
+async fn get_mcp_status() -> Result<serde_json::Value, String> {
+    pipe_request("GET", "/api/mcp/status", None).await
+}
+
+/// Kick a background MCP/permission registry rebuild.
+#[tauri::command]
+async fn rescan_mcp() -> Result<serde_json::Value, String> {
+    pipe_request("POST", "/api/mcp/rescan", None).await
+}
+
 /// Convert a `SystemTime` to an ISO 8601 UTC string with second
 /// precision (e.g. "2026-06-27T12:34:56Z"). Howard Hinnant's
 /// `days_from_civil` algorithm — no chrono dep required.
@@ -2045,6 +2102,9 @@ pub fn run() {
             get_diagnostics,
             get_runtime_workspace, get_workspace_tree, get_recent_errors,
             get_workflow_status,
+            get_workspace_file, write_workspace_file,
+            create_checkpoint, list_checkpoints, restore_checkpoint,
+            get_mcp_status, rescan_mcp,
             get_log_tail, clear_log_file, get_log_file_path,
         ])
         .build(tauri::generate_context!())

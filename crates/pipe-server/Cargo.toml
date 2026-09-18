@@ -37,6 +37,10 @@ base64       = "0.22"
 chrono       = { workspace = true }
 reqwest      = { workspace = true }
 ulid         = { workspace = true }
+# v0.4.36: parse workspace-root flowntier.toml ([mcp]/[permissions])
+toml         = { workspace = true }
+# v0.4.36: checkpoint dir snapshots walk with gitignore-aware excludes
+ignore       = "0.4"
 
 # Agent core: the pipe server dispatches tasks into the in-process
 # agent runtime.

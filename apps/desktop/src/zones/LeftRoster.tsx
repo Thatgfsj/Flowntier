@@ -27,7 +27,18 @@ import { AgentLivePanelTooltip } from "./AgentLivePanel.js";
  * every event. Now the roster subscribes to `useEvents()`
  * directly so changes are scoped to this subtree.
  */
-export function LeftRoster() {
+/**
+ * v0.4.36: optional `onOpenFile` passthrough. App.tsx forwards
+ * `(p) => setEditorPath(p)` so clicking a file in the 文件 tab
+ * opens it in the central EditorPane. Optional + conditional
+ * spread into FileTree because exactOptionalPropertyTypes
+ * rejects passing `undefined` into an optional prop slot.
+ */
+export interface LeftRosterProps {
+  onOpenFile?: ((path: string) => void) | undefined;
+}
+
+export function LeftRoster({ onOpenFile }: LeftRosterProps) {
   const { t } = useTranslation();
   const [tab, setTab] = useState<"agents" | "files">("agents");
 
@@ -183,7 +194,7 @@ export function LeftRoster() {
 
       {tab === "files" && (
         <div className="mt-2">
-          <FileTree pollMs={5000} />
+          <FileTree pollMs={5000} {...(onOpenFile ? { onOpenFile } : {})} />
         </div>
       )}
     </div>

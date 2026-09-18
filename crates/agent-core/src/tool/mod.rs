@@ -35,6 +35,12 @@ pub enum ToolError {
     #[error("{0}")]
     Refused(String),
 
+    /// v0.4.36: an MCP-backed tool failed at the protocol level
+    /// (server crashed, timed out, or answered with a JSON-RPC
+    /// error).
+    #[error("mcp error: {0}")]
+    Mcp(#[from] crate::mcp::McpError),
+
     /// Catch-all.
     #[error("{0}")]
     Other(String),
@@ -205,10 +211,15 @@ impl Capabilities {
 #[async_trait]
 pub trait Tool: Send + Sync + std::fmt::Debug {
     /// Stable name; must match what the LLM emits in tool calls.
-    fn name(&self) -> &'static str;
+    ///
+    /// v0.4.36: widened from `&'static str` to `&str` so runtime-
+    /// generated tools (MCP: `mcp__<server>__<tool>`) can implement
+    /// the trait without leaking strings. Built-in tools still
+    /// return literals.
+    fn name(&self) -> &str;
 
     /// Human description used in the system prompt.
-    fn description(&self) -> &'static str;
+    fn description(&self) -> &str;
 
     /// JSON-Schema describing the tool's arguments. Inlined into
     /// the system prompt so the model knows how to call it.
@@ -225,10 +236,16 @@ pub trait Tool: Send + Sync + std::fmt::Debug {
 /// A registry of tools, looked up by name.
 ///
 /// The default registry ships the built-in tools; users (and
-/// future plugins) can register additional ones.
+/// v0.4.36 MCP servers) can register additional ones.
+///
+/// v0.4.36: keys are owned `String`s so runtime-generated tool
+/// names (MCP `mcp__<server>__<tool>`) can be registered. Callers
+/// that need to mutate the registry at runtime wrap the whole
+/// registry in an `Arc<RwLock<…>>` and swap snapshots (see
+/// `pipe-server`'s `ServerState::tools_snapshot`).
 #[derive(Debug, Default)]
 pub struct ToolRegistry {
-    tools: HashMap<&'static str, Box<dyn Tool>>,
+    tools: HashMap<String, Box<dyn Tool>>,
 }
 
 impl ToolRegistry {
@@ -254,7 +271,25 @@ impl ToolRegistry {
 
     /// Add (or replace) a tool by name.
     pub fn register(&mut self, tool: Box<dyn Tool>) {
-        self.tools.insert(tool.name(), tool);
+        self.tools.insert(tool.name().to_string(), tool);
+    }
+
+    /// Remove a tool by name. No-op when absent.
+    ///
+    /// v0.4.36 (permissions): used to strip write-class builtins
+    /// when the user configures `mode = "readonly"`.
+    pub fn remove(&mut self, name: &str) {
+        self.tools.remove(name);
+    }
+
+    /// v0.4.36 (permissions): drop every write-class built-in tool
+    /// (`write`, `patch`, `bash`, `nwt_log`). Belt-and-braces
+    /// alongside the per-tool `Capabilities` checks: in readonly
+    /// mode the model never even sees these tools.
+    pub fn retain_read_only(&mut self) {
+        for name in ["write", "patch", "bash", "nwt_log"] {
+            self.tools.remove(name);
+        }
     }
 
     /// Look up a tool by name.

@@ -835,6 +835,34 @@ impl Orchestrator {
 
         // Try each candidate in order. Stop on first success.
         let mut last_outcome: Option<TaskOutcome> = None;
+
+        // v0.4.36 (checkpoints): snapshot the workspace before any
+        // worker run so the chairman can always roll back agent
+        // edits. Best-effort: a failed checkpoint is logged and
+        // surfaced as an error-record but never blocks the task.
+        if spec.role == agent_core::prompt::Role::Worker {
+            let ws = self.state.workspace_snapshot();
+            let label = format!("auto: before worker {task_id:?}");
+            match crate::checkpoint::create(&ws.root, &label).await {
+                Ok(m) => {
+                    info!(target: "orchestrator", wf_id = %self.wf_id,
+                          checkpoint = %m.id, kind = %m.kind,
+                          "auto-checkpoint created before worker run");
+                }
+                Err(e) => {
+                    warn!(target: "orchestrator", wf_id = %self.wf_id, error = %e,
+                          "auto-checkpoint failed (continuing)");
+                    self.state.push_error(crate::handlers::ErrorRecord {
+                        at: chrono::Utc::now().timestamp(),
+                        severity: "warn".into(),
+                        source: "checkpoint".into(),
+                        summary: "auto-checkpoint before worker failed".into(),
+                        detail: Some(e.to_string()),
+                    });
+                }
+            }
+        }
+
         for (idx, cand) in candidates.iter().enumerate() {
             info!(
                 target: "orchestrator",
@@ -870,12 +898,15 @@ impl Orchestrator {
                     cand.api_key.to_string(),
                 )),
             };
+            let ws_for_cfg = self.state.workspace_snapshot();
             let agent = agent_core::Agent::new(
                 spec.role,
                 provider,
-                self.state.tools.clone(),
-                self.state.workspace_snapshot(),
-                agent_core::AgentConfig::default(),
+                // v0.4.36: registry snapshot + permission capabilities
+                // + project rules (was hard-coded AgentConfig::default()).
+                self.state.tools_snapshot(),
+                ws_for_cfg.clone(),
+                self.state.agent_config(&ws_for_cfg),
             );
             let task = if let Some(ref ctx) = spec.context {
                 format!("{}\n\n{}", spec.task, ctx)

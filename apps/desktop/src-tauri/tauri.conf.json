@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2.0.0",
   "productName": "Flowntier",
-  "version": "0.4.35",
+  "version": "0.4.36",
   "identifier": "ai.flowntier.desktop",
   "build": {
     "frontendDist": "../dist",
@@ -33,10 +33,10 @@
     "targets": "all",
     "category": "DeveloperTool",
     "publisher": "Thatgfsj",
-    "copyright": "Copyright © 2026 Thatgfsj",
+    "copyright": "Copyright 漏 2026 Thatgfsj",
     "homepage": "https://github.com/Thatgfsj/Flowntier",
-    "shortDescription": "Flowntier — AI software company on your desktop",
-    "longDescription": "Flowntier — a visual AI software company powered by multi-agent workflow.",
+    "shortDescription": "Flowntier 鈥?AI software company on your desktop",
+    "longDescription": "Flowntier 鈥?a visual AI software company powered by multi-agent workflow.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

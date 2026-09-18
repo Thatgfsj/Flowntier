@@ -37,9 +37,11 @@
 pub mod context;
 pub mod event;
 pub mod loop_;
+pub mod mcp;
 pub mod message;
 pub mod prompt;
 pub mod provider;
+pub mod rules;
 pub mod tool;
 pub mod workspace;
 

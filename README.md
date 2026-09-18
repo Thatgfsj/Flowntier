@@ -33,6 +33,38 @@ product.**
 
 ---
 
+## 🆕 What's new in v0.4.36 — harness parity
+
+v0.4.36 brings the runtime up to the 2026 table stakes for
+agent harnesses (the `Claude Code` / `Cursor` capability set)
+without changing the workflow-first product:
+
+* **🔌 MCP client.** Per-project MCP servers in the workspace
+  `flowntier.toml` (`[mcp.servers.<name>]`); their tools join
+  the agent loop as `mcp__<server>__<tool>`. Background
+  handshakes with per-server timeouts, stderr draining, and
+  process-tree kills — a broken server can never take the
+  runtime down. `Settings`-free, file-committable, and
+  re-scanned automatically when you switch workspaces.
+* **📜 Project rule files.** `AGENTS.md` (the de-facto
+  standard), `CLAUDE.md`, and Flowntier's own `.agent/*.md`
+  are loaded into every role's system prompt. Edit → next task
+  picks it up. No restart, no UI.
+* **🔒 Permission modes.** `[permissions] mode = "readonly"`
+  strips every write-class tool (bash included), disables MCP,
+  and locks file saves — for plan/inspect runs on code you
+  don't trust the agents near yet.
+* **⏪ Checkpoints.** The workspace is snapshotted before every
+  worker run (git-native when possible: your index, refs and
+  working tree are never touched). Restore is two-phase —
+  preview the affected files, confirm, then roll back.
+* **📝 A real editor.** Click a file in the tree to open it in
+  CodeMirror 6 — read-only by default, explicit edit toggle,
+  Ctrl+S with mtime conflict detection so you can't clobber
+  what an agent just wrote (and vice versa).
+
+---
+
 ## ✨ What's new in v0.4
 
 * **All-Rust runtime** — the Python FastAPI sidecar and the

@@ -15,6 +15,7 @@
 
 #![allow(clippy::doc_overindented_list_items)]
 
+pub mod checkpoint;
 pub mod dispatcher;
 pub mod handlers;
 pub mod i_ching;
@@ -25,6 +26,8 @@ pub mod providers;
 pub mod scheduler;
 pub mod secrets;
 pub mod server;
+pub mod tools_registry;
+pub mod workspace_toml;
 pub mod ws_bridge;
 
 pub use dispatcher::Dispatcher;

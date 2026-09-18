@@ -30,6 +30,17 @@ pub struct AgentConfig {
     /// many times in a row, the loop emits `Done { status:
     /// "ABORTED_REPEAT" }` and exits. 0 = disabled.
     pub repeat_abort_after: usize,
+    /// v0.4.36 (permissions): capability set applied to every
+    /// tool execution in this run. Callers derive it from the
+    /// workspace's `[permissions] mode` (`"readonly"` maps to
+    /// [`Capabilities::no_modify`]); default = everything on.
+    pub capabilities: crate::tool::Capabilities,
+    /// v0.4.36 (rules): project rule files (AGENTS.md / CLAUDE.md
+    /// / `.agent/*.md`), preloaded by the caller via
+    /// [`crate::rules::load_project_rules`]. Appended after the
+    /// role system prompt — prompt templates and their snapshot
+    /// tests are untouched. `None` = no rule files found.
+    pub rules: Option<String>,
 }
 
 impl Default for AgentConfig {
@@ -38,6 +49,8 @@ impl Default for AgentConfig {
             max_iterations: 50,
             context: ContextConfig::default(),
             repeat_abort_after: 3,
+            capabilities: crate::tool::Capabilities::default(),
+            rules: None,
         }
     }
 }
@@ -201,15 +214,25 @@ async fn drive_loop(
     // can pass prior user/assistant turns via `chat_history` so the
     // agent has memory of the conversation instead of re-asking
     // clarifying questions. Empty Vec → behaves like the old shape.
+    let mut system = derive_system(&agent_id, tools.schemas());
+    // v0.4.36 (rules): project rule files ride along after the role
+    // prompt. Appending (not templating) keeps the prompt module's
+    // snapshots untouched.
+    if let Some(rules) = &cfg.rules {
+        system.push_str("\n\n# Project Rules\n\n");
+        system.push_str(rules);
+    }
     let mut history: Vec<Message> = Vec::with_capacity(2 + chat_history.len());
-    history.push(Message::system(derive_system(&agent_id, tools.schemas())));
+    history.push(Message::system(system));
     history.extend(chat_history);
     history.push(Message::user(task.clone()));
 
     let tool_ctx = ToolContext {
         workspace: workspace.clone(),
         approved: true,
-        capabilities: crate::tool::Capabilities::default(),
+        // v0.4.36 (permissions): was hard-coded to Capabilities::default();
+        // the caller now decides (auto vs readonly workspace mode).
+        capabilities: cfg.capabilities,
         cancel: Some(cancel.clone()),
     };
 
