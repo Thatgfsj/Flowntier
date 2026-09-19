@@ -8,7 +8,7 @@
  * popup (or, worse, hide the total).
  */
 import { describe, expect, it } from "vitest";
-import { summarizeRestoreFiles } from "./checkpointUtil.js";
+import { formatCheckpointTime, summarizeRestoreFiles } from "./checkpointUtil.js";
 
 const makeFiles = (n: number): string[] =>
   Array.from({ length: n }, (_, i) => `src/file_${String(i).padStart(3, "0")}.rs`);
@@ -78,5 +78,31 @@ describe("summarizeRestoreFiles — restore preview truncation", () => {
     const s = summarizeRestoreFiles(hostile);
     expect(s.shown).toEqual(["a.rs", "b.rs"]);
     expect(s.total).toBe(2);
+  });
+});
+
+describe("formatCheckpointTime — unix seconds (not ms) rendering", () => {
+  it("treats server timestamps as unix SECONDS", () => {
+    // 2026-09-19 00:00:00 UTC = 1789766400 seconds. The first strip
+    // build passed seconds to `new Date()` directly and every
+    // checkpoint rendered as January 1970.
+    const seconds = 1789766400;
+    const text = formatCheckpointTime(seconds);
+    expect(text).toContain("2026");
+    expect(text).not.toContain("1970");
+  });
+
+  it("accepts ms-sized values unchanged (forward compat)", () => {
+    const ms = 1789766400000;
+    expect(formatCheckpointTime(ms)).toBe(formatCheckpointTime(seconds()));
+    function seconds(): number {
+      return ms / 1000;
+    }
+  });
+
+  it("renders -- for invalid and epoch-zero values", () => {
+    expect(formatCheckpointTime(0)).toBe("--");
+    expect(formatCheckpointTime(-5)).toBe("--");
+    expect(formatCheckpointTime(Number.NaN)).toBe("--");
   });
 });

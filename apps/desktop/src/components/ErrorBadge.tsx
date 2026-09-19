@@ -23,7 +23,14 @@ export function ErrorBadge() {
     const tick = async () => {
       try {
         const r = await getRecentErrors(10);
-        if (!cancelled) setRows(r.rows);
+        if (!cancelled) {
+          // Normalize at the IPC boundary: a failure envelope
+          // ({ok:false,error}) has no `rows`, and a bare-undefined
+          // here used to explode the whole app via rows.filter
+          // (crash screen FE-8c6711c5). Same normalization the
+          // FileTree got after event 000118.
+          setRows(Array.isArray(r?.rows) ? r.rows : []);
+        }
       } catch {
         // Silent — badge just shows zero.
       }

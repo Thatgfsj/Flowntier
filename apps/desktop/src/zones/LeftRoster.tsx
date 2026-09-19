@@ -89,7 +89,7 @@ export function LeftRoster({ onOpenFile }: LeftRosterProps) {
               : "text-text-tertiary hover:text-text-primary")
           }
         >
-          智能体
+          {t("leftRoster.tabAgents")}
         </button>
         <button
           type="button"
@@ -103,7 +103,7 @@ export function LeftRoster({ onOpenFile }: LeftRosterProps) {
               : "text-text-tertiary hover:text-text-primary")
           }
         >
-          工作区文件
+          {t("leftRoster.tabFiles")}
         </button>
       </div>
 

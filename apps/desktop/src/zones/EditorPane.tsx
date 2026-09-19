@@ -89,6 +89,10 @@ export function EditorPane({ path, onClose }: EditorPaneProps) {
   const [saving, setSaving] = useState(false);
   const [conflict, setConflict] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  // Set on a successful write; the footer shows a "saved HH:MM"
+  // confirmation (the save previously gave zero visible feedback —
+  // the only signal was the disappearing dirty dot).
+  const [savedAt, setSavedAt] = useState<number | null>(null);
   // Bumped by the "reload from disk" action; re-runs the load effect
   // so the view is destroyed and rebuilt from fresh disk content.
   const [reloadNonce, setReloadNonce] = useState(0);
@@ -113,6 +117,7 @@ export function EditorPane({ path, onClose }: EditorPaneProps) {
         baselineDocRef.current = view.state.doc;
         setDirty(false);
         setConflict(false);
+        setSavedAt(Date.now());
       } else if (result.conflict) {
         setConflict(true);
       } else if (result.readonly) {
@@ -172,6 +177,7 @@ export function EditorPane({ path, onClose }: EditorPaneProps) {
     setConflict(false);
     setSaveError(null);
     setEditable(false);
+    setSavedAt(null);
     baselineDocRef.current = null;
     mtimeRef.current = null;
 
@@ -201,6 +207,8 @@ export function EditorPane({ path, onClose }: EditorPaneProps) {
                 const baseline = baselineDocRef.current;
                 if (!baseline) return;
                 setDirty(!u.state.doc.eq(baseline));
+                // A fresh edit invalidates the "saved" confirmation.
+                setSavedAt(null);
               }),
             ],
           }),
@@ -255,6 +263,7 @@ export function EditorPane({ path, onClose }: EditorPaneProps) {
         baselineDocRef.current = view.state.doc;
         setDirty(false);
         setConflict(false);
+        setSavedAt(Date.now());
       } else {
         setSaveError(result.error ?? t("editor.errorSave", { error: "-" }));
       }
@@ -377,7 +386,11 @@ export function EditorPane({ path, onClose }: EditorPaneProps) {
       {!loadError && !loading && (
         <footer className="flex shrink-0 items-center justify-between border-t border-border bg-surface-2 px-3 py-1 text-[10px] text-text-secondary">
           <span>{editable ? t("editor.modeEditing") : t("editor.modeReadonly")}</span>
-          <span>{t("editor.saveHint")}</span>
+          <span>
+            {savedAt !== null && !dirty
+              ? t("editor.savedAt", { time: new Date(savedAt).toLocaleTimeString() })
+              : t("editor.saveHint")}
+          </span>
         </footer>
       )}
     </section>

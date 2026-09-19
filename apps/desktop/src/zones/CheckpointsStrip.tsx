@@ -28,21 +28,12 @@ import {
   type CheckpointInfo,
   type RestorePreview,
 } from "../lib/api.js";
-import { summarizeRestoreFiles } from "./checkpointUtil.js";
+import { summarizeRestoreFiles, formatCheckpointTime } from "./checkpointUtil.js";
 
 /** One pending restore confirmation. */
 interface PendingRestore {
   checkpoint: CheckpointInfo;
   preview: RestorePreview;
-}
-
-function formatTime(at: number): string {
-  // Server timestamps are ms since epoch; render local time.
-  if (!Number.isFinite(at) || at <= 0) return "--";
-  const d = new Date(at);
-  if (Number.isNaN(d.getTime())) return "--";
-  const pad = (n: number): string => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
 export function CheckpointsStrip() {
@@ -239,7 +230,7 @@ export function CheckpointsStrip() {
                 <span className="font-mono text-text-primary">{cp.label}</span>
                 <span className="font-mono text-text-tertiary">#{cp.id.slice(0, 8)}</span>
                 <span className="text-text-secondary">{cp.kind}</span>
-                <span className="text-text-secondary">{formatTime(cp.at)}</span>
+                <span className="text-text-secondary">{formatCheckpointTime(cp.at)}</span>
                 <button
                   type="button"
                   onClick={() => {

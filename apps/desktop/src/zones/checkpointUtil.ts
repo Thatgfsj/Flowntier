@@ -50,3 +50,23 @@ export function summarizeRestoreFiles(
   const hidden = total - shown.length;
   return { shown, total, hidden, truncated: hidden > 0 };
 }
+
+/**
+ * Format a checkpoint timestamp for the strip row.
+ *
+ * The pipe-server emits unix SECONDS (chrono `timestamp()`), not
+ * milliseconds — the first strip build rendered `new Date(seconds)`
+ * and every checkpoint showed a January-1970 date. Values that are
+ * already ms-sized (>= 1e12) are accepted as-is so an API bump to
+ * ms can't silently reintroduce the bug in the other direction.
+ *
+ * @param at  Unix seconds (or ms) since epoch; non-finite/<=0 → "--".
+ */
+export function formatCheckpointTime(at: number): string {
+  if (!Number.isFinite(at) || at <= 0) return "--";
+  const ms = at >= 1e12 ? at : at * 1000;
+  const d = new Date(ms);
+  if (Number.isNaN(d.getTime())) return "--";
+  const pad = (n: number): string => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
