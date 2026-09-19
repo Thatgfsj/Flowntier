@@ -420,6 +420,25 @@ impl ResolvedCandidate {
 /// single workflow (wf_id) and runs the 8 phases serially,
 /// spawning parallel agents inside each phase as the spec
 /// requires.
+/// v0.4.37: retry policy for rate-limited agent runs. The backoff
+/// (5s / 15s / 30s) spreads the burst that a parallel worker fan-out
+/// creates against a per-minute token cap — previously a 429 storm
+/// burned the whole fallback chain in milliseconds.
+const RATE_LIMIT_MAX_RETRIES: usize = 3;
+const RATE_LIMIT_BACKOFF_SECS: [u64; RATE_LIMIT_MAX_RETRIES] = [5, 15, 30];
+
+/// v0.4.37: does a TaskOutcome status look like provider rate
+/// limiting? SiliconFlow answers `50602 ... TPM limit reached`,
+/// OpenAI-style providers answer plain 429 / "Too Many Requests".
+pub(crate) fn status_is_rate_limited(status: &str) -> bool {
+    let s = status.to_ascii_lowercase();
+    s.contains("429")
+        || s.contains("rate limit")
+        || s.contains("too many requests")
+        || s.contains("tpm limit")
+        || s.contains("50602")
+}
+
 pub struct Orchestrator {
     state: Arc<ServerState>,
     events: broadcast::Sender<AgentEvent>,
@@ -452,6 +471,14 @@ pub struct Orchestrator {
     /// waiting for the 5-min per-task timeout. `drive_single_agent`
     /// races this against the in-flight agent.run().
     cancel_token: tokio_util::sync::CancellationToken,
+    /// v0.4.37: first provider-infrastructure total failure (rate
+    /// limit exhausted, provider error after all candidates) on a
+    /// work-producing role. Once set, every subsequent `run_agent`
+    /// short-circuits — the workflow is already doomed, and letting
+    /// the remaining phases "complete" on zero LLM work produced a
+    /// fake 8/8 delivery (observed live: a SiliconFlow TPM 429 storm
+    /// sailed through all 8 phases in ~2s with nothing written).
+    abort_reason: parking_lot::Mutex<Option<String>>,
 }
 
 impl Orchestrator {
@@ -479,6 +506,7 @@ impl Orchestrator {
             current_phase: PHASES[0],
             max_repair_loops,
             cancel_token,
+            abort_reason: parking_lot::Mutex::new(None),
         }
     }
 
@@ -799,6 +827,22 @@ impl Orchestrator {
         let role_id = spec.role.id().to_string();
         let role_display = spec.role.display().to_string();
 
+        // v0.4.37: once a work-producing phase died on provider
+        // infrastructure, later phases short-circuit here. Driving
+        // them anyway is how v0.4.36 produced a fake "8/8 delivery"
+        // with zero LLM work behind it.
+        if let Some(why) = self.abort_reason.lock().clone() {
+            return TaskOutcome {
+                role_id,
+                role_display,
+                status: format!("FAILED: abort_provider_failure ({why})"),
+                summary: Some(format!("工作流已中止: {why}")),
+                text: format!("工作流已中止: {why}"),
+                elapsed_ms: 0,
+                structured_verdict: None,
+            };
+        }
+
         // v0.4.22 (event 000091 fix #23): build a list of
         // (provider, model_id, base_url, api_kind) candidates
         // from the primary default_model + the configured
@@ -877,52 +921,83 @@ impl Orchestrator {
                 "[TRACE] event 000091 fix #23: agent run starting (with fallback)"
             );
 
-            let provider: Arc<dyn agent_core::Provider> = match cand.api_kind.as_str() {
-                "openai" => Arc::new(agent_core::provider::openai::OpenAiProvider::openai(
-                    cand.model_id.clone(),
-                    cand.api_key.to_string(),
-                )),
-                "anthropic" | "anthropic-compatible" => {
-                    let mut p = agent_core::provider::anthropic::AnthropicProvider::new(
+            // v0.4.37: rate-limit-aware retry. A 429/TPM rejection is
+            // provider health, not candidate quality — retry the SAME
+            // candidate with backoff instead of burning the (often
+            // single-element) chain in milliseconds.
+            let mut rate_retries = 0usize;
+            let outcome = loop {
+                let provider: Arc<dyn agent_core::Provider> = match cand.api_kind.as_str() {
+                    "openai" => Arc::new(agent_core::provider::openai::OpenAiProvider::openai(
                         cand.model_id.clone(),
                         cand.api_key.to_string(),
-                    );
-                    if !cand.base_url.is_empty() && cand.base_url != "https://api.anthropic.com" {
-                        p.base_url = Some(cand.base_url.clone());
+                    )),
+                    "anthropic" | "anthropic-compatible" => {
+                        let mut p = agent_core::provider::anthropic::AnthropicProvider::new(
+                            cand.model_id.clone(),
+                            cand.api_key.to_string(),
+                        );
+                        if !cand.base_url.is_empty()
+                            && cand.base_url != "https://api.anthropic.com"
+                        {
+                            p.base_url = Some(cand.base_url.clone());
+                        }
+                        Arc::new(p)
                     }
-                    Arc::new(p)
-                }
-                _ => Arc::new(agent_core::provider::openai::OpenAiProvider::compat(
-                    cand.base_url.clone(),
-                    cand.model_id.clone(),
-                    cand.api_key.to_string(),
-                )),
-            };
-            let ws_for_cfg = self.state.workspace_snapshot();
-            let agent = agent_core::Agent::new(
-                spec.role,
-                provider,
-                // v0.4.36: registry snapshot + permission capabilities
-                // + project rules (was hard-coded AgentConfig::default()).
-                self.state.tools_snapshot(),
-                ws_for_cfg.clone(),
-                self.state.agent_config(&ws_for_cfg),
-            );
-            let task = if let Some(ref ctx) = spec.context {
-                format!("{}\n\n{}", spec.task, ctx)
-            } else {
-                spec.task.clone()
-            };
+                    _ => Arc::new(agent_core::provider::openai::OpenAiProvider::compat(
+                        cand.base_url.clone(),
+                        cand.model_id.clone(),
+                        cand.api_key.to_string(),
+                    )),
+                };
+                let ws_for_cfg = self.state.workspace_snapshot();
+                let agent = agent_core::Agent::new(
+                    spec.role,
+                    provider,
+                    // v0.4.36: registry snapshot + permission capabilities
+                    // + project rules (was hard-coded AgentConfig::default()).
+                    self.state.tools_snapshot(),
+                    ws_for_cfg.clone(),
+                    self.state.agent_config(&ws_for_cfg),
+                );
+                let task = if let Some(ref ctx) = spec.context {
+                    format!("{}\n\n{}", spec.task, ctx)
+                } else {
+                    spec.task.clone()
+                };
 
-            let outcome = self
-                .drive_single_agent(
-                    agent,
-                    task,
-                    role_id.clone(),
-                    role_display.clone(),
-                    task_id.clone(),
-                )
-                .await;
+                let attempt = self
+                    .drive_single_agent(
+                        agent,
+                        task,
+                        role_id.clone(),
+                        role_display.clone(),
+                        task_id.clone(),
+                    )
+                    .await;
+                if status_is_rate_limited(&attempt.status)
+                    && rate_retries < RATE_LIMIT_MAX_RETRIES
+                {
+                    rate_retries += 1;
+                    let wait = RATE_LIMIT_BACKOFF_SECS[rate_retries - 1];
+                    warn!(
+                        target: "orchestrator",
+                        wf_id = %self.wf_id,
+                        role = %role_id,
+                        candidate_idx = idx,
+                        retry = rate_retries,
+                        backoff_secs = wait,
+                        status = %attempt.status,
+                        "v0.4.37: provider rate-limited; backing off before retrying the same candidate"
+                    );
+                    tokio::time::sleep(std::time::Duration::from_secs(wait)).await;
+                    if self.cancel_token.is_cancelled() {
+                        break attempt;
+                    }
+                    continue;
+                }
+                break attempt;
+            };
             // If the outcome looks like a retriable failure, log
             // it and try the next candidate. "DONE" / "ABORTED"
             // (user-cancelled) / "TIMEOUT" (5-min wall clock) are
@@ -998,15 +1073,71 @@ impl Orchestrator {
             last_outcome = Some(outcome);
         }
         // All candidates exhausted — return the last failure.
-        last_outcome.unwrap_or_else(|| TaskOutcome {
-            role_id,
+        let final_outcome = last_outcome.unwrap_or_else(|| TaskOutcome {
+            role_id: role_id.clone(),
             role_display,
             status: "FAILED: all candidates exhausted".into(),
             summary: None,
             text: String::new(),
             elapsed_ms: 0,
             structured_verdict: None,
-        })
+        });
+
+        // v0.4.37: total provider-infrastructure failure on a
+        // work-producing role aborts the workflow. Critics are
+        // exempt — their unresponsive case already has a dedicated
+        // verdict path (event 000114). Previously the failure simply
+        // fell through and every later phase "completed" without any
+        // LLM work, ending in a fake delivery.
+        let is_critic = role_id == "agent:critic:a" || role_id == "agent:critic:b";
+        let infra_failure = final_outcome.status.starts_with("FAILED: all candidates exhausted")
+            || (!is_critic
+                && (final_outcome.status.contains("provider error")
+                    || status_is_rate_limited(&final_outcome.status)));
+        if infra_failure && !is_critic {
+            // Claim the abort slot first (sync — the MutexGuard must
+            // NOT be held across the awaits below; a held guard makes
+            // the run() future !Send and tokio::spawn rejects it).
+            let claimed = {
+                let mut g = self.abort_reason.lock();
+                if g.is_none() {
+                    let why = format!("角色 {role_id} — {}", final_outcome.status);
+                    *g = Some(why.clone());
+                    Some(why)
+                } else {
+                    None
+                }
+            };
+            if let Some(why) = claimed {
+                error!(
+                    target: "orchestrator",
+                    wf_id = %self.wf_id,
+                    why = %why,
+                    "v0.4.37: provider-infrastructural failure on a work-producing role — aborting workflow instead of fake-completing"
+                );
+                self.state.push_error(crate::handlers::ErrorRecord {
+                    at: chrono::Utc::now().timestamp(),
+                    severity: "error".into(),
+                    source: "orchestrator".into(),
+                    summary: "工作流中止: 模型服务不可用或被限流".into(),
+                    detail: Some(final_outcome.status.clone()),
+                });
+                let msg = format!(
+                    "工作流中止：模型服务不可用或被限流（{why}）。剩余阶段已停止，避免零产出假完成。可稍后重试或更换模型/供应商。"
+                );
+                let _ = self.events.send(AgentEvent::Done {
+                    wf_id: self.wf_id.clone(),
+                    status: "FAILED: provider_failure".into(),
+                    summary: Some(msg.clone()),
+                });
+                let _ = self
+                    .state
+                    .repo
+                    .set_workflow_summary(&self.wf_id, &msg)
+                    .await;
+            }
+        }
+        final_outcome
     }
 
     /// Build the list of (provider, model, base_url, api_kind)
@@ -2225,6 +2356,30 @@ mod storage {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rate_limit_detection_covers_provider_variants() {
+        // SiliconFlow's shape (observed live in the v0.4.36 GUI test).
+        assert!(status_is_rate_limited(
+            "FAILED: provider error: provider returned 429: {\"code\":50602,\"message\":\"Request was rejected due to rate limiting. Details: TPM limit reached.\"}"
+        ));
+        // Plain OpenAI-style 429 and prose variants.
+        assert!(status_is_rate_limited("FAILED: provider error: 429 too many requests"));
+        assert!(status_is_rate_limited("FAILED: Rate Limit exceeded"));
+        // Non-rate failures must NOT match.
+        assert!(!status_is_rate_limited("FAILED: provider error: 500 internal"));
+        assert!(!status_is_rate_limited("DONE"));
+        assert!(!status_is_rate_limited("FAILED: resolve: no key"));
+    }
+
+    #[test]
+    fn rate_limit_backoff_is_bounded() {
+        assert_eq!(RATE_LIMIT_MAX_RETRIES, RATE_LIMIT_BACKOFF_SECS.len());
+        // Worst-case wait per agent stays finite and sane (< 1 min).
+        let total: u64 = RATE_LIMIT_BACKOFF_SECS.iter().sum();
+        assert!(total < 60);
+        assert!(RATE_LIMIT_BACKOFF_SECS[0] >= 1);
+    }
 
     #[test]
     fn test_from_chief_text_with_think_tags() {
