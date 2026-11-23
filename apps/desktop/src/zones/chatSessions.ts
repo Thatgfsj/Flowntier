@@ -122,6 +122,58 @@ export function touchSession(session: ChatSession): ChatSession {
   return { ...session, updatedAt: new Date().toISOString() };
 }
 
+// ── Send attribution (issue #26 defect 4) ───────────────────────
+//
+// A send awaits `run_agent_task` / `run_workflow` before appending
+// anything to the transcript. The user can switch sessions during
+// that await, so the append must be addressed to the session that
+// started the send — never to "whatever is active by then". These
+// helpers keep that decision pure and testable.
+
+/**
+ * Append `message` to the session with `sessionId`, capping its
+ * transcript at `maxMessages`. An unknown id is a no-op (the session
+ * may have been deleted while the send was in flight — we must not
+ * resurrect it). Returns the input reference when nothing changed;
+ * otherwise a new, most-recent-first list.
+ */
+export function appendMessageToSession(
+  sessions: ChatSession[],
+  sessionId: string,
+  message: ChatTurnMessage,
+  maxMessages: number,
+): ChatSession[] {
+  const idx = sessions.findIndex((s) => s.id === sessionId);
+  if (idx === -1) return sessions;
+  const target = sessions[idx];
+  if (!target) return sessions;
+  const messages = [...target.messages, message].slice(-maxMessages);
+  const out = sessions.slice();
+  out[idx] = touchSession({ ...target, messages });
+  return sortByUpdatedAt(out);
+}
+
+/** Append a turn to the live `chatHistory`, with the same cap. */
+export function appendChatTurn(
+  history: ChatTurnMessage[],
+  turn: ChatTurnMessage,
+  maxMessages: number,
+): ChatTurnMessage[] {
+  return [...history, turn].slice(-maxMessages);
+}
+
+/**
+ * True only while the session that started a send is still the one
+ * the user is looking at. Callers gate `setChatHistory` on this so a
+ * late reply cannot be appended to a session the user switched to.
+ */
+export function shouldMirrorToActiveSession(
+  activeSessionId: string | null,
+  originSessionId: string,
+): boolean {
+  return activeSessionId !== null && activeSessionId === originSessionId;
+}
+
 // ── Boundary-safe loaders ───────────────────────────────────────
 
 /**

@@ -40,11 +40,14 @@ import {
 } from "../lib/api.js";
 import { fallbackSummary as fallbackSummaryFromEvents } from "./chatFallback.js";
 import {
+  appendChatTurn,
+  appendMessageToSession,
   findSession,
   loadActiveId,
   loadSessions,
   newSession as buildNewSession,
   removeSession,
+  shouldMirrorToActiveSession,
   sortByUpdatedAt,
   STORAGE_KEY_ACTIVE,
   STORAGE_KEY_SESSIONS,
@@ -158,6 +161,22 @@ export function ChatZone({ onCollapse, activeAgent = null }: ChatZoneProps = {})
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [sessionsLoading, setSessionsLoading] = useState(true);
 
+  // Issue #26 (defect 4): `activeSessionIdRef` mirrors the state
+  // synchronously, so an in-flight send can tell the moment its await
+  // resolves whether the user is still looking at the session the send
+  // was started from. React state alone lags a render behind — that
+  // lag is exactly the window the cross-session write used to slip
+  // through.
+  const activeSessionIdRef = useRef<string | null>(null);
+  // Session that owns the in-flight send + its assistant reply. Set
+  // when a send starts; every post-await write is attributed to it.
+  const originSessionRef = useRef<{ sessionId: string; mode: "workflow" | "chat" } | null>(null);
+
+  const setActiveSession = useCallback((id: string | null) => {
+    activeSessionIdRef.current = id;
+    setActiveSessionId(id);
+  }, []);
+
   const { events, text, done, status, reset } = useAgentStream();
   const transcriptRef = useRef<HTMLDivElement>(null);
 
@@ -197,7 +216,7 @@ export function ChatZone({ onCollapse, activeAgent = null }: ChatZoneProps = {})
       // drop the active pointer.
       const validActive = activeId && findSession(loaded, activeId) ? activeId : null;
       setSessions(sortByUpdatedAt(loaded));
-      setActiveSessionId(validActive);
+      setActiveSession(validActive);
       // Pre-load the chatHistory if we found an active session.
       if (validActive) {
         const s = findSession(loaded, validActive);
@@ -208,7 +227,7 @@ export function ChatZone({ onCollapse, activeAgent = null }: ChatZoneProps = {})
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [setActiveSession]);
 
   // v0.4.22 (event 000118, fix 6 persistence): when the active
   // session's messages change, mirror them into the session
@@ -296,25 +315,41 @@ export function ChatZone({ onCollapse, activeAgent = null }: ChatZoneProps = {})
   }, [role]);
 
   // v0.4.22 (event 000118, fix 6): when the stream closes
-  // with `done`, append an assistant turn to chatHistory so
-  // the next 对话-mode send has it in memory. We use the
-  // streamed `text` if it's non-empty, else fall back to the
-  // `summary` (event 000118 fix 5 path). Skipped in workflow
-  // mode because the orchestrator builds its own context.
+  // with `done`, append an assistant turn so the next 对话-mode
+  // send has it in memory. We use the streamed `text` if it's
+  // non-empty, else fall back to the `summary` (event 000118
+  // fix 5 path).
+  //
+  // Issue #26 (defect 4): the reply is attributed to the session
+  // that started the stream (`originSessionRef`), not to whatever
+  // session happens to be active now — the user may have switched
+  // while the backend was still running. Only when that origin is
+  // still active do we also touch the live `chatHistory`. Workflow
+  // mode is skipped because the orchestrator builds its own context.
   useEffect(() => {
-    if (mode !== "chat") return;
     if (!done) return;
+    const origin = originSessionRef.current;
+    if (!origin || origin.mode !== "chat") return;
     const assistantTurn = text.trim() || (fallbackText ?? "").trim();
     if (!assistantTurn) return;
-    setChatHistory((h) => {
-      // Avoid duplicate consecutive assistant turns if the
-      // effect re-fires for the same `done` (e.g. StrictMode).
-      const last = h[h.length - 1];
-      if (last && last.role === "assistant" && last.content === assistantTurn) return h;
-      const next = [...h, { role: "assistant" as const, content: assistantTurn }];
-      return next.slice(-MAX_CHAT_HISTORY);
+    const turn: ChatTurnMessage = { role: "assistant", content: assistantTurn };
+    setSessions((prev) => {
+      const target = findSession(prev, origin.sessionId);
+      if (!target) return prev;
+      // Avoid duplicate consecutive assistant turns if the effect
+      // re-fires for the same `done` (e.g. StrictMode).
+      const last = target.messages[target.messages.length - 1];
+      if (last && last.role === "assistant" && last.content === assistantTurn) return prev;
+      return appendMessageToSession(prev, origin.sessionId, turn, MAX_CHAT_HISTORY);
     });
-  }, [done, mode, text, fallbackText]);
+    if (shouldMirrorToActiveSession(activeSessionIdRef.current, origin.sessionId)) {
+      setChatHistory((h) => {
+        const last = h[h.length - 1];
+        if (last && last.role === "assistant" && last.content === assistantTurn) return h;
+        return appendChatTurn(h, turn, MAX_CHAT_HISTORY);
+      });
+    }
+  }, [done, text, fallbackText]);
 
   const send = useCallback(async () => {
     const trimmed = task.trim();
@@ -332,9 +367,14 @@ export function ChatZone({ onCollapse, activeAgent = null }: ChatZoneProps = {})
     if (!sessionId) {
       const created = buildNewSession(trimmed, mode);
       setSessions((prev) => sortByUpdatedAt(upsertSession(prev, created)));
-      setActiveSessionId(created.id);
+      setActiveSession(created.id);
       sessionId = created.id;
     }
+    // Issue #26 (defect 4): remember which session/mode this send
+    // belongs to. Every state write after an `await` below is
+    // attributed to it — never to whatever session is active by then.
+    originSessionRef.current = { sessionId, mode };
+    const originSessionId = sessionId;
 
     // v0.4.22 (event 000118, fix 6): snapshot chatHistory BEFORE
     // we append the new user turn so the backend receives the
@@ -378,10 +418,19 @@ export function ChatZone({ onCollapse, activeAgent = null }: ChatZoneProps = {})
       // the assistant turn in a separate effect keyed on `done`
       // so we capture the streamed summary even when the
       // backend didn't stream text.
-      setChatHistory((h) => {
-        const next = [...h, { role: "user" as const, content: trimmed }];
-        return next.slice(-MAX_CHAT_HISTORY);
-      });
+      //
+      // Issue #26 (defect 4): write the turn to the session that
+      // started the send, and mirror it into the live chatHistory
+      // only when that session is still active. Appending to the
+      // current chatHistory unconditionally is what wrote A's
+      // message into B after a mid-send switch.
+      const userTurn: ChatTurnMessage = { role: "user", content: trimmed };
+      setSessions((prev) =>
+        appendMessageToSession(prev, originSessionId, userTurn, MAX_CHAT_HISTORY),
+      );
+      if (shouldMirrorToActiveSession(activeSessionIdRef.current, originSessionId)) {
+        setChatHistory((h) => appendChatTurn(h, userTurn, MAX_CHAT_HISTORY));
+      }
     } catch (e) {
       // Async pipe failure (server not reachable, panic, etc.).
       const msg = typeof e === "string" ? e : (e as Error).message;
@@ -401,17 +450,17 @@ export function ChatZone({ onCollapse, activeAgent = null }: ChatZoneProps = {})
     (id: string) => {
       const s = findSession(sessions, id);
       if (!s) return;
-      setActiveSessionId(id);
+      setActiveSession(id);
       setChatHistory(s.messages);
       setMode(s.mode);
       reset();
       setError(null);
     },
-    [sessions],
+    [sessions, setActiveSession],
   );
 
   const createNewSession = useCallback(() => {
-    setActiveSessionId(null);
+    setActiveSession(null);
     setChatHistory([]);
     setMode(mode); // keep current mode; user can change after
     reset();
@@ -424,11 +473,11 @@ export function ChatZone({ onCollapse, activeAgent = null }: ChatZoneProps = {})
       if (activeSessionId === id) {
         // Active session was deleted — clear the chat so the
         // next send starts a brand new session.
-        setActiveSessionId(null);
+        setActiveSession(null);
         setChatHistory([]);
       }
     },
-    [activeSessionId],
+    [activeSessionId, setActiveSession],
   );
 
   const onSubmit = useCallback(
