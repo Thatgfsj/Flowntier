@@ -35,6 +35,7 @@ import {
 import { DisabledModelsProvider } from "./contexts/DisabledModelsContext.js";
 import type { PhaseName } from "./contexts/workflowReducer.js";
 import { PHASES } from "./contexts/workflowReducer.js";
+import { runWorkflowWatchdog, type PollBinding, type PollSnapshot } from "./app/workflowPolling.js";
 
 export function App() {
   // v0.4.29 (Phase A): the workbench is rendered inside a
@@ -181,6 +182,13 @@ export function App() {
     const { state, dispatch } = useWorkflow();
     const stateRef = useRef(state);
     stateRef.current = state;
+
+    // Issue #26 (defect 3): monotonic generation of the running
+    // workflow. Bumped synchronously on every start so a watchdog
+    // loop from a previous run can tell it has been superseded even
+    // before the new run's id reaches the reducer (SET_CURRENT_WF_ID
+    // is only dispatched after the start_workflow_cmd IPC resolves).
+    const wfEpochRef = useRef(0);
 
     // Mount the event stream subscription + the idle-timer ticker
     // here so they live on the workbench's lifecycle (App-level
@@ -331,6 +339,11 @@ export function App() {
     };
 
     const startRealWorkflow = async (text: string) => {
+      // Issue #26 (defect 3): bump the watchdog generation BEFORE the
+      // reducer dispatch so a stale loop from the previous run can
+      // detect that it has been superseded.
+      const epoch = wfEpochRef.current + 1;
+      wfEpochRef.current = epoch;
       dispatch({ type: "START_WORKFLOW" });
       try {
         if (workdir && workdir.length > 0) {
@@ -343,54 +356,37 @@ export function App() {
         const data = await invoke<{ id: string }>("start_workflow_cmd", { text });
         dispatch({ type: "SET_CURRENT_WF_ID", id: data.id });
 
-        // 30-min watchdog polls /api/workflow/{id} for summary.
-        // Uses stateRef to read the live state and avoid React stale-closure traps.
-        const deadline = Date.now() + 30 * 60 * 1000;
-        while (Date.now() < deadline) {
-          await new Promise((r) => setTimeout(r, 2000));
-          if (!stateRef.current.busy || stateRef.current.completed) break;
-          if (stateRef.current.currentWfId !== data.id) break;
-          try {
-            const wf = await invoke<Record<string, unknown>>("get_workflow", { id: data.id });
-            const st = (wf?.status || wf?.state) as string | undefined;
-            const phase = wf?.phase as string | undefined;
-            const isTerminal =
-              st === "DONE" ||
-              (typeof st === "string" && (st.startsWith("ABORTED") || st.startsWith("FAILED")));
-            const isDelivery = phase === "delivery" || phase === "8-delivery";
-
-            if (wf && (isTerminal || isDelivery) && wf.summary) {
-              dispatch({ type: "SET_FINAL_REPORT", report: wf.summary as string });
-              dispatch({ type: "SET_BUSY", value: false });
-              dispatch({ type: "SET_COMPLETED", value: true });
-              break;
-            }
-            if (wf && isTerminal) {
-              dispatch({ type: "SET_BUSY", value: false });
-              dispatch({ type: "SET_COMPLETED", value: true });
-              break;
-            }
-          } catch {
-            /* continue */
-          }
-        }
-
-        // If timed out and still busy, mark repair
-        if (!stateRef.current.completed && stateRef.current.busy) {
-          const err = stateRef.current.workflowError;
-          if (err !== null) {
-            dispatch({ type: "SET_REVIEW_VERDICT", verdict: { verdict: "REPAIR", summary: err } });
-          } else {
-            dispatch({
-              type: "SET_REVIEW_VERDICT",
-              verdict: { verdict: "REPAIR", summary: t("workflow.verdict.timeout") },
-            });
-          }
-          dispatch({ type: "SET_BUSY", value: false });
-          dispatch({ type: "SET_COMPLETED", value: true });
-        }
+        // Issue #26 (defect 3): the 30-min watchdog is *bound* to the
+        // workflow this invocation started. `runWorkflowWatchdog`
+        // re-checks (epoch, wfId) before every write and only fires
+        // the timeout verdict while that same workflow is still busy,
+        // so A's late reply can never write into B.
+        const binding: PollBinding = { epoch, wfId: data.id };
+        const readSnapshot = (): PollSnapshot => ({
+          epoch: wfEpochRef.current,
+          currentWfId: stateRef.current.currentWfId,
+          busy: stateRef.current.busy,
+          completed: stateRef.current.completed,
+        });
+        await runWorkflowWatchdog({
+          binding,
+          readSnapshot,
+          fetchWorkflow: (wfId) =>
+            invoke<Record<string, unknown> | null>("get_workflow", { id: wfId }),
+          dispatch,
+          sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+          now: Date.now,
+          timeoutMs: 30 * 60 * 1000,
+          timeoutSummary: t("workflow.verdict.timeout"),
+          readWorkflowError: () => stateRef.current.workflowError,
+        });
       } catch (e) {
         console.warn("workflow failed", e);
+        // Issue #26 (defect 3): if another workflow superseded this
+        // start, do not paint this failure onto it.
+        if (wfEpochRef.current !== epoch) {
+          return;
+        }
         const errStr = String(e);
         let userFacingError = errStr;
         try {
