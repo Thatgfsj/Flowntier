@@ -138,6 +138,10 @@ impl Tool for BashTool {
             .stderr(std::process::Stdio::piped())
             .spawn()
             .map_err(ToolError::Io)?;
+        // `child_pid` is only consumed by the Windows-only taskkill
+        // branches below; keep the binding on every platform so the
+        // Windows build compiles, and silence the non-Windows warning.
+        #[cfg_attr(not(windows), allow(unused_variables))]
         let child_pid = child.id();
 
         let output_fut = child.wait_with_output();
