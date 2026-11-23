@@ -21,6 +21,71 @@ enum OutcomeShape {
 }
 
 impl Orchestrator {
+    /// v0.4.38 (issue #26 defects 1 + 2): emit the terminal `Done`
+    /// event at most once for this workflow.
+    pub(super) fn send_terminal_done_once(&self, status: &str, summary: Option<String>) -> bool {
+        emit_done_once(
+            &self.terminal_done_emitted,
+            &self.events,
+            &self.wf_id,
+            status,
+            summary,
+        )
+    }
+
+    /// v0.4.38 (issue #26 defects 1 + 2): phase-boundary / pre-wrap-up
+    /// guard. Returns `Some(summary)` once a terminal stop condition is
+    /// active, after persisting the terminal state exactly once; `None`
+    /// means the run may continue normally.
+    ///
+    /// Abort path: `run_agent` already emitted `FAILED: provider_failure`
+    /// and persisted the summary, so this only re-asserts state + summary
+    /// and returns — no second Done, no verdict rewrite.
+    /// Cancel path: an in-flight agent may already have emitted ABORTED;
+    /// the once-guard keeps it to a single terminal event either way.
+    pub(super) async fn finish_if_terminal(&self) -> Option<String> {
+        let why = self.abort_reason.lock().clone();
+        let stop = terminal_stop(why.as_deref(), self.cancel_token.is_cancelled())?;
+        let status = stop.status();
+        let summary = match stop {
+            TerminalStop::ProviderFailure => {
+                provider_failure_summary(why.as_deref().unwrap_or("unknown"))
+            }
+            TerminalStop::Cancelled => CANCELLED_SUMMARY.to_string(),
+        };
+        if stop == TerminalStop::Cancelled {
+            self.send_terminal_done_once(status, Some(summary.clone()));
+        }
+        if let Err(e) = self
+            .state
+            .repo
+            .update_workflow_state(&self.wf_id, status, &map_phase_name(self.current_phase))
+            .await
+        {
+            warn!(
+                target: "orchestrator",
+                wf_id = %self.wf_id,
+                status,
+                error = %e,
+                "v0.4.38: failed to persist terminal state (issue #26)"
+            );
+        }
+        if let Err(e) = self
+            .state
+            .repo
+            .set_workflow_summary(&self.wf_id, &summary)
+            .await
+        {
+            warn!(
+                target: "orchestrator",
+                wf_id = %self.wf_id,
+                error = %e,
+                "v0.4.38: failed to persist terminal summary (issue #26)"
+            );
+        }
+        Some(summary)
+    }
+
     /// Run one agent and collect its outcome (extracted from
     /// the original `run_agent` body so the fallback loop can
     /// call it multiple times).
@@ -106,13 +171,15 @@ impl Orchestrator {
                             role = %role_id,
                             "v0.4.22 (event 000118 fix 7): cancel_token fired during phase"
                         );
-                        let _ = self.events.send(AgentEvent::Done {
-                            wf_id: self.wf_id.clone(),
-                            status: "ABORTED".into(),
-                            summary: Some("workflow cancelled by user".into()),
-                        });
+                        // v0.4.38 (issue #26 defect 2): exactly one
+                        // ABORTED Done for the whole run, even when two
+                        // parallel agents observe the cancellation.
+                        self.send_terminal_done_once(
+                            "ABORTED",
+                            Some(CANCELLED_SUMMARY.into()),
+                        );
                         last_status = "ABORTED".into();
-                        summary = Some("workflow cancelled by user".into());
+                        summary = Some(CANCELLED_SUMMARY.into());
                         return OutcomeShape::Cancelled;
                     }
                     ev_opt = rx.recv() => {
@@ -342,6 +409,14 @@ impl Orchestrator {
             return error_msg;
         }
 
+        // v0.4.38 (issue #26 defects 1 + 2): a provider abort or a user
+        // cancel must stop the run at the phase boundary — no new phase
+        // may start, and the terminal state must not be rewritten by the
+        // final verdict.
+        if let Some(msg) = self.finish_if_terminal().await {
+            return msg;
+        }
+
         let mut phase_idx = 0;
         self.emit_phase(None, PHASES[phase_idx]).await;
 
@@ -356,6 +431,13 @@ impl Orchestrator {
         }).await;
         self.persist_task_row(&chief_clarify, "1-requirement", 0)
             .await;
+        // v0.4.38 (issue #26 defects 1 + 2): a provider abort or a user
+        // cancel must stop the run at the phase boundary — no new phase
+        // may start, and the terminal state must not be rewritten by the
+        // final verdict.
+        if let Some(msg) = self.finish_if_terminal().await {
+            return msg;
+        }
         phase_idx = 1;
         self.emit_phase(Some(PHASES[0]), PHASES[phase_idx]).await;
 
@@ -428,6 +510,14 @@ impl Orchestrator {
                 .await;
         }
 
+        // v0.4.38 (issue #26 defects 1 + 2): a provider abort or a user
+        // cancel must stop the run at the phase boundary — no new phase
+        // may start, and the terminal state must not be rewritten by the
+        // final verdict.
+        if let Some(msg) = self.finish_if_terminal().await {
+            return msg;
+        }
+
         // ── Phase 3: plan review (parallel) ──────────────
         phase_idx = 2;
         self.emit_phase(Some(PHASES[1]), PHASES[phase_idx]).await;
@@ -455,6 +545,14 @@ impl Orchestrator {
         // final-review verdict to populate the ReviewerCard).
         self.emit_reviewer_verdict("plan-review", &critic_a);
         self.emit_reviewer_verdict("plan-review", &critic_b);
+
+        // v0.4.38 (issue #26 defects 1 + 2): a provider abort or a user
+        // cancel must stop the run at the phase boundary — no new phase
+        // may start, and the terminal state must not be rewritten by the
+        // final verdict.
+        if let Some(msg) = self.finish_if_terminal().await {
+            return msg;
+        }
 
         // ── Phase 4: dispatch (chief declares worker list) ──
         phase_idx = 3;
@@ -494,6 +592,14 @@ impl Orchestrator {
                 .await;
         }
 
+        // v0.4.38 (issue #26 defects 1 + 2): a provider abort or a user
+        // cancel must stop the run at the phase boundary — no new phase
+        // may start, and the terminal state must not be rewritten by the
+        // final verdict.
+        if let Some(msg) = self.finish_if_terminal().await {
+            return msg;
+        }
+
         // ── Phase 5: develop (workers in parallel) ─────────
         phase_idx = 4;
         self.emit_phase(Some(PHASES[3]), PHASES[phase_idx]).await;
@@ -506,6 +612,14 @@ impl Orchestrator {
                 .unwrap_or_default();
             self.persist_task_row(w, &format!("5-develop-{}", title), 0)
                 .await;
+        }
+
+        // v0.4.38 (issue #26 defects 1 + 2): a provider abort or a user
+        // cancel must stop the run at the phase boundary — no new phase
+        // may start, and the terminal state must not be rewritten by the
+        // final verdict.
+        if let Some(msg) = self.finish_if_terminal().await {
+            return msg;
         }
 
         // ── Phase 6 + 7: final review + repair loop ────────
@@ -522,6 +636,11 @@ impl Orchestrator {
         self.emit_phase(Some(PHASES[4]), PHASES[phase_idx]).await;
         let mut loop_count: u32 = 0;
         let (final_a, final_b) = loop {
+            // v0.4.38 (issue #26 defects 1 + 2): never start another
+            // review/repair round after a provider abort or a user cancel.
+            if let Some(msg) = self.finish_if_terminal().await {
+                return msg;
+            }
             let (a, b) = self.run_phase_6_final_review(&plan, &worker_results).await;
             self.persist_task_row(
                 &a,
@@ -653,6 +772,14 @@ impl Orchestrator {
             self.emit_phase(Some(PHASES[6]), PHASES[phase_idx]).await;
         };
 
+        // v0.4.38 (issue #26 defects 1 + 2): a provider abort or a user
+        // cancel must stop the run at the phase boundary — no new phase
+        // may start, and the terminal state must not be rewritten by the
+        // final verdict.
+        if let Some(msg) = self.finish_if_terminal().await {
+            return msg;
+        }
+
         // ── Phase 8: delivery ─────────────────────────────
         phase_idx = 7;
         self.emit_phase(Some(PHASES[6]), PHASES[phase_idx]).await;
@@ -690,6 +817,13 @@ impl Orchestrator {
             context: Some(format!("Worker 实际执行产出列表:\n{}", workers_summary)),
         }).await;
         self.persist_task_row(&delivery, "8-delivery", 0).await;
+
+        // v0.4.38 (issue #26 defects 1 + 2): a provider abort or a user
+        // cancel that raced the delivery agent must be the final word —
+        // return before the verdict-derived Done/state rewrite below.
+        if let Some(msg) = self.finish_if_terminal().await {
+            return msg;
+        }
 
         // v0.4.22 (event 000114): the workflow's terminal status
         // must reflect the final-review verdict, not blindly
@@ -750,11 +884,9 @@ impl Orchestrator {
         // status is no longer the hard-coded "DONE" — it
         // reflects the final-review verdict pair.
         let terminal_status_for_done = terminal_status.clone();
-        let _ = self.events.send(AgentEvent::Done {
-            wf_id: self.wf_id.clone(),
-            status: terminal_status_for_done.clone(),
-            summary: Some(effective_summary.clone()),
-        });
+        // v0.4.38 (issue #26 defects 1 + 2): same once-guard as the
+        // abort/cancel paths; on the normal path this is the only Done.
+        self.send_terminal_done_once(&terminal_status_for_done, Some(effective_summary.clone()));
         // v0.4.22 (event 000069): mark the workflow in the
         // workflows row so /api/workflow/{wf_id}/status can be
         // polled by clients that didn't watch the events pipe.
