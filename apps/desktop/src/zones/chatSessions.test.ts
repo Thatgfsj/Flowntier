@@ -6,6 +6,8 @@
  */
 import { describe, expect, it } from "vitest";
 import {
+  appendChatTurn,
+  appendMessageToSession,
   capMessages,
   deriveTitle,
   findSession,
@@ -14,6 +16,7 @@ import {
   newSession,
   newSessionId,
   removeSession,
+  shouldMirrorToActiveSession,
   sortByUpdatedAt,
   STORAGE_KEY_ACTIVE,
   STORAGE_KEY_SESSIONS,
@@ -326,5 +329,115 @@ describe("round-trip", () => {
     const out = loadSessions(serialized);
     expect(out.length).toBe(1);
     expect(out[0]).toEqual(session);
+  });
+});
+
+// ── Send attribution (issue #26 defect 4) ───────────────────────
+//
+// A send awaits the backend before writing the user turn, and the
+// assistant reply arrives even later. If the user switches sessions
+// in between, the write must still go to the session that started
+// the send — not to whatever is active when the await resolves.
+
+describe("appendMessageToSession — origin-session attribution", () => {
+  const originA = (): ChatSession =>
+    sampleSession({
+      id: "A",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      messages: [makeMsg("user", "hello")],
+    });
+  const otherB = (): ChatSession =>
+    sampleSession({
+      id: "B",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      messages: [makeMsg("user", "unrelated")],
+    });
+
+  it("writes the user turn to the originating session only", () => {
+    // User is looking at B when the send from A resolves.
+    const out = appendMessageToSession(
+      [originA(), otherB()],
+      "A",
+      makeMsg("user", "sent from A"),
+      12,
+    );
+    expect(findSession(out, "A")?.messages.map((m) => m.content)).toEqual(["hello", "sent from A"]);
+    expect(findSession(out, "B")?.messages.map((m) => m.content)).toEqual(["unrelated"]);
+  });
+
+  it("keeps the assistant reply with the origin after a mid-stream switch", () => {
+    const afterSwitch = appendMessageToSession(
+      [originA(), otherB()],
+      "A",
+      makeMsg("assistant", "reply from A"),
+      12,
+    );
+    expect(findSession(afterSwitch, "A")?.messages.map((m) => m.content)).toEqual([
+      "hello",
+      "reply from A",
+    ]);
+    expect(findSession(afterSwitch, "B")?.messages.map((m) => m.content)).toEqual(["unrelated"]);
+    // The live chatHistory (now B's) must not mirror A's reply.
+    expect(shouldMirrorToActiveSession("B", "A")).toBe(false);
+  });
+
+  it("does not touch the transcript of an unrelated session", () => {
+    const before = [originA(), otherB()];
+    const out = appendMessageToSession(before, "A", makeMsg("user", "x"), 12);
+    expect(findSession(out, "B")).toEqual(findSession(before, "B"));
+  });
+
+  it("is a no-op when the originating session was deleted mid-send", () => {
+    const before = [otherB()];
+    expect(appendMessageToSession(before, "A", makeMsg("user", "x"), 12)).toBe(before);
+  });
+
+  it("caps the transcript and keeps the newest turns", () => {
+    const full = sampleSession({
+      id: "A",
+      messages: Array.from({ length: 12 }, (_, i) => makeMsg("user", `m_${i}`)),
+    });
+    const out = appendMessageToSession([full], "A", makeMsg("user", "newest"), 12);
+    const messages = findSession(out, "A")?.messages ?? [];
+    expect(messages.length).toBe(12);
+    expect(messages[0]?.content).toBe("m_1");
+    expect(messages[11]?.content).toBe("newest");
+  });
+
+  it("does not mutate the input list or session objects", () => {
+    const before = [originA(), otherB()];
+    const snapshot = JSON.parse(JSON.stringify(before));
+    appendMessageToSession(before, "A", makeMsg("user", "x"), 12);
+    expect(before).toEqual(snapshot);
+  });
+
+  it("moves the touched session to the front of the list", () => {
+    const out = appendMessageToSession([otherB(), originA()], "A", makeMsg("user", "bump"), 12);
+    expect(out.map((s) => s.id)).toEqual(["A", "B"]);
+  });
+});
+
+describe("shouldMirrorToActiveSession — live history gate", () => {
+  it("mirrors only while the origin is still the active session", () => {
+    expect(shouldMirrorToActiveSession("A", "A")).toBe(true);
+    expect(shouldMirrorToActiveSession("B", "A")).toBe(false);
+    expect(shouldMirrorToActiveSession(null, "A")).toBe(false);
+  });
+});
+
+describe("appendChatTurn — live history cap", () => {
+  it("appends and caps at maxMessages", () => {
+    const history = Array.from({ length: 12 }, (_, i) => makeMsg("user", `m_${i}`));
+    const out = appendChatTurn(history, makeMsg("assistant", "newest"), 12);
+    expect(out.length).toBe(12);
+    expect(out[11]?.content).toBe("newest");
+    expect(out[0]?.content).toBe("m_1");
+  });
+
+  it("does not mutate the input array", () => {
+    const history = [makeMsg("user", "a")];
+    const out = appendChatTurn(history, makeMsg("assistant", "b"), 12);
+    expect(history.length).toBe(1);
+    expect(out.length).toBe(2);
   });
 });
