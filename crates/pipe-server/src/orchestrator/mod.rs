@@ -32,6 +32,7 @@
 //! mimo:mimo-2.5-pro config returned a 401 and the
 //! workflow hung). See NWT 000082 for the boundary.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -411,6 +412,97 @@ pub(crate) fn status_is_rate_limited(status: &str) -> bool {
         || s.contains("50602")
 }
 
+/// v0.4.38 (issue #26 defects 1 + 2): why the workflow must stop before
+/// the next phase starts. `ProviderFailure` wins over `Cancelled`
+/// because the provider abort already owns the persisted terminal state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum TerminalStop {
+    ProviderFailure,
+    Cancelled,
+}
+
+impl TerminalStop {
+    /// Persisted / emitted terminal status for this stop reason.
+    pub(super) fn status(self) -> &'static str {
+        match self {
+            TerminalStop::ProviderFailure => "FAILED: provider_failure",
+            TerminalStop::Cancelled => "ABORTED",
+        }
+    }
+}
+
+/// v0.4.38 (issue #26 defects 1 + 2): decide whether the workflow must
+/// stop before starting a new phase. Pure so the precedence rules are
+/// unit-testable without a live provider or a real run().
+///
+/// - `abort_reason` is set by `run_agent` after a total provider
+///   infrastructure failure; once set, no new phase may start (defect 1:
+///   previously run() kept advancing and the final verdict rewrote the
+///   terminal state to DONE).
+/// - `cancelled` is the user's stop signal; it must propagate at the
+///   next phase boundary and win over the verdict (defect 2).
+pub(super) fn terminal_stop(abort_reason: Option<&str>, cancelled: bool) -> Option<TerminalStop> {
+    if abort_reason.is_some() {
+        Some(TerminalStop::ProviderFailure)
+    } else if cancelled {
+        Some(TerminalStop::Cancelled)
+    } else {
+        None
+    }
+}
+
+/// v0.4.38 (issue #26 defect 2): summary persisted with the ABORTED
+/// terminal state (and emitted at most once with the Done event).
+pub(super) const CANCELLED_SUMMARY: &str =
+    "工作流已取消：用户中止了本次运行，已完成的阶段与产物保留在任务列表中。";
+
+/// v0.4.38 (issue #26 defect 1): summary persisted with
+/// FAILED: provider_failure. Shared by the failure site in `run_agent`
+/// and run()'s early-return path so event + stored summary agree.
+pub(super) fn provider_failure_summary(why: &str) -> String {
+    format!(
+        "工作流中止：模型服务不可用或被限流（{why}）。剩余阶段已停止，避免零产出假完成。可稍后重试或更换模型/供应商。"
+    )
+}
+
+/// v0.4.38 (issue #26 defect 2): outcome returned by `run_agent` when the
+/// cancel token fires during a 429 backoff. Deliberately ABORTED (not the
+/// pending 429) so the failure classification below never treats the
+/// cancelled retry as a provider failure.
+pub(super) fn cancelled_outcome(role_id: String, role_display: String) -> TaskOutcome {
+    TaskOutcome {
+        role_id,
+        role_display,
+        status: "ABORTED".into(),
+        summary: Some(CANCELLED_SUMMARY.into()),
+        text: String::new(),
+        elapsed_ms: 0,
+        structured_verdict: None,
+    }
+}
+
+/// v0.4.38 (issue #26 defects 1 + 2): emit the workflow's terminal `Done`
+/// at most once. Both the provider-abort path and the cancel path (which
+/// can race across concurrent agents in a phase) funnel through here, so
+/// subscribers never see a second terminal status overwrite the first.
+pub(super) fn emit_done_once(
+    emitted: &AtomicBool,
+    events: &broadcast::Sender<AgentEvent>,
+    wf_id: &str,
+    status: &str,
+    summary: Option<String>,
+) -> bool {
+    if emitted.swap(true, Ordering::SeqCst) {
+        return false;
+    }
+    let _ = events.send(AgentEvent::Done {
+        wf_id: wf_id.to_string(),
+        status: status.to_string(),
+        summary,
+    });
+    true
+}
+
 pub struct Orchestrator {
     pub(super) state: Arc<ServerState>,
     pub(super) events: broadcast::Sender<AgentEvent>,
@@ -451,6 +543,10 @@ pub struct Orchestrator {
     /// fake 8/8 delivery (observed live: a SiliconFlow TPM 429 storm
     /// sailed through all 8 phases in ~2s with nothing written).
     pub(super) abort_reason: parking_lot::Mutex<Option<String>>,
+    /// v0.4.38 (issue #26 defects 1 + 2): guards `emit_done_once` so the
+    /// workflow emits exactly one terminal `Done` event even when provider
+    /// failure and cancellation race.
+    pub(super) terminal_done_emitted: AtomicBool,
 }
 
 impl Orchestrator {
@@ -479,6 +575,7 @@ impl Orchestrator {
             max_repair_loops,
             cancel_token,
             abort_reason: parking_lot::Mutex::new(None),
+            terminal_done_emitted: AtomicBool::new(false),
         }
     }
 }

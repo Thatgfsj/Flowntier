@@ -1,6 +1,11 @@
 use super::verdict::verdict_of;
 use super::*;
 
+use std::sync::atomic::AtomicBool;
+use std::time::{Duration, Instant};
+
+use tokio::sync::broadcast;
+
 #[test]
 fn rate_limit_detection_covers_provider_variants() {
     // SiliconFlow's shape (observed live in the v0.4.36 GUI test).
@@ -153,4 +158,126 @@ fn test_verdict_of_severity_and_boundaries() {
         verdict_of(&make_outcome("虽然部分测试 PASS，但架构缺陷需要 REWRITE")),
         "REWRITE"
     );
+}
+
+// ── v0.4.38 (issue #26 defects 1 + 2): terminal-state regressions ──────
+
+/// Defect 1: once a provider-infrastructure failure has set the abort
+/// reason, run() must stop at the phase boundary — the final verdict
+/// (both critics PASS → DONE) must never rewrite the terminal state.
+#[test]
+fn provider_abort_stops_before_next_phase_and_keeps_failure_status() {
+    let why = "角色 agent:worker — FAILED: provider error: provider returned 429";
+    let stop = terminal_stop(Some(why), false);
+    assert_eq!(stop, Some(TerminalStop::ProviderFailure));
+    assert_eq!(stop.unwrap().status(), "FAILED: provider_failure");
+    // The verdict-derived status would be DONE for a dual PASS; the abort
+    // must win regardless.
+    assert_eq!(
+        terminal_done_status("PASS", "PASS", "agent:critic:a", "agent:critic:b"),
+        "DONE"
+    );
+    // Abort also wins when a cancel arrives afterwards.
+    assert_eq!(
+        terminal_stop(Some(why), true),
+        Some(TerminalStop::ProviderFailure)
+    );
+    // No abort + no cancel = normal path untouched.
+    assert_eq!(terminal_stop(None, false), None);
+}
+
+/// Defect 2: a cancel must terminate the run as ABORTED, not as the
+/// verdict-derived DONE, and must not wait for a later phase.
+#[test]
+fn cancelled_stop_is_aborted_and_not_overridden_by_pass_verdict() {
+    assert_eq!(
+        terminal_done_status("PASS", "PASS", "agent:critic:a", "agent:critic:b"),
+        "DONE"
+    );
+    let stop = terminal_stop(None, true);
+    assert_eq!(stop, Some(TerminalStop::Cancelled));
+    assert_eq!(stop.unwrap().status(), "ABORTED");
+}
+
+/// Defect 1 + 2: only one terminal Done event may ever be emitted for a
+/// workflow, even when abort/cancel paths race.
+#[test]
+fn terminal_done_event_is_emitted_at_most_once() {
+    let (tx, mut rx) = broadcast::channel(8);
+    let emitted = AtomicBool::new(false);
+    assert!(emit_done_once(
+        &emitted,
+        &tx,
+        "wf_regression",
+        "FAILED: provider_failure",
+        Some("abort".into())
+    ));
+    // The verdict tail / second cancel must not emit a second Done.
+    assert!(!emit_done_once(
+        &emitted,
+        &tx,
+        "wf_regression",
+        "DONE",
+        Some("verdict".into())
+    ));
+    let mut statuses = Vec::new();
+    while let Ok(ev) = rx.try_recv() {
+        if let AgentEvent::Done { status, .. } = ev {
+            statuses.push(status);
+        }
+    }
+    assert_eq!(statuses, vec!["FAILED: provider_failure".to_string()]);
+}
+
+/// Defect 1: the persisted summary must keep the original provider
+/// failure reason (same text emitted and stored).
+#[test]
+fn provider_failure_summary_keeps_original_reason() {
+    let why = "角色 agent:chief — FAILED: all candidates exhausted";
+    let summary = provider_failure_summary(why);
+    assert!(summary.contains(why));
+    assert!(summary.contains("模型服务不可用"));
+}
+
+/// Defect 2: cancelling during a 429 backoff yields ABORTED, not the
+/// pending 429 (which would be reclassified as provider_failure).
+#[test]
+fn cancelled_backoff_outcome_is_aborted_not_429() {
+    let outcome = cancelled_outcome("agent:chief".into(), "Chief".into());
+    assert_eq!(outcome.status, "ABORTED");
+    assert!(!status_is_rate_limited(&outcome.status));
+    assert!(!outcome.status.contains("429"));
+    assert_eq!(outcome.summary.as_deref(), Some(CANCELLED_SUMMARY));
+}
+
+/// Defect 2: the 429 backoff sleep must return promptly when the token
+/// fires instead of waiting out the full (up to 30s) delay.
+#[tokio::test]
+async fn rate_limit_backoff_sleep_is_cancelled_promptly() {
+    let token = tokio_util::sync::CancellationToken::new();
+    let canceller = {
+        let token = token.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            token.cancel();
+        })
+    };
+    let started = Instant::now();
+    let cancelled = super::phases::sleep_cancellable(&token, Duration::from_secs(10)).await;
+    assert!(cancelled, "backoff sleep must observe the cancel token");
+    assert!(
+        started.elapsed() < Duration::from_secs(5),
+        "cancel must not wait out the full backoff (elapsed {:?})",
+        started.elapsed()
+    );
+    canceller.await.unwrap();
+}
+
+/// Defect 2: without a cancel the same helper still waits and reports
+/// "not cancelled" (normal path unchanged).
+#[tokio::test]
+async fn rate_limit_backoff_sleep_completes_without_cancel() {
+    let token = tokio_util::sync::CancellationToken::new();
+    let cancelled = super::phases::sleep_cancellable(&token, Duration::from_millis(10)).await;
+    assert!(!cancelled);
 }

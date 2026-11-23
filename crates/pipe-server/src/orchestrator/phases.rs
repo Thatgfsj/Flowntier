@@ -32,6 +32,20 @@ impl ResolvedCandidate {
     }
 }
 
+/// v0.4.38 (issue #26 defect 2): backoff sleep that returns early when
+/// the workflow cancel token fires. Returns `true` when cancelled.
+/// Extracted so the "429 backoff must be interruptible" contract is
+/// unit-testable without a live provider.
+pub(super) async fn sleep_cancellable(
+    token: &tokio_util::sync::CancellationToken,
+    wait: std::time::Duration,
+) -> bool {
+    tokio::select! {
+        _ = token.cancelled() => true,
+        _ = tokio::time::sleep(wait) => false,
+    }
+}
+
 impl Orchestrator {
     /// Emit a phase transition. Always best-effort — if no
     /// subscribers are listening (e.g. headless build) the
@@ -217,7 +231,9 @@ impl Orchestrator {
         }
 
         for (stage_idx, stage) in stages.iter().enumerate() {
-            if self.cancel_token.is_cancelled() {
+            // v0.4.38 (issue #26 defects 1 + 2): never start a new worker
+            // stage once a provider abort or a user cancel is recorded.
+            if self.cancel_token.is_cancelled() || self.abort_reason.lock().is_some() {
                 break;
             }
 
@@ -511,9 +527,19 @@ impl Orchestrator {
                         status = %attempt.status,
                         "v0.4.37: provider rate-limited; backing off before retrying the same candidate"
                     );
-                    tokio::time::sleep(std::time::Duration::from_secs(wait)).await;
-                    if self.cancel_token.is_cancelled() {
-                        break attempt;
+                    // v0.4.38 (issue #26 defect 2): the backoff must be
+                    // interruptible. On cancel return ABORTED directly — the
+                    // pending 429 is NOT a terminal provider classification.
+                    if sleep_cancellable(&self.cancel_token, std::time::Duration::from_secs(wait))
+                        .await
+                    {
+                        warn!(
+                            target: "orchestrator",
+                            wf_id = %self.wf_id,
+                            role = %role_id,
+                            "v0.4.38: cancelled during rate-limit backoff; returning ABORTED"
+                        );
+                        return cancelled_outcome(role_id, role_display);
                     }
                     continue;
                 }
@@ -645,14 +671,20 @@ impl Orchestrator {
                     summary: "工作流中止: 模型服务不可用或被限流".into(),
                     detail: Some(final_outcome.status.clone()),
                 });
-                let msg = format!(
-                    "工作流中止：模型服务不可用或被限流（{why}）。剩余阶段已停止，避免零产出假完成。可稍后重试或更换模型/供应商。"
-                );
-                let _ = self.events.send(AgentEvent::Done {
-                    wf_id: self.wf_id.clone(),
-                    status: "FAILED: provider_failure".into(),
-                    summary: Some(msg.clone()),
-                });
+                // v0.4.38 (issue #26 defect 1): persist the terminal state
+                // right where the failure happens, and share the summary /
+                // once-guard with run()'s phase-boundary early return.
+                let msg = provider_failure_summary(&why);
+                self.send_terminal_done_once("FAILED: provider_failure", Some(msg.clone()));
+                let _ = self
+                    .state
+                    .repo
+                    .update_workflow_state(
+                        &self.wf_id,
+                        "FAILED: provider_failure",
+                        &map_phase_name(self.current_phase),
+                    )
+                    .await;
                 let _ = self
                     .state
                     .repo
